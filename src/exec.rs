@@ -44,8 +44,7 @@ fn verify_git_original() -> Result<(), GuardError> {
             if meta.st_uid() != 0 {
                 return Err(GuardError::GitOriginalBadPerms);
             }
-            let mode = meta.st_mode() & 0o777;
-            if mode != 0o755 && mode != 0o700 {
+            if meta.st_mode() & 0o777 != 0o700 {
                 return Err(GuardError::GitOriginalBadPerms);
             }
             Ok(())
@@ -92,19 +91,20 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     }
     envp.push(CString::new("PATH=/usr/local/bin:/usr/bin:/bin").unwrap());
 
+    // Suppress git's "dubious ownership" fatal error when root accesses
+    // repos owned by other users. We stay root; we just tell git to trust
+    // all directories. This is safe because we only exec git.original after
+    // all guard checks have passed.
+    envp.push(CString::new("GIT_CONFIG_COUNT=1").unwrap());
+    envp.push(CString::new("GIT_CONFIG_KEY_0=safe.directory").unwrap());
+    envp.push(CString::new("GIT_CONFIG_VALUE_0=*").unwrap());
+
     let mut argv_ptrs: Vec<*const libc::c_char> = argv_c.iter().map(|s| s.as_ptr()).collect();
     argv_ptrs.push(std::ptr::null());
     let mut envp_ptrs: Vec<*const libc::c_char> = envp.iter().map(|s| s.as_ptr()).collect();
     envp_ptrs.push(std::ptr::null());
 
-    // Drop privileges back to real user before execve so git.original runs
-    // as the invoking user, not root. Prevents git's "dubious ownership"
-    // fatal error when root accesses repos owned by other users.
     unsafe {
-        let real_uid = libc::getuid();
-        let real_gid = libc::getgid();
-        libc::setgid(real_gid);
-        libc::setuid(real_uid);
         libc::execve(git_path.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
         libc::_exit(3);
     }
