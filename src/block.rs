@@ -1,0 +1,192 @@
+use std::ffi::OsString;
+use std::fs;
+use std::os::unix::process::ExitStatusExt;
+
+use crate::{args::ArgState, GuardError, BLOCKED_SUBCOMMANDS};
+
+pub fn check_blocked(
+    state: &ArgState,
+    subcommand: &str,
+    argv_os: &[OsString],
+) -> Result<(), GuardError> {
+    if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
+        return Err(GuardError::Blocked {
+            reason: format!("destructive subcommand: git {}", subcommand),
+            hint: format!(
+                "Use a non-destructive git command instead of {}",
+                subcommand
+            ),
+        });
+    }
+
+    if subcommand == "stash" && (state.has_stash_drop || state.has_stash_clear) {
+        let what = if state.has_stash_drop {
+            "drop"
+        } else {
+            "clear"
+        };
+        return Err(GuardError::Blocked {
+            reason: format!("git stash {}", what),
+            hint: "Use 'git stash pop' to restore without losing, or 'git stash list' to review"
+                .into(),
+        });
+    }
+
+    if subcommand == "branch" && state.has_branch_d {
+        return Err(GuardError::Blocked {
+            reason: "git branch -D (force delete)".into(),
+            hint: "Use 'git branch -d' for safe delete (only merged branches)".into(),
+        });
+    }
+
+    if subcommand == "push" && (state.has_force_flag || state.has_force_with_lease_flag) {
+        return Err(GuardError::Blocked {
+            reason: "git push --force".into(),
+            hint:
+                "Use 'git push' without --force, or --force-with-lease if you understand the risks"
+                    .into(),
+        });
+    }
+
+    if subcommand == "push" {
+        if let Ok(stat) = fs::read_to_string("/proc/self/stat") {
+            let fields: Vec<&str> = stat.split_whitespace().collect();
+            if fields.len() > 8 {
+                let pgrp: i32 = fields[4].parse().unwrap_or(0);
+                let tpgid: i32 = fields[7].parse().unwrap_or(0);
+                if tpgid > 0 && pgrp != tpgid {
+                    return Err(GuardError::Blocked {
+                        reason: "git push from background process".into(),
+                        hint: "Run 'git push' in the foreground so hooks can interact".into(),
+                    });
+                }
+            }
+        }
+    }
+
+    if subcommand == "commit" && state.has_amend {
+        if let Ok(branch) = get_current_branch() {
+            if branch != "HEAD" && !branch.is_empty() {
+                let status = run_git(&[
+                    "git",
+                    "merge-base",
+                    "--is-ancestor",
+                    "HEAD",
+                    &format!("origin/{}", branch),
+                ]);
+                if status.success() {
+                    return Err(GuardError::Blocked {
+                        reason: format!(
+                            "git commit --amend on commit already on origin/{}",
+                            branch
+                        ),
+                        hint: "Make a new commit instead — amending pushed history is destructive"
+                            .into(),
+                    });
+                }
+            }
+        }
+    }
+
+    if subcommand == "revert" {
+        let target = extract_revert_target(argv_os);
+        if let Ok(branch) = get_current_branch() {
+            if branch != "HEAD" && !branch.is_empty() {
+                let exists = run_git(&[
+                    "git",
+                    "rev-parse",
+                    "--verify",
+                    &format!("{}^{{commit}}", target),
+                ]);
+                let on_remote = run_git(&[
+                    "git",
+                    "merge-base",
+                    "--is-ancestor",
+                    &target,
+                    &format!("origin/{}", branch),
+                ]);
+                if exists.success() && !on_remote.success() {
+                    return Err(GuardError::Blocked {
+                        reason: format!(
+                            "git revert on {} which is not on origin/{}",
+                            target, branch
+                        ),
+                        hint: "Edit forward with a new commit instead of reverting un-pushed work"
+                            .into(),
+                    });
+                }
+            }
+        }
+    }
+
+    if subcommand == "pull" && is_protected_branch() && !state.safe_pull_flag {
+        return Err(GuardError::Blocked {
+            reason: "git pull on protected branch without --ff-only or --rebase".into(),
+            hint: "Use 'git pull --ff-only' or 'git pull --rebase' to avoid merge commits".into(),
+        });
+    }
+
+    if subcommand == "merge" && is_protected_branch() && !state.has_ff_only {
+        return Err(GuardError::Blocked {
+            reason: "git merge on protected branch without --ff-only".into(),
+            hint: "Use 'git merge --ff-only' to avoid creating merge commits".into(),
+        });
+    }
+
+    if let Ok(skip) = std::env::var("SKIP") {
+        if !skip.is_empty() {
+            return Err(GuardError::Blocked {
+                reason: "SKIP environment variable set (hook bypass)".into(),
+                hint: "Unset SKIP before running git commands".into(),
+            });
+        }
+    }
+    if let Ok(allow) = std::env::var("PRE_COMMIT_ALLOW_NO_CONFIG") {
+        if !allow.is_empty() {
+            return Err(GuardError::Blocked {
+                reason: "PRE_COMMIT_ALLOW_NO_CONFIG environment variable set (hook bypass)".into(),
+                hint: "Unset PRE_COMMIT_ALLOW_NO_CONFIG before running git commands".into(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn get_current_branch() -> Result<String, ()> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .map_err(|_| ())?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(())
+    }
+}
+
+fn is_protected_branch() -> bool {
+    match get_current_branch() {
+        Ok(b) => b == "main" || b == "master",
+        Err(_) => false,
+    }
+}
+
+fn extract_revert_target(argv_os: &[OsString]) -> String {
+    for arg in argv_os.iter().skip(1) {
+        let s = arg.to_string_lossy();
+        if !s.starts_with('-') && s != "revert" {
+            return s.to_string();
+        }
+    }
+    "HEAD".to_string()
+}
+
+fn run_git(args: &[&str]) -> std::process::ExitStatus {
+    std::process::Command::new("/usr/bin/git.original")
+        .args(&args[1..])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap_or_else(|_| std::process::ExitStatus::from_raw(1))
+}

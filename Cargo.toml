@@ -1,0 +1,15 @@
+[package]
+name = "ami-git-guard"
+version = "0.1.0"
+edition = "2021"
+description = "SUID-root git wrapper — blocks destructive commands, sanitises env, enforces AMI-CI contracts"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[dependencies]
+libc = "0.2"
