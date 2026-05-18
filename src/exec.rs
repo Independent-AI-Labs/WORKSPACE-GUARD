@@ -44,7 +44,8 @@ fn verify_git_original() -> Result<(), GuardError> {
             if meta.st_uid() != 0 {
                 return Err(GuardError::GitOriginalBadPerms);
             }
-            if meta.st_mode() & 0o777 != 0o700 {
+            let mode = meta.st_mode() & 0o777;
+            if mode != 0o755 && mode != 0o700 {
                 return Err(GuardError::GitOriginalBadPerms);
             }
             Ok(())
