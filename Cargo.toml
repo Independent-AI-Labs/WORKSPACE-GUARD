@@ -1,8 +1,8 @@
 [package]
-name = "ami-git-guard"
+name = "rust-guard"
 version = "0.1.0"
 edition = "2021"
-description = "SUID-root git wrapper — blocks destructive commands, sanitises env, enforces AMI-CI contracts"
+description = "SUID-root guard framework — blocks destructive commands, sanitises env, enforces AMI-CI contracts. Git PoC."
 
 [profile.release]
 opt-level = "z"

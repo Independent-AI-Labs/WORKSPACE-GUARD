@@ -67,7 +67,7 @@ pub const DANGEROUS_CONFIG_KEYS: &[&str] = &[
 ];
 
 pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
-pub const LOG_FILE: &str = ".ami-git-guard.log";
+pub const LOG_FILE: &str = ".rust-guard.log";
 
 fn main() {
     let result = run();
