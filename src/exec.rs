@@ -111,7 +111,10 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
 }
 
 pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
-    let toplevel = match std::process::Command::new("git")
+    let toplevel = match std::process::Command::new("/usr/bin/git.original")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "safe.directory")
+        .env("GIT_CONFIG_VALUE_0", "*")
         .args(["rev-parse", "--show-toplevel"])
         .output()
     {

@@ -65,27 +65,10 @@ pub fn check_blocked(
     }
 
     if subcommand == "commit" && state.has_amend {
-        if let Ok(branch) = get_current_branch() {
-            if branch != "HEAD" && !branch.is_empty() {
-                let status = run_git(&[
-                    "git",
-                    "merge-base",
-                    "--is-ancestor",
-                    "HEAD",
-                    &format!("origin/{}", branch),
-                ]);
-                if status.success() {
-                    return Err(GuardError::Blocked {
-                        reason: format!(
-                            "git commit --amend on commit already on origin/{}",
-                            branch
-                        ),
-                        hint: "Make a new commit instead — amending pushed history is destructive"
-                            .into(),
-                    });
-                }
-            }
-        }
+        return Err(GuardError::Blocked {
+            reason: "git commit --amend".into(),
+            hint: "Make a new commit instead — history is immutable, amends are forbidden".into(),
+        });
     }
 
     if subcommand == "revert" {
@@ -153,8 +136,16 @@ pub fn check_blocked(
     Ok(())
 }
 
+fn git_cmd() -> std::process::Command {
+    let mut cmd = std::process::Command::new("/usr/bin/git.original");
+    cmd.env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "safe.directory")
+        .env("GIT_CONFIG_VALUE_0", "*");
+    cmd
+}
+
 fn get_current_branch() -> Result<String, ()> {
-    let output = std::process::Command::new("git")
+    let output = git_cmd()
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .map_err(|_| ())?;
@@ -183,7 +174,7 @@ fn extract_revert_target(argv_os: &[OsString]) -> String {
 }
 
 fn run_git(args: &[&str]) -> std::process::ExitStatus {
-    std::process::Command::new("/usr/bin/git.original")
+    git_cmd()
         .args(&args[1..])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
