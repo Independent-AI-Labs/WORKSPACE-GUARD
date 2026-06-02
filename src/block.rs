@@ -46,12 +46,40 @@ pub fn check_blocked(
         });
     }
 
+    if subcommand == "branch" && state.has_branch_force_rename {
+        return Err(GuardError::Blocked {
+            reason: "git branch -M (force rename)".into(),
+            hint: "Use 'git branch -m' for safe rename (refuses to overwrite existing)".into(),
+        });
+    }
+
+    if subcommand == "tag" && state.has_force_flag {
+        return Err(GuardError::Blocked {
+            reason: "git tag -f (force move tag)".into(),
+            hint: "Tags are immutable — create a new tag instead of force-moving".into(),
+        });
+    }
+
+    if subcommand == "tag" && state.has_branch_d {
+        return Err(GuardError::Blocked {
+            reason: "git tag -d / -D (delete tag)".into(),
+            hint: "Tags are immutable — archive rather than delete".into(),
+        });
+    }
+
     if subcommand == "push" && (state.has_force_flag || state.has_force_with_lease_flag) {
         return Err(GuardError::Blocked {
             reason: "git push --force".into(),
             hint:
                 "Use 'git push' without --force, or --force-with-lease if you understand the risks"
                     .into(),
+        });
+    }
+
+    if subcommand == "push" && state.has_delete_flag {
+        return Err(GuardError::Blocked {
+            reason: "git push --delete / -d (delete remote branch)".into(),
+            hint: "Deleting remote branches is forbidden — archive or rename instead".into(),
         });
     }
 
@@ -145,7 +173,10 @@ pub fn check_blocked(
 
 fn git_cmd() -> std::process::Command {
     let mut cmd = std::process::Command::new("/usr/bin/git.original");
-    cmd.env("GIT_CONFIG_COUNT", "1")
+    cmd.env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", "/")
+        .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "safe.directory")
         .env("GIT_CONFIG_VALUE_0", "*");
     cmd
@@ -164,8 +195,19 @@ fn get_current_branch() -> Result<String, ()> {
 }
 
 fn is_protected_branch() -> bool {
+    const PROTECTED: &[&str] = &[
+        "main",
+        "master",
+        "develop",
+        "production",
+        "staging",
+        "release",
+    ];
     match get_current_branch() {
-        Ok(b) => b == "main" || b == "master",
+        Ok(ref b) => {
+            let lower = b.to_lowercase();
+            PROTECTED.contains(&lower.as_str()) || lower.starts_with("release/")
+        }
         Err(_) => false,
     }
 }

@@ -1,7 +1,23 @@
 #!/usr/bin/env bash
-# generate-hooks — Generate native git hooks for ami-git-guard.
-# Zero-dependency bash alternative to the pre-commit Python framework.
+# generate-hooks — DEPRECATED: LEGACY HOOK GENERATOR.
+# This script produces MINIMAL cargo-only hooks (fmt, build, clippy, test)
+# WITHOUT gitleaks, banned-words, sensitive-files, suppress-swallow scanning,
+# commit-message validation, or quality-exception enforcement.
+#
+# USE THE AMI-CI GENERATOR INSTEAD:
+#   make install-hooks
+#
+# Running this script directly will OVERWRITE the full AMI-CI-generated
+# hooks with a weaker subset. This downgrade attack vector is intentional:
+# if you need these weaker hooks, you know how to bypass the warning.
+# For production use, always run 'make install-hooks' which delegates
+# to the full AMI-CI hook generator.
+
 set -euo pipefail
+
+echo "WARNING: generate-hooks.sh is DEPRECATED and produces WEAKER hooks." >&2
+echo "Use 'make install-hooks' for full AMI-CI hook coverage." >&2
+echo "" >&2
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

@@ -16,17 +16,20 @@ pub fn check_at_secure() -> Result<(), GuardError> {
 
 pub fn set_resource_limits() {
     unsafe {
-        let nofile = libc::rlimit {
-            rlim_cur: 256,
-            rlim_max: 256,
-        };
-        libc::setrlimit(libc::RLIMIT_NOFILE, &nofile);
-
-        let core = libc::rlimit {
-            rlim_cur: 0,
-            rlim_max: 0,
-        };
-        libc::setrlimit(libc::RLIMIT_CORE, &core);
+        libc::setrlimit(
+            libc::RLIMIT_NOFILE,
+            &libc::rlimit {
+                rlim_cur: 256,
+                rlim_max: 256,
+            },
+        );
+        libc::setrlimit(
+            libc::RLIMIT_CORE,
+            &libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            },
+        );
     }
 }
 
@@ -91,10 +94,6 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     }
     envp.push(CString::new("PATH=/usr/local/bin:/usr/bin:/bin").unwrap());
 
-    // Suppress git's "dubious ownership" fatal error when root accesses
-    // repos owned by other users. We stay root; we just tell git to trust
-    // all directories. This is safe because we only exec git.original after
-    // all guard checks have passed.
     envp.push(CString::new("GIT_CONFIG_COUNT=1").unwrap());
     envp.push(CString::new("GIT_CONFIG_KEY_0=safe.directory").unwrap());
     envp.push(CString::new("GIT_CONFIG_VALUE_0=*").unwrap());
@@ -112,6 +111,9 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
 
 pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     let toplevel = match std::process::Command::new("/usr/bin/git.original")
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", "/")
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "safe.directory")
         .env("GIT_CONFIG_VALUE_0", "*")
@@ -128,6 +130,14 @@ pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         None => return Ok(()),
     };
 
+    if check_vendored_tier_bypass(&wsroot, &toplevel) {
+        return Err(GuardError::ContractFailed(
+            "Project tier is set to 'vendored' in project_enforcement.yaml — \
+             quality gates are disabled. Restore 'strict' tier before committing."
+                .into(),
+        ));
+    }
+
     let ci_script = format!("{}/projects/AMI-CI/lib/checks_quality.sh", wsroot);
     if !Path::new(&ci_script).exists() {
         eprintln!(
@@ -138,6 +148,9 @@ pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     }
 
     let output = std::process::Command::new("bash")
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", "/")
         .arg(&ci_script)
         .env("AMI_GGUARD_CMD", subcommand)
         .env("AMI_GGUARD_REPO_ROOT", &toplevel)
@@ -156,6 +169,89 @@ pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     Ok(())
 }
 
+fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
+    let enforce_path = Path::new(wsroot).join("ami/config/project_enforcement.yaml");
+    if !enforce_path.exists() {
+        return false;
+    }
+    let content = match fs::read_to_string(&enforce_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let rel_path = match toplevel.strip_prefix(wsroot) {
+        Some(stripped) => stripped.trim_start_matches('/'),
+        None => toplevel,
+    };
+
+    let mut in_exemptions = false;
+    let mut current_path: Option<String> = None;
+    let mut current_tier: Option<String> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "exemptions:" {
+            in_exemptions = true;
+            current_path = None;
+            current_tier = None;
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if in_exemptions && !trimmed.starts_with('-') && !trimmed.contains(':') {
+            continue;
+        }
+        if in_exemptions
+            && !trimmed.starts_with('-')
+            && !trimmed.starts_with("path:")
+            && !trimmed.starts_with("tier:")
+            && !trimmed.starts_with("reason:")
+        {
+            in_exemptions = false;
+            current_path = None;
+            current_tier = None;
+            continue;
+        }
+        if !in_exemptions {
+            continue;
+        }
+
+        let entry_line = match trimmed.strip_prefix("- ") {
+            Some(s) => s,
+            None => trimmed,
+        };
+
+        if let Some(stripped) = entry_line.strip_prefix("tier:") {
+            current_tier = Some(stripped.trim().to_lowercase());
+        }
+        if let Some(stripped) = entry_line.strip_prefix("path:") {
+            current_path = Some(stripped.trim().to_string());
+        }
+
+        if current_path.is_some() && current_tier.is_some() {
+            let path_val = current_path.as_deref().unwrap();
+            if (rel_path.starts_with(path_val.trim_end_matches('/')) || path_val == rel_path)
+                && current_tier.as_deref() == Some("vendored")
+            {
+                return true;
+            }
+            current_path = None;
+            current_tier = None;
+        }
+    }
+
+    if let (Some(path_val), Some(tier)) = (current_path.as_deref(), current_tier.as_deref()) {
+        if (rel_path.starts_with(path_val.trim_end_matches('/')) || path_val == rel_path)
+            && tier == "vendored"
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn find_workspace_root(toplevel: &str) -> Option<String> {
     let mut cur = std::path::PathBuf::from(toplevel);
     loop {
@@ -168,5 +264,94 @@ fn find_workspace_root(toplevel: &str) -> Option<String> {
         if !cur.pop() {
             return None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_temp_enforcement(dir: &std::path::Path, content: &str) {
+        let ami_config = dir.join("ami").join("config");
+        std::fs::create_dir_all(&ami_config).unwrap();
+        let mut f = std::fs::File::create(ami_config.join("project_enforcement.yaml")).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn vendored_tier_not_bypassed_for_safe_tier() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = r#"
+version: 1
+defaults:
+  tier: strict
+exemptions:
+  - path: projects/RUST-GUARD/
+    tier: strict
+    reason: "test"
+"#;
+        write_temp_enforcement(dir.path(), content);
+        let wsroot = dir.path().to_string_lossy().to_string();
+        let toplevel = format!("{}/projects/RUST-GUARD", wsroot);
+        assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
+    }
+
+    #[test]
+    fn vendored_tier_bypass_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = r#"
+version: 1
+defaults:
+  tier: strict
+exemptions:
+  - path: projects/RUST-GUARD/
+    tier: vendored
+    reason: "test vendored bypass"
+"#;
+        write_temp_enforcement(dir.path(), content);
+        let wsroot = dir.path().to_string_lossy().to_string();
+        let toplevel = format!("{}/projects/RUST-GUARD", wsroot);
+        assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
+    }
+
+    #[test]
+    fn vendored_tier_no_exemptions() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = r#"
+version: 1
+defaults:
+  tier: strict
+"#;
+        write_temp_enforcement(dir.path(), content);
+        let wsroot = dir.path().to_string_lossy().to_string();
+        let toplevel = format!("{}/projects/other", wsroot);
+        assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
+    }
+
+    #[test]
+    fn vendored_tier_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let wsroot = dir.path().to_string_lossy().to_string();
+        let toplevel = format!("{}/projects/RUST-GUARD", wsroot);
+        assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
+    }
+
+    #[test]
+    fn vendored_tier_path_prefix_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = r#"
+version: 1
+defaults:
+  tier: strict
+exemptions:
+  - path: projects/RUST-GUARD/
+    tier: vendored
+    reason: "test"
+"#;
+        write_temp_enforcement(dir.path(), content);
+        let wsroot = dir.path().to_string_lossy().to_string();
+        let toplevel = format!("{}/projects/RUST-GUARD/subdir", wsroot);
+        assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
     }
 }
