@@ -11,7 +11,7 @@ use log::block;
 
 #[derive(Debug)]
 pub enum GuardError {
-    NotSuid,
+    MissingCap,
     GitOriginalMissing,
     GitOriginalBadPerms,
     NullByteInArg,
@@ -212,6 +212,12 @@ fn main() {
             eprintln!("{}", msg);
             process::exit(4);
         }
+        Err(GuardError::MissingCap) => {
+            eprintln!(
+                "FATAL: missing CAP_DAC_OVERRIDE — guard must be installed with file capabilities"
+            );
+            process::exit(2);
+        }
         Err(e) => {
             eprintln!("FATAL: {:?}", e);
             process::exit(2);
@@ -220,8 +226,17 @@ fn main() {
 }
 
 fn run() -> Result<(), GuardError> {
-    exec::check_at_secure()?;
+    if !caps::has_cap(
+        None,
+        caps::CapSet::Effective,
+        caps::Capability::CAP_DAC_OVERRIDE,
+    )
+    .unwrap_or(false)
+    {
+        return Err(GuardError::MissingCap);
+    }
     exec::set_resource_limits();
+    exec::raise_ambient_caps()?;
 
     let argv_os: Vec<OsString> = std::env::args_os().collect();
 

@@ -2,7 +2,7 @@
 name = "rust-guard"
 version = "0.1.0"
 edition = "2021"
-description = "SUID-root guard framework — blocks destructive commands, sanitises env, enforces AMI-CI contracts. Git PoC."
+description = "Capability-based guard framework — blocks destructive commands, sanitises env, enforces AMI-CI contracts. Git PoC."
 
 [profile.release]
 opt-level = "z"
@@ -12,6 +12,7 @@ panic = "abort"
 strip = true
 
 [dependencies]
+caps = "0.5"
 libc = "0.2"
 
 [dev-dependencies]

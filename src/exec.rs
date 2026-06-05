@@ -6,11 +6,24 @@ use std::path::Path;
 
 use crate::{args::ArgState, GuardError, ALLOWED_VARS, GIT_ORIGINAL};
 
-pub fn check_at_secure() -> Result<(), GuardError> {
-    let at_secure = unsafe { libc::getauxval(libc::AT_SECURE) };
-    if at_secure == 0 {
-        return Err(GuardError::NotSuid);
-    }
+pub fn raise_ambient_caps() -> Result<(), GuardError> {
+    caps::raise(
+        None,
+        caps::CapSet::Inheritable,
+        caps::Capability::CAP_DAC_OVERRIDE,
+    )
+    .map_err(|_| GuardError::MissingCap)?;
+    caps::raise(
+        None,
+        caps::CapSet::Ambient,
+        caps::Capability::CAP_DAC_OVERRIDE,
+    )
+    .map_err(|_| GuardError::MissingCap)?;
+    Ok(())
+}
+
+fn clear_child_caps() -> Result<(), GuardError> {
+    caps::clear(None, caps::CapSet::Ambient).map_err(|_| GuardError::MissingCap)?;
     Ok(())
 }
 
@@ -103,9 +116,29 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     let mut envp_ptrs: Vec<*const libc::c_char> = envp.iter().map(|s| s.as_ptr()).collect();
     envp_ptrs.push(std::ptr::null());
 
-    unsafe {
-        libc::execve(git_path.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
-        libc::_exit(3);
+    let pid = unsafe { libc::fork() };
+    match pid {
+        -1 => Err(GuardError::GitOriginalMissing),
+        0 => {
+            let _ = clear_child_caps();
+            unsafe {
+                libc::execve(git_path.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
+                libc::_exit(3);
+            }
+        }
+        _ => {
+            let mut status: libc::c_int = 0;
+            unsafe {
+                libc::waitpid(pid, &mut status, 0);
+            }
+            if libc::WIFEXITED(status) {
+                std::process::exit(libc::WEXITSTATUS(status));
+            }
+            if libc::WIFSIGNALED(status) {
+                std::process::exit(128 + libc::WTERMSIG(status));
+            }
+            std::process::exit(1);
+        }
     }
 }
 
@@ -353,5 +386,41 @@ exemptions:
         let wsroot = dir.path().to_string_lossy().to_string();
         let toplevel = format!("{}/projects/RUST-GUARD/subdir", wsroot);
         assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
+    }
+
+    #[test]
+    fn clear_child_caps_succeeds() {
+        assert!(clear_child_caps().is_ok());
+    }
+
+    #[test]
+    fn raise_ambient_caps_returns_error_without_file_caps() {
+        let result = raise_ambient_caps();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn verify_git_original_returns_error_when_missing() {
+        if std::path::Path::new("/usr/bin/git.original").exists() {
+            return;
+        }
+        assert!(verify_git_original().is_err());
+    }
+
+    #[test]
+    fn fork_child_clears_and_exits() {
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork should succeed");
+        if pid == 0 {
+            let _ = clear_child_caps();
+            std::process::exit(0);
+        } else {
+            let mut status: libc::c_int = 0;
+            unsafe {
+                libc::waitpid(pid, &mut status, 0);
+            }
+            assert!(libc::WIFEXITED(status));
+            assert_eq!(libc::WEXITSTATUS(status), 0);
+        }
     }
 }
