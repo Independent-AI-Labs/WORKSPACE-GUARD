@@ -5,8 +5,8 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null)
-AMI_CI_DIR := $(abspath $(REPO_ROOT)/../AMI-CI)
+REPO_ROOT := $(shell if [ -d .git ]; then git rev-parse --show-toplevel; else pwd; fi)
+AMI_CI_DIR := $(abspath $(REPO_ROOT)/../CI)
 
 -include $(AMI_CI_DIR)/lib/makefile_contract.mk
 
@@ -26,7 +26,9 @@ preflight: ## Verify required tooling is present
 
 .PHONY: install-hooks
 install-hooks: preflight ## Regenerate native git hooks from .pre-commit-config.yaml
-	@bash $(AMI_CI_DIR)/scripts/cleanup-precommit 2>/dev/null || true
+	@if [ -x "$(AMI_CI_DIR)/scripts/cleanup-precommit" ]; then \
+		bash "$(AMI_CI_DIR)/scripts/cleanup-precommit"; \
+	fi
 	bash $(AMI_CI_DIR)/scripts/generate-hooks
 
 .PHONY: check

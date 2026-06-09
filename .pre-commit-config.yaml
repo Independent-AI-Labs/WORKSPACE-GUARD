@@ -17,6 +17,7 @@ repos:
         name: Block Sensitive Files
         entry: "bash -c 'source ../CI/lib/checks.sh && ci_block_sensitive_files \"$@\"' --"
         language: system
+        always_run: true
 
       - id: gitleaks
         name: Block secrets in staged content (gitleaks)
@@ -37,18 +38,21 @@ repos:
         entry: "bash -c 'source ../CI/lib/checks.sh && ci_check_banned_words'"
         language: system
         pass_filenames: false
+        always_run: true
 
       - id: check-file-length
         name: Check File Length (max 512 lines)
         entry: "bash -c 'source ../CI/lib/checks.sh && ci_check_file_length'"
         language: system
         pass_filenames: false
+        always_run: true
 
       - id: cargo-fmt
         name: Cargo Format Check
         entry: cargo fmt --all -- --check
         language: system
         pass_filenames: false
+        always_run: true
         files: \.rs$
 
       - id: cargo-clippy
@@ -56,6 +60,7 @@ repos:
         entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         pass_filenames: false
+        always_run: true
         files: \.rs$
 
       - id: check-commit-message
