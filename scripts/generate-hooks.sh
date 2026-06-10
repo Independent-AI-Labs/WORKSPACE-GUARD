@@ -70,8 +70,12 @@ EOF
     _header
     cat << 'EOF'
 # Only run Rust checks when Rust files are staged
-STAGED="$(git diff --cached --name-only --diff-filter=ACMR 2>&1)" || STAGED=""
-MATCH="$(echo "$STAGED" | grep -E '\.rs$|Cargo\.toml$|Cargo\.lock$' 2>&1)" || MATCH=""
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR 2>&1)"
+if [ $? -ne 0 ]; then
+    echo "cargo hooks: git diff failed" >&2
+    exit 1
+fi
+MATCH="$(echo "$STAGED" | grep -E '\.rs$|Cargo\.toml$|Cargo\.lock$')"
 
 if [[ -z "$MATCH" ]]; then
     echo "cargo hooks: no Rust files staged — skipping"
