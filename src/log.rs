@@ -1,13 +1,14 @@
 use std::ffi::CStr;
 use std::fs;
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::LOG_FILE;
 
-pub fn block(reason: &str, hint: &str) -> ! {
+pub fn block(reason: &str, hint: &str, cmd: &str) -> ! {
     let ts = timestamp();
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -15,7 +16,7 @@ pub fn block(reason: &str, hint: &str) -> ! {
 
     let uid = unsafe { libc::getuid() };
 
-    let msg = format!("BLOCKED: git {} ({})\n  -> Hint: {}", reason, ts, hint);
+    let msg = format!("BLOCKED: {} ({})\n  -> Hint: {}", cmd, ts, hint);
 
     eprintln!("{}", msg);
 
@@ -29,9 +30,10 @@ pub fn block(reason: &str, hint: &str) -> ! {
         if let Ok(mut f) = fs::OpenOptions::new()
             .create(true)
             .append(true)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&log_path)
         {
-            let _ = writeln!(f, "{}|{}|git {}|{}|uid={}", ts, cwd, reason, reason, uid);
+            let _ = writeln!(f, "{}|{}|{}|{}|uid={}", ts, cwd, cmd, reason, uid);
         }
     }
 
@@ -63,7 +65,7 @@ fn timestamp() -> String {
         libc::localtime_r(&secs, &mut tm);
     }
 
-    let mut buf = [0i8; 64];
+    let mut buf = [0 as libc::c_char; 64];
     let len = unsafe {
         libc::strftime(
             buf.as_mut_ptr(),
@@ -74,7 +76,7 @@ fn timestamp() -> String {
     };
 
     if len > 0 {
-        let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, len) };
+        let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) };
         String::from_utf8_lossy(bytes).to_string()
     } else {
         "1970-01-01T00:00:00+0000".to_string()

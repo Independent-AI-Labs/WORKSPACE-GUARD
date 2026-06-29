@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=https://moonrepo.dev/schemas/project.json
+#
+# moon project config for workspace-guard.
+# Per-repo tasks live in the Makefile.
+
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+project:
+  name: 'workspace-guard'
+  description: 'Rust SUID git-guard; boot-layout inherits from WORKSPACE-CI'
+  # Boot-layout metadata (descriptive; mirrors config/boot_layout.yaml).
+  # Compliance check (WORKSPACE-CI/ci/check_boot_venv_layout.py) verifies consistency.
+  bootDir: '.boot-linux'
+  parentBoot:
+    - '../WORKSPACE-CI/.boot-linux'
+
+language: 'rust'
+layer: 'library'
+
+tags:
+  - 'library'
+  - 'rust'
+  - 'security'
+  - 'tooling'
+
+# GUARD inherits WORKSPACE-CI/.boot-linux/ for gitleaks binaries
+# per config/boot_layout.yaml::inherit. This moon.yml::dependsOn edge MUST
+# match (SPEC §8.2). Reverse direction (CI depending on GUARD) is invalid.
+dependsOn:
+  - 'ci'
+
+# Tasks wrap the Makefile contract. `inputs:` are declared on cacheable
+# tasks (lint, type-check, test, check) so affected checks can skip
+# unchanged projects. The implementation still lives in the Makefile.
+tasks:
+  lint:
+    command: 'make lint'
+    inputs:
+      - 'src/**/*.rs'
+      - 'tests/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+  type-check:
+    # Rust has no separate type-check; cargo check IS the type-check.
+    command: 'make type-check'
+    inputs:
+      - 'src/**/*.rs'
+      - 'tests/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+  test:
+    command: 'make test'
+    inputs:
+      - 'src/**/*.rs'
+      - 'tests/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+  check:
+    # Aggregator: deps run lint+type-check+test through moon's task DAG;
+    # the command itself is a no-op so we don't re-invoke `make check`
+    # which would recurse back through the public shim.
+    command: 'true'
+    deps:
+      - '~:lint'
+      - '~:type-check'
+      - '~:test'
+  build:
+    command: 'make build'
+    options:
+      cache: false
+  build-guard:
+    command: 'make build-guard'
+    inputs:
+      - 'src/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+    options:
+      cache: false
+  # Workspace-wide update walk. `^update` runs the same task in every
+  # project this depends on (transitively) BEFORE running update here.
+  # cache=false because git pull has external state; runDepsInParallel=
+  # false to enforce Tier 0 → 1 → 2 ordering (CI before GUARD).
+  update:
+    # rc-capture pattern: git pull may fail (offline dev, detached HEAD);
+    # we surface the rc + stderr to the user then proceed to make sync.
+    # NO 2>/dev/null swallow, NO || true swallow (per the swallow canon).
+    command: 'bash -c "rc=0; git pull --ff-only || rc=$?; if [[ $rc -ne 0 ]]; then echo \"[WARN] git pull failed (exit $rc) — continuing with make sync\" >&2; fi; make sync"'
+    deps:
+      - '^:update'
+    options:
+      cache: false
+      runDepsInParallel: false

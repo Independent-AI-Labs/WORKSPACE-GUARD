@@ -27,7 +27,7 @@ repos:
         always_run: true
 
       - id: ci-check-silent-swallow
-        name: Block silent error-swallow patterns (staged diff)
+        name: Block error-swallow patterns (staged diff)
         entry: "bash -c 'source ../CI/lib/checks.sh && ci_check_silent_swallow'"
         language: system
         pass_filenames: false
@@ -43,6 +43,13 @@ repos:
       - id: check-file-length
         name: Check File Length (max 512 lines)
         entry: "bash -c 'source ../CI/lib/checks.sh && ci_check_file_length'"
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: check-markdown-docs
+        name: Check Markdown Docs
+        entry: "uv run --project ../CI --no-sync python -m ci.check_markdown_docs --all-md --check-remote"
         language: system
         pass_filenames: false
         always_run: true

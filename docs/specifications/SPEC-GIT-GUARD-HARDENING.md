@@ -26,7 +26,7 @@ pre-req.sh main flow:
      └── Verify + rollback on failure
 ```
 
-The git guard section runs unconditionally after dependency installation (not gated on missing packages). If the guard is already installed, it skips silently (unless `--reinstall-git-guard` is passed).
+The git guard section runs unconditionally after dependency installation (not gated on missing packages). If the guard is already installed, it skips without notice (unless `--reinstall-git-guard` is passed).
 
 ### 8.1 New Command-Line Flags for pre-req.sh
 
@@ -57,9 +57,9 @@ install: ... install-hooks ...
 install-ci: ... install-hooks ...
 ```
 
-### 9.2 Keep `install-git-guard` for Legacy Compatibility
+### 9.2 Keep `install-git-guard` as a No-op for Migration Support
 
-The `install-git-guard` target definition remains in the Makefile (as a no-op with a deprecation warning) for backwards compatibility, but it is NOT called by any install flow:
+The `install-git-guard` target definition remains in the Makefile (as a no-op with a deprecation warning) to support existing scripts that still invoke it, but it is NOT called by any install flow:
 
 ```makefile
 .PHONY: install-git-guard
@@ -76,10 +76,10 @@ During the transition period, the old bash guard at `ami/scripts/utils/git-guard
 
 - `/usr/bin/git` → SUID Rust guard (active)
 - `/usr/bin/git.original` → real git (restricted)
-- `.boot-linux/bin/git` → legacy bash wrapper (inactive, not in PATH)
+- `.boot-linux/bin/git` → older bash wrapper (inactive, not in PATH)
 - `ami/scripts/utils/git-guard` → source script (kept for reference)
 
-The legacy wrapper can be removed after all machines have migrated to the SUID guard.
+The older wrapper can be removed after all machines have migrated to the SUID guard.
 
 ---
 
@@ -151,7 +151,7 @@ if dpkg -l libgit2-dev 2>/dev/null | grep -q '^ii'; then
     echo "       Consider: sudo apt remove libgit2-dev"
 fi
 
-# Check for git python packages
+# Check for GitPython via pip
 if pip3 list 2>/dev/null | grep -q 'GitPython'; then
     echo "[WARN] GitPython is installed — Python scripts can bypass the guard"
     echo "       Consider: pip3 uninstall GitPython"

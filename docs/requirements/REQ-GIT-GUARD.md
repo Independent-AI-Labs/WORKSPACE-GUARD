@@ -1,22 +1,25 @@
 # Requirements: WORKSPACE-GUARD SUID Guard Framework (Git PoC)
 
 **Date:** 2026-05-18
-**Status:** DRAFT
+**Updated:** 2026-06-24
+**Status:** ACTIVE
 **Type:** Requirements
 
 ---
 
 ## Background
 
-The current git-guard is a 337-line bash script at `ami/scripts/utils/git-guard`. It intercepts git commands by being placed first in PATH, blocks destructive operations, and enforces AMI-CI contracts on commit/push. However, a bash wrapper is inherently bypassable: the source is readable, logic can be understood and circumvented, and it relies on PATH ordering alone.
+The current git-guard is a 337-line bash script at `workspace/scripts/utils/git-guard`. It intercepts git commands by being placed first in PATH, blocks destructive operations, and enforces WORKSPACE-CI contracts on commit/push. However, a bash wrapper is inherently bypassable: the source is readable, logic can be understood and circumvented, and it relies on PATH ordering alone.
 
-The replacement is a **Rust binary** installed as a **SUID-root** executable at `/usr/bin/git`, with the real git binary relocated to `/usr/bin/git.original` (owner root, mode 700). The guard validates all arguments in compiled code, sanitises the execution environment, and only then `execve()`s the real git. A user who reads the binary cannot trivially bypass it because:
+The replacement is a **Rust binary** installed as a **capability-enabled** executable at `/usr/bin/git`, with the real git binary relocated to `/usr/bin/git.original` (owner root, mode 700). The guard validates all arguments in compiled code, sanitises the execution environment, and only then `execve()`s the real git. A user who reads the binary cannot trivially bypass it because:
 
 1. The real git at `/usr/bin/git.original` is mode 700 root:root — unreadable and unexecutable by non-root.
 2. No sudoers rule allows direct execution of git.original.
 3. The guard itself is a compiled Rust binary, not a readable script.
 
-This document specifies the requirements for the Rust binary. The installation/deployment procedure is specified in [SPEC-GIT-GUARD-INSTALL](../specifications/SPEC-GIT-GUARD-INSTALL.md) and is handled exclusively by `sudo make pre-req`.
+For environments where file capabilities are unavailable (PRoot, containers running as root), a **root-only mode** (`--features root-only`) provides a soft barrier with the same policy engine.
+
+This document specifies the requirements for the Rust binary. The installation/deployment procedure is specified in [SPEC-GIT-GUARD-INSTALL](../specifications/SPEC-GIT-GUARD-INSTALL.md) and is handled by `make build-guard` and `make install-guard`.
 
 ---
 
@@ -24,12 +27,12 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 1. Privileged Execution Model
 
-- **REQ-GGUARD-001**: The binary shall be installed at `/usr/bin/git` with owner root:root and mode 4555 (SUID root, world-executable).
+- **REQ-GGUARD-001**: The binary shall be installed at `/usr/bin/git` with owner root:root and mode 0755, with file capability `cap_dac_override+ep` (capability mode).
 - **REQ-GGUARD-002**: The real git binary shall reside at `/usr/bin/git.original` with owner root:root and mode 0700.
-- **REQ-GGUARD-003**: The binary shall detect privileged execution via `getauxval(AT_SECURE)` — not by comparing real/effective UID — to correctly handle file-capability contexts.
-- **REQ-GGUARD-004**: If `AT_SECURE` is not set (binary is not running as SUID), the binary shall refuse to operate and exit with code 3. This prevents an attacker from compiling their own binary that bypasses the guard.
+- **REQ-GGUARD-003**: The binary shall detect privileged execution via `caps::has_cap()` (capability mode) or `geteuid() == 0` (root-only mode).
+- **REQ-GGUARD-004**: If the capability check fails (capability mode) or euid is not 0 (root-only mode), the binary shall refuse to operate and exit with code 2. This prevents an attacker from compiling their own binary that bypasses the guard.
 - **REQ-GGUARD-005**: The binary shall call `execve()` with an **absolute path** to `/usr/bin/git.original` — never `execvp()` or PATH-based lookup.
-- **REQ-GGUARD-006**: The binary shall verify that `/usr/bin/git.original` exists, is a regular file, is owned by root, and has mode 0700 before exec-ing it. If verification fails, exit with code 3.
+- **REQ-GGUARD-006**: The binary shall verify that `/usr/bin/git.original` exists, is a regular file, is owned by root, and has mode 0700 before exec-ing it. If verification fails, exit with code 2.
 - **REQ-GGUARD-007**: The binary shall NOT use `system()`, `Command::new("sh")`, or any shell invocation at any point. All subprocess execution shall use explicit argument vectors.
 
 ### 2. Argument Parsing
@@ -115,18 +118,18 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-073**: The binary shall NOT modify `HOME`, `USER`, `LANG`, `LC_*`, or locale variables — these are needed by git for normal operation.
 - **REQ-GGUARD-074**: The binary shall use `secure_getenv()` (via the `nix` crate or libc binding) when reading environment variables during its own execution, to prevent an attacker from influencing the guard's own logic via crafted env vars in the SUID context.
 
-### 9. AMI-CI Contract Enforcement
+### 9. WORKSPACE-CI Contract Enforcement
 
 - **REQ-GGUARD-080**: Contract enforcement shall run ONLY for `git commit` and `git push` subcommands. All other invocations skip this section entirely.
-- **REQ-GGUARD-081**: The binary shall determine if the current repository is within an AMI workspace by walking up from the repo's `.git` directory (or `git rev-parse --show-toplevel`) and checking for the presence of `.boot-linux/` directory, `projec../CI/` directory, and `ami/scripts/utils/git-guard` file at the same root.
-- **REQ-GGUARD-082**: If the repo is NOT in an AMI workspace, contract enforcement shall be skipped.
-- **REQ-GGUARD-083**: For AMI workspace repos, the binary shall source and execute the contract checks from `projec../CI/lib/checks_quality.sh`. The binary shall NOT re-implement the contract logic — it delegates to the AMI-CI shell script.
+- **REQ-GGUARD-081**: The binary shall determine if the current repository is within an WORKSPACE workspace by walking up from the repo's `.git` directory (or `git rev-parse --show-toplevel`) and checking for the presence of `.boot-linux/` directory, `projects/CI/` directory, and `workspace/scripts/utils/git-guard` file at the same root.
+- **REQ-GGUARD-082**: If the repo is NOT in an WORKSPACE workspace, contract enforcement shall be skipped.
+- **REQ-GGUARD-083**: For WORKSPACE workspace repos, the binary shall source and execute the contract checks from `projects/CI/lib/checks_quality.sh`. The binary shall NOT re-implement the contract logic — it delegates to the WORKSPACE-CI shell script.
 - **REQ-GGUARD-084**: The binary shall pass the following information to the contract check script via environment variables:
-  - `AMI_GGUARD_CMD` — the git subcommand (`commit` or `push`)
-  - `AMI_GGUARD_REPO_ROOT` — the repo's top-level directory
-  - `AMI_GGUARD_WORKSPACE_ROOT` — the AMI workspace root
-- **REQ-GGUARD-085**: If the contract check script exits non-zero, the binary shall exit with code 1, showing the script's stderr output.
-- **REQ-GGUARD-086**: If the contract check script is not found at the expected path, contract enforcement shall be skipped with a warning to stderr (graceful degradation).
+  - `WORKSPACE_GGUARD_CMD` — the git subcommand (`commit` or `push`)
+  - `WORKSPACE_GGUARD_REPO_ROOT` — the repo's top-level directory
+  - `WORKSPACE_GGUARD_WORKSPACE_ROOT` — the WORKSPACE workspace root
+- **REQ-GGUARD-085**: If the contract check script exits non-zero, the binary shall exit with code 4, showing the script's stderr output.
+- **REQ-GGUARD-086**: If the contract check script is not found at the expected path, contract enforcement shall be skipped with a warning to stderr (graceful skip).
 
 ### 10. Audit Logging
 
@@ -174,9 +177,9 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 15. Deployment and Installation
 
-- **REQ-GGUARD-140**: The SUID git guard shall be installed exclusively by `sudo make pre-req` — not by `make install` or any other target. `make install` shall NOT touch the git binary or git guard.
-- **REQ-GGUARD-141**: The `sudo make pre-req` script shall inform the user **before** any git-related changes are made, including: that the existing system git will be relocated, that a SUID-root binary will be installed at `/usr/bin/git`, and that the real git will be restricted to mode 0700 root:root.
-- **REQ-GGUARD-142**: The installation script shall build the `workspace-guard` Rust binary from source (`projects/WORKSPACE-GUARD/`) before installing it. The build target shall be `x86_64-unknown-linux-musl` (static) with a fallback to `x86_64-unknown-linux-gnu` (dynamic).
+- **REQ-GGUARD-140**: The git guard shall be installed by `make build-guard` and `make install-guard` — not by `make install`. `make install` shall NOT touch the git binary or git guard.
+- **REQ-GGUARD-141**: The `make install-guard` script shall inform the user **before** any git-related changes are made, including: that the existing system git will be relocated, that a capability-enabled binary will be installed at `/usr/bin/git`, and that the real git will be restricted to mode 0700 root:root.
+- **REQ-GGUARD-142**: The installation script shall build the `workspace-guard` Rust binary from source (`projects/WORKSPACE-GUARD/`) before installing it. The build shall use `cargo build --release` with appropriate feature flags.
 - **REQ-GGUARD-143**: Before relocating the real git, the script shall verify that: (a) the Rust binary compiled successfully, (b) the compiled binary is a valid ELF executable, and (c) `/usr/bin/git` exists and is the system git.
 - **REQ-GGUARD-144**: The script shall relocate the real git binary as follows:
   1. Copy `/usr/bin/git` to `/usr/bin/git.original`
@@ -184,63 +187,76 @@ This document specifies the requirements for the Rust binary. The installation/d
   3. Set permissions: `chmod 0700 /usr/bin/git.original`
   4. Verify the copy matches the original via checksum comparison
 - **REQ-GGUARD-145**: The script shall install the guard binary as follows:
-  1. Copy `projects/WORKSPACE-GUARD/target/x86_64-unknown-linux-musl/release/workspace-guard` to `/usr/bin/git`
+  1. Copy the built binary to `/usr/bin/git`
   2. Set ownership: `chown root:root /usr/bin/git`
-  3. Set permissions: `chmod 4555 /usr/bin/git` (SUID root, world-executable)
+  3. Set permissions: `chmod 0755 /usr/bin/git`
+  4. Set file capability: `setcap cap_dac_override+ep /usr/bin/git` (capability mode only)
 - **REQ-GGUARD-146**: After installation, the script shall verify correctness by:
-  1. Confirming `/usr/bin/git` has mode 4555 and owner root:root
+  1. Confirming `/usr/bin/git` has correct mode and owner
   2. Confirming `/usr/bin/git.original` has mode 0700 and owner root:root
   3. Running `git --version` as the current user and confirming it succeeds
   4. Running `git reset --hard` as the current user and confirming it is blocked
 - **REQ-GGUARD-147**: If any step of the installation fails, the script shall attempt to restore the original state: copy `/usr/bin/git.original` back to `/usr/bin/git` and set permissions to 0755. A clear error message shall be displayed.
-- **REQ-GGUARD-148**: The installation script shall detect if the guard is already installed (by checking `/usr/bin/git.original` exists with mode 0700). If already installed, the script shall inform the user and skip re-installation unless a `--reinstall` flag is passed.
-- **REQ-GGUARD-149**: An uninstall procedure shall be available via `sudo make pre-req --uninstall-workspace-guard` which:
-  1. Removes `/usr/bin/git` (the SUID guard)
+- **REQ-GGUARD-148**: The installation script shall detect if the guard is already installed (by checking `/usr/bin/git.original` exists with mode 0700). If already installed, the script shall inform the user and skip re-installation unless a `reinstall` mode is passed.
+- **REQ-GGUARD-149**: An uninstall procedure shall be available via `make uninstall-guard` which:
+  1. Removes `/usr/bin/git` (the guard)
   2. Restores `/usr/bin/git.original` to `/usr/bin/git` with mode 0755
   3. Restores the dpkg diversion (removes it, returning `/usr/bin/git` to dpkg control)
   4. Confirms `git --version` works
 - **REQ-GGUARD-150**: The installation script shall configure a `dpkg-divert` for `/usr/bin/git` to prevent the `git` apt package from overwriting the guard binary during `apt install git` or `apt upgrade`. The diversion shall redirect `/usr/bin/git` → `/usr/bin/git.distrib`.
-- **REQ-GGUARD-151**: The installation script shall remove the legacy bash wrapper at `.boot-linux/bin/git` to prevent PATH-based bypass. If `.boot-linux/bin/git` exists, it shall be removed (or replaced with a symlink to `/usr/bin/git`) during guard installation.
+- **REQ-GGUARD-151**: The installation script shall remove the older bash wrapper at `.boot-linux/bin/git` to prevent PATH-based bypass. If `.boot-linux/bin/git` exists, it shall be removed during guard installation.
 - **REQ-GGUARD-152**: If the guard detects that `/usr/bin/git` has been replaced (e.g., by a manual override or failed divert), the guard binary shall refuse to `execve()` real git if the inode of `/usr/bin/git` does not match its own. This prevents a scenario where an attacker replaces the SUID binary at the filesystem level.
-- **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `sudo make pre-req`. The hook shall NOT silently reinstall the guard — it only warns.
+- **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `make install-guard`. The hook shall NOT reinstall the guard on its own; it only warns.
 - **REQ-GGUARD-154**: The installation script shall detect and warn about alternative git installations (`snap`, `flatpak`, `nix`, `/usr/local/bin/git`). The user shall be informed that these provide alternate paths to git that bypass the guard. This is informational only — the guard does not attempt to disable them.
+
+### 15A. Root-Only Mode
+
+- **REQ-GGUARD-155**: When built with `--features root-only`, the guard shall skip the `CAP_DAC_OVERRIDE` capability check and instead verify `geteuid() == 0`.
+- **REQ-GGUARD-156**: Root-only mode shall print a warning to stderr on every invocation, documenting that it is a soft barrier and that direct execution of `/usr/bin/git.original` bypasses the guard.
+- **REQ-GGUARD-157**: Root-only mode shall apply the same 17-rule policy engine, environment sanitization, and audit logging as capability mode.
+- **REQ-GGUARD-158**: Root-only mode shall NOT attempt `setcap`, `chattr +i`, or `dpkg-divert` during installation. The bootstrap script shall detect the absence of `setcap` and fall back to a simple copy + symlink installation.
 
 ### 16. Rust Project Structure
 
-- **REQ-GGUARD-160**: The Rust project shall reside at `projects/WORKSPACE-GUARD/` with the following layout:
+- **REQ-GGUARD-170**: The Rust project shall reside at `projects/WORKSPACE-GUARD/` with the following layout:
   ```
   projects/WORKSPACE-GUARD/
   ├── Cargo.toml
   ├── Cargo.lock
-  └── src/
-      ├── main.rs
-      ├── block.rs
-      ├── exec.rs
-      ├── args.rs
-      └── log.rs
+  ├── src/
+  │   ├── main.rs
+  │   ├── block.rs
+  │   ├── exec.rs
+  │   ├── args.rs
+  │   └── log.rs
+  └── tests/
+      └── integration_test.rs
   ```
-- **REQ-GGUARD-161**: The `Cargo.toml` shall specify: `edition = "2021"`, `panic = "abort"`, `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`.
-- **REQ-GGUARD-162**: The only allowed dependency is `libc = "0.2"`. No other crates shall be used.
+- **REQ-GGUARD-171**: The `Cargo.toml` shall specify: `edition = "2021"`, `panic = "abort"`, `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`.
+- **REQ-GGUARD-172**: The allowed dependencies are `libc = "0.2"` (required) and `caps = "0.5"` (optional, only for capability mode). No other crates shall be used.
+- **REQ-GGUARD-173**: The `Cargo.toml` shall define the following feature flags:
+  - `capability-mode` (default): enables `caps` dependency, cap checks
+  - `root-only`: skips cap checks, verifies `geteuid() == 0`
 
 ---
 
 ## Constraints
 
 - **Rust 1.75+** (minimum stable toolchain available on target systems).
-- **No external dependencies** beyond `libc`. No `clap` or argument parsing frameworks — manual `std::env::args_os()` parsing to minimise dependency surface.
+- **Dependencies**: `libc` (required), `caps` (optional, capability mode only). No `clap` or argument parsing frameworks — manual `std::env::args_os()` parsing to minimise dependency surface.
 - **Statically linked preferred** to avoid shared library injection vectors. If dynamically linked, only link against `libc`, `libgcc_s`, and `libm`.
-- **Target**: `x86_64-unknown-linux-musl` (static) or `x86_64-unknown-linux-gnu` (dynamic) depending on availability of musl toolchain.
+- **Target**: `x86_64-unknown-linux-musl` (static) or `x86_64-unknown-linux-gnu` (dynamic) or `aarch64-unknown-linux-gnu` depending on availability of musl toolchain and target architecture.
 - **No shell, no Python, no interpreter** — the binary is fully self-contained.
 - **Binary size target**: under 500KB stripped.
-- **Deployment is via `sudo make pre-req` only** — the `make install` flow shall NOT handle git or the git guard.
+- **Deployment is via `make build-guard` + `make install-guard`** — the `make install` flow shall NOT handle git or the git guard.
 
 ## Non-Requirements
 
-- **Contract check logic** — the AMI-CI contract checks remain in shell (`checks_quality.sh`). The guard only invokes them; it does not re-implement them.
-- **Pre-commit hook generation** — hook installation is handled by AMI-CI's `make install-hooks`.
-- **Tier/enforcement resolution** — `project_enforcement.yaml` parsing is done by the AMI-CI shell script, not by the guard binary.
+- **Contract check logic** — the WORKSPACE-CI contract checks remain in shell (`checks_quality.sh`). The guard only invokes them; it does not re-implement them.
+- **Pre-commit hook generation** — hook installation is handled by WORKSPACE-CI's `make install-hooks`.
+- **Tier/enforcement resolution** — `project_enforcement.yaml` parsing is done by the WORKSPACE-CI shell script, not by the guard binary.
 - **Interactive prompts** — the guard never prompts the user. It blocks or allows. User interaction is the responsibility of pre-commit hooks.
 - **Network operations** — the guard does not make any network requests. All checks are local.
 - **Windows/macOS support** — this binary is Linux-only. SUID has no equivalent on Windows, and macOS has different security semantics.
 - **Subcommand aliasing** — the guard does not support git aliases. Aliases are resolved by real git after the guard passes through.
-- **Custom block lists** — the destructive command list is hardcoded in the binary, not configurable at runtime. Configuration lives in AMI-CI's shell-based pre-commit hooks, not in the guard.
+- **Custom block lists** — the destructive command list is hardcoded in the binary, not configurable at runtime. Configuration lives in WORKSPACE-CI's shell-based pre-commit hooks, not in the guard.

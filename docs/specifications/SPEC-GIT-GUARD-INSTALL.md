@@ -183,16 +183,16 @@ chown root:root /usr/bin/git
 chmod 4555 /usr/bin/git
 ```
 
-### 5.5 Remove Legacy Bash Wrapper (PATH Bypass Mitigation)
+### 5.5 Remove Older Bash Wrapper (PATH Bypass Mitigation)
 
-The legacy bash wrapper at `.boot-linux/bin/git` provides a PATH-based bypass of the SUID guard. Since `.boot-linux/bin/` appears in PATH, running `git` would invoke the bash wrapper instead of `/usr/bin/git`.
+The older bash wrapper at `.boot-linux/bin/git` provides a PATH-based bypass of the SUID guard. Since `.boot-linux/bin/` appears in PATH, running `git` would invoke the bash wrapper instead of `/usr/bin/git`.
 
 The script removes this bypass:
 
 ```bash
 if [[ -f "$PROJECT_ROOT/.boot-linux/bin/git" ]]; then
     rm -f "$PROJECT_ROOT/.boot-linux/bin/git"
-    echo "[INFO] Removed legacy bash wrapper at .boot-linux/bin/git"
+    echo "[INFO] Removed older bash wrapper at .boot-linux/bin/git"
     echo "       Use /usr/bin/git (SUID guard) for all git operations"
 fi
 ```
@@ -217,7 +217,7 @@ This hook runs after every `dpkg` operation and warns if:
 - The `git` package is installed
 - But `/usr/bin/git.original` (the guard's marker) does not exist
 
-It does NOT silently reinstall the guard — only warns.
+It does NOT reinstall the guard on its own; it only warns.
 
 ### 5.7 Post-Installation Verification
 

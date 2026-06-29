@@ -11,9 +11,18 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[[bin]]
+name = "workspace-guard"
+path = "src/main.rs"
+
 [dependencies]
-caps = "0.5"
 libc = "0.2"
+caps = { version = "0.5", optional = true }
+
+[features]
+default = ["capability-mode"]
+capability-mode = ["caps"]
+root-only = []
 
 [dev-dependencies]
 tempfile = "3"

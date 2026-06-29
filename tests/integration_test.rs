@@ -8,7 +8,7 @@ use std::process::Command;
 
 fn guard_cmd() -> Command {
     let mut cmd = Command::new("cargo");
-    cmd.args(["run", "--release", "--"]);
+    cmd.args(["run", "--release", "--bin", "workspace-guard", "--"]);
     cmd
 }
 
@@ -50,7 +50,7 @@ fn guard_exits_missing_cap_on_blocked_cmd() {
 #[test]
 fn guard_compiles_release() {
     let output = Command::new("cargo")
-        .args(["build", "--release"])
+        .args(["build", "--release", "--bin", "workspace-guard"])
         .output()
         .expect("failed to build guard");
     assert!(

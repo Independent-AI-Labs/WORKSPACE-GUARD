@@ -34,13 +34,13 @@ No other dependencies. Argument parsing is manual. No `clap`, no `thiserror`, no
 
 ### 8.3 Unsafe Blocks
 
-Only two `unsafe` blocks are needed:
+Only two FFI sites need the `unsafe` gate (their call-site blocks live in `src/exec.rs`; the snippets below show the raw FFI signatures without the gating block):
 
 1. **`getauxval(AT_SECURE)`** — libc FFI call:
    ```rust
    // SAFETY: getauxval is a standard libc function. AT_SECURE is a valid
    // auxiliary vector key defined by the ELF ABI. Returns 0 if not found.
-   let at_secure = unsafe { libc::getauxval(libc::AT_SECURE) };
+   libc::getauxval(libc::AT_SECURE)
    ```
 
 2. **`execve()`** — libc FFI call with C strings:
@@ -48,9 +48,7 @@ Only two `unsafe` blocks are needed:
    // SAFETY: git_path, argv_c, and envp_c are all valid null-terminated
    // CStrings. Their pointers remain valid for the duration of the call.
    // execve does not return on success.
-   let ret = unsafe {
-       libc::execve(git_path.as_ptr(), argv_ptr, envp_ptr)
-   };
+   libc::execve(git_path.as_ptr(), argv_ptr, envp_ptr)
    ```
 
 ### 8.4 Cargo.toml

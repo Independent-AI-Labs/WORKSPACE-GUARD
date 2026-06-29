@@ -8,6 +8,8 @@ pub fn check_blocked(
     state: &ArgState,
     subcommand: &str,
     argv_os: &[OsString],
+    git_path: &str,
+    cwd: Option<&str>,
 ) -> Result<(), GuardError> {
     if subcommand == "config" {
         // Only block git config when setting a dangerous key.
@@ -23,16 +25,28 @@ pub fn check_blocked(
             });
         }
         // Check positional key argument (git config <key> <value>)
-        let positional_key: Option<String> = argv_os
-            .iter()
-            .skip(1)
-            .map(|a| a.to_string_lossy().into_owned())
-            .find(|s| s != "config" && !s.starts_with('-'));
-
-        if let Some(ref key) = positional_key {
-            if is_dangerous_config_key(key) {
+        // Also catches keys after value-taking options like --file <path> <key>
+        const VALUE_TAKING_OPTS: &[&str] = &["--file", "-f", "--blob", "--get-urlmatch"];
+        let mut skip_next = false;
+        for arg in argv_os.iter().skip(1) {
+            let s = arg.to_string_lossy();
+            if s == "config" {
+                continue;
+            }
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if s.starts_with('-') {
+                let opt = s.split('=').next().unwrap_or(&s);
+                if VALUE_TAKING_OPTS.contains(&opt) {
+                    skip_next = true;
+                }
+                continue;
+            }
+            if is_dangerous_config_key(&s) {
                 return Err(GuardError::Blocked {
-                    reason: format!("git config — dangerous config key: {}", key),
+                    reason: format!("git config — dangerous config key: {}", s),
                     hint: "Use a non-dangerous config key instead".into(),
                 });
             }
@@ -113,15 +127,17 @@ pub fn check_blocked(
 
     if subcommand == "push" {
         if let Ok(stat) = fs::read_to_string("/proc/self/stat") {
-            let fields: Vec<&str> = stat.split_whitespace().collect();
-            if fields.len() > 8 {
-                let pgrp: i32 = fields[4].parse().unwrap_or(0);
-                let tpgid: i32 = fields[7].parse().unwrap_or(0);
-                if tpgid > 0 && pgrp != tpgid {
-                    return Err(GuardError::Blocked {
-                        reason: "git push from background process".into(),
-                        hint: "Run 'git push' in the foreground so hooks can interact".into(),
-                    });
+            if let Some(pos) = stat.rfind(')') {
+                let fields: Vec<&str> = stat[pos + 1..].split_whitespace().collect();
+                if fields.len() > 4 {
+                    let pgrp: i32 = fields[1].parse().unwrap_or(0);
+                    let tpgid: i32 = fields[4].parse().unwrap_or(0);
+                    if tpgid > 0 && pgrp != tpgid {
+                        return Err(GuardError::Blocked {
+                            reason: "git push from background process".into(),
+                            hint: "Run 'git push' in the foreground so hooks can interact".into(),
+                        });
+                    }
                 }
             }
         }
@@ -136,21 +152,29 @@ pub fn check_blocked(
 
     if subcommand == "revert" {
         let target = extract_revert_target(argv_os);
-        if let Ok(branch) = get_current_branch() {
+        if let Ok(branch) = get_current_branch(git_path, cwd) {
             if branch != "HEAD" && !branch.is_empty() {
-                let exists = run_git(&[
-                    "git",
-                    "rev-parse",
-                    "--verify",
-                    &format!("{}^{{commit}}", target),
-                ]);
-                let on_remote = run_git(&[
-                    "git",
-                    "merge-base",
-                    "--is-ancestor",
-                    &target,
-                    &format!("origin/{}", branch),
-                ]);
+                let exists = run_git(
+                    git_path,
+                    cwd,
+                    &[
+                        "git",
+                        "rev-parse",
+                        "--verify",
+                        &format!("{}^{{commit}}", target),
+                    ],
+                );
+                let on_remote = run_git(
+                    git_path,
+                    cwd,
+                    &[
+                        "git",
+                        "merge-base",
+                        "--is-ancestor",
+                        &target,
+                        &format!("origin/{}", branch),
+                    ],
+                );
                 if exists.success() && !on_remote.success() {
                     return Err(GuardError::Blocked {
                         reason: format!(
@@ -165,14 +189,14 @@ pub fn check_blocked(
         }
     }
 
-    if subcommand == "pull" && is_protected_branch() && !state.safe_pull_flag {
+    if subcommand == "pull" && is_protected_branch(git_path, cwd) && !state.safe_pull_flag {
         return Err(GuardError::Blocked {
             reason: "git pull on protected branch without --ff-only or --rebase".into(),
             hint: "Use 'git pull --ff-only' or 'git pull --rebase' to avoid merge commits".into(),
         });
     }
 
-    if subcommand == "merge" && is_protected_branch() && !state.has_ff_only {
+    if subcommand == "merge" && is_protected_branch(git_path, cwd) && !state.has_ff_only {
         return Err(GuardError::Blocked {
             reason: "git merge on protected branch without --ff-only".into(),
             hint: "Use 'git merge --ff-only' to avoid creating merge commits".into(),
@@ -199,19 +223,22 @@ pub fn check_blocked(
     Ok(())
 }
 
-fn git_cmd() -> std::process::Command {
-    let mut cmd = std::process::Command::new("/usr/bin/git.original");
+fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
+    let mut cmd = std::process::Command::new(git_path);
     cmd.env_clear()
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env("HOME", "/")
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "safe.directory")
         .env("GIT_CONFIG_VALUE_0", "*");
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
     cmd
 }
 
-fn get_current_branch() -> Result<String, ()> {
-    let output = git_cmd()
+fn get_current_branch(git_path: &str, cwd: Option<&str>) -> Result<String, ()> {
+    let output = git_cmd(git_path, cwd)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .map_err(|_| ())?;
@@ -222,7 +249,7 @@ fn get_current_branch() -> Result<String, ()> {
     }
 }
 
-fn is_protected_branch() -> bool {
+fn is_protected_branch(git_path: &str, cwd: Option<&str>) -> bool {
     const PROTECTED: &[&str] = &[
         "main",
         "master",
@@ -231,7 +258,7 @@ fn is_protected_branch() -> bool {
         "staging",
         "release",
     ];
-    match get_current_branch() {
+    match get_current_branch(git_path, cwd) {
         Ok(ref b) => {
             let lower = b.to_lowercase();
             PROTECTED.contains(&lower.as_str()) || lower.starts_with("release/")
@@ -250,8 +277,8 @@ fn extract_revert_target(argv_os: &[OsString]) -> String {
     "HEAD".to_string()
 }
 
-fn run_git(args: &[&str]) -> std::process::ExitStatus {
-    git_cmd()
+fn run_git(git_path: &str, cwd: Option<&str>, args: &[&str]) -> std::process::ExitStatus {
+    git_cmd(git_path, cwd)
         .args(&args[1..])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

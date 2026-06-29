@@ -4,13 +4,13 @@
 # Exists permanently at repo root so every reviewer sees it on every PR.
 #
 # Schema:
-#   hook       -- id from required_hooks.yaml. Must be a non-mandatory hook.
-#   reason     -- minimum 20 characters.
-#   paths      -- list of path prefixes (>=1 entry). Whole-hook skips not allowed.
-#   added_by   -- email of the person adding the exception.
-#   ticket     -- optional issue/PR ref.
+#   hook       : id from required_hooks.yaml. Must be a non-mandatory hook.
+#   reason     : minimum 20 characters.
+#   paths      : list of path prefixes (>=1 entry). Whole-hook skips not allowed.
+#   added_by   : email of the person adding the exception.
+#   ticket     : optional issue/PR ref.
 #
-# Empty exceptions list (exceptions: []) is allowed -- fully compliant.
+# Empty exceptions list (exceptions: []) is allowed: fully compliant.
 
 version: 1
 project: WORKSPACE-GUARD

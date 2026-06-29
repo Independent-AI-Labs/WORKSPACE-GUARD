@@ -5,6 +5,34 @@ policies on destructive and history-rewriting operations. Uses **file
 capabilities** (`CAP_DAC_OVERRIDE`) rather than SUID — more granular, correctly
 handles `NO_NEW_PRIVS` contexts, and avoids the `geteuid() != getuid()` trap.
 
+For environments where file capabilities are unavailable (PRoot, containers
+running as root, user namespaces), a **root-only mode** provides a soft barrier
+with the same policy engine but reduced bypass resistance.
+
+## Deployment Modes
+
+| Mode | Feature Flag | Enforcement Level | Requires | Suitable For |
+|------|-------------|-------------------|----------|-------------|
+| Capability (default) | `--features capability-mode` (default) | Hard barrier | `setcap`, `chattr`, `dpkg-divert` | Production, non-root users |
+| Root-only | `--features root-only` | Soft barrier | Root only | PRoot, containers, CI agents as root |
+
+### Build Commands
+
+```bash
+# Capability mode (default — production)
+cargo build --release
+# or:
+make build-guard
+
+# Root-only mode (PRoot, containers)
+cargo build --release --no-default-features --features root-only
+# or (auto-detected by bootstrap script):
+make build-guard BUILD_MODE=root-only
+```
+
+See [docs/ROOT-ONLY-MODE.md](docs/ROOT-ONLY-MODE.md) for the root-only threat
+model and limitations.
+
 ## Why
 
 Shell-based git guards (bash wrappers, pre-commit hooks) are readable, editable,
@@ -24,6 +52,8 @@ The user cannot bypass the guard: they cannot read, modify, or directly execute
 `/usr/bin/git.original`, and the compiled binary logic is opaque.
 
 ## Architecture
+
+### Capability Mode (default)
 
 ```
 User: git push --force
@@ -131,12 +161,14 @@ the guard handles authorization.
 Before `git commit` and `git push`, the guard:
 1. Finds the git repository root via `git.original rev-parse --show-toplevel`
 2. Walks up the directory tree to locate the workspace root (marked by
-   `.boot-linux/`, `projects/CI/`, and `ami/scripts/utils/git-guard`)
-3. Checks for **vendored tier bypass** — reads `ami/config/project_enforcement.yaml`,
-   parses exemptions manually (no YAML dependency), blocks if the current project
-   is exempted as `"vendored"` (quality gates disabled)
+   `.boot-linux/`, `projects/CI/`, and `workspace/scripts/utils/git-guard`)
+3. Checks for **vendored tier bypass** — reads
+   `workspace/config/project_enforcement.yaml`, parses exemptions manually
+   (no YAML dependency), blocks if the current project is exempted as
+   `"vendored"` (quality gates disabled)
 4. Shell-execs `<workspace-root>/projects/CI/lib/checks_quality.sh` with
-   environment variables (`AMI_GGUARD_CMD`, `AMI_GGUARD_REPO_ROOT`, etc.)
+   environment variables (`WORKSPACE_GGUARD_CMD`, `WORKSPACE_GGUARD_REPO_ROOT`,
+   `WORKSPACE_GGUARD_WORKSPACE_ROOT`)
 5. Returns exit code 4 on contract failure
 
 Delegating to a shell script avoids re-implementing YAML parsing and CI policy
@@ -168,43 +200,60 @@ stderr is redirected.
 
 ## Deployment
 
+### Capability Mode (production)
+
 ```bash
-# From the workspace root:
-sudo make pre-req
+# From the WORKSPACE-CI repo root:
+make build-guard        # Build the guard binary
+make install-guard      # Install (requires root: setcap, dpkg-divert, chattr)
+make check-guard        # Verify installation
 
 # What happens:
 #   1. Build the Rust binary (release: LTO, single codegen unit, abort-on-panic, stripped)
 #   2. Relocate /usr/bin/git → /usr/bin/git.original (0700 root:root)
-#   3. Install guard as /usr/bin/git (4555, file capability CAP_DAC_OVERRIDE)
+#   3. Install guard as /usr/bin/git (0755, file capability CAP_DAC_OVERRIDE)
 #   4. Set up dpkg-divert to protect from apt overwrites
-#   5. Attempt chattr +i on both binaries (skipped if >30s — eg. overlayfs)
+#   5. Attempt chattr +i on both binaries (skipped if unavailable)
 #   6. Register apt post-invoke hook at /etc/apt/apt.conf.d/99workspace-guard
-#   7. Restrict alternate git binaries (/snap/bin/git, /usr/local/bin/git, flatpak)
+#   7. Restrict alternate git binaries (/snap/bin/git, /usr/local/bin/git)
 #   8. Create /var/log/workspace-guard/ (1777) for system-wide audit trail
 
 # Uninstall:
-sudo make pre-req --uninstall-workspace-guard
+make uninstall-guard
+```
 
-# Verify:
-sudo make pre-req --check-workspace-guard
+### Root-Only Mode (PRoot, containers)
+
+```bash
+# The bootstrap script auto-detects root-only mode when setcap is unavailable:
+make build-guard
+make install-guard
+
+# Manual:
+cargo build --release --no-default-features --features root-only
+cp target/release/workspace-guard /usr/bin/git.guard
+mv /usr/bin/git /usr/bin/git.original
+ln -s /usr/bin/git.guard /usr/bin/git
 ```
 
 ## Development
 
 ```bash
-cargo build                      # Debug
-cargo build --release            # Release (opt-level=z, LTO, abort-on-panic, stripped)
-cargo test                       # 73 unit + 3 integration tests
-cargo fmt --all -- --check       # Format check
-cargo clippy --workspace --all-targets -- -D warnings  # Strict lint
-make test                        # Full workspace test suite (cargo test + integration)
+cargo build                                              # Debug (capability-mode)
+cargo build --no-default-features --features root-only   # Debug (root-only)
+cargo build --release                                    # Release (opt-level=z, LTO, abort-on-panic, stripped)
+cargo test                                               # 73 unit + 3 integration tests
+cargo test --no-default-features --features root-only    # 72 unit + 3 integration tests
+cargo fmt --all -- --check                               # Format check
+cargo clippy --workspace --all-targets -- -D warnings    # Strict lint
+make test                                                # Full workspace test suite (cargo test + integration)
 ```
 
 ## Project Structure
 
 ```
 WORKSPACE-GUARD/
-├── Cargo.toml                  # Deps: libc (FFI), caps (Linux capabilities)
+├── Cargo.toml                  # Deps: libc (FFI), caps (optional, capability-mode)
 ├── Cargo.lock                  # Locked dependency tree
 ├── Makefile                    # Build, test, lint, compliance (includes CI contract)
 ├── .pre-commit-config.yaml     # 14 hooks: Rust + WORKSPACE-CI quality gates
@@ -214,12 +263,21 @@ WORKSPACE-GUARD/
 │   ├── banned_words_exceptions.yaml    # Allows `unsafe` in FFI code
 │   ├── coverage_thresholds.yaml        # min_coverage: 1 (placeholder)
 │   └── sensitive_files_exceptions.yaml # Allows .cargo/config.toml
+├── docs/
+│   ├── ROOT-ONLY-MODE.md              # Root-only threat model and limitations
+│   ├── requirements/
+│   │   └── REQ-GIT-GUARD.md           # Requirements document
+│   └── specifications/
+│       ├── SPEC-GIT-GUARD.md          # Architecture spec
+│       ├── SPEC-GIT-GUARD-IMPL.md     # Implementation spec
+│       ├── SPEC-GIT-GUARD-INSTALL.md  # Installation spec
+│       └── SPEC-GIT-GUARD-HARDENING.md # System hardening spec
 ├── src/
 │   ├── main.rs                 # Entry point, run(), config tables, DP glob matcher
 │   ├── args.rs                 # ArgState parser, subcommand abbreviation, null-byte check
 │   ├── block.rs                # 17-rule policy engine, proc/self/stat background detection
 │   ├── exec.rs                 # File cap checks, execve, env construct, CI contract
-│   └── log.rs                  # block() diverging fn, audit logging, /dev/tty output
+│   ├── log.rs                  # block() diverging fn, audit logging, /dev/tty output
 ├── tests/
 │   └── integration_test.rs     # Non-SUID operations: cap check, compile, blocked cmd
 └── README.md
@@ -247,6 +305,10 @@ WORKSPACE-GUARD/
     panic=abort, strip=true` for smallest attack surface
 12. **2-second subprocess timeout**: Prevents hung git subprocesses from
     blocking the guard indefinitely
+13. **Log symlink protection**: `O_NOFOLLOW` on all log file opens prevents
+    symlink attacks on `~/.workspace-guard.log`
+14. **HOME spoofing prevention**: Home directory resolved via `getpwuid(getuid())`,
+    never from `$HOME` environment variable
 
 ## Subcommand Abbreviation
 
@@ -268,10 +330,11 @@ same SUID/caps + compiled policy pattern. The initial PoC targets `git`, but
 the architecture supports extending to other binaries (ssh, rsync, make, etc.)
 by creating separate guard crates with their own allow/block lists.
 
-The binary is ~1,600 lines of Rust across 5 modules. The only dependencies
-are `libc` (FFI: fork, execve, waitpid, getuid, setrlimit, localtime_r) and
-`caps` (Linux capability management). No YAML, HTTP, or async dependencies —
-the binary stays small and auditable.
+The binary is ~1,600 lines of Rust across 5 modules (guard). The only
+dependencies are `libc` (FFI: fork, execve, waitpid, getuid, setrlimit,
+localtime_r) and `caps` (optional, Linux capability management — only needed
+for capability mode). No YAML, HTTP, or async dependencies — the binary
+stays small and auditable.
 
 ## License
 

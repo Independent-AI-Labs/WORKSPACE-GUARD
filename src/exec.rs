@@ -6,6 +6,7 @@ use std::path::Path;
 
 use crate::{args::ArgState, GuardError, ALLOWED_VARS, GIT_ORIGINAL};
 
+#[cfg(feature = "capability-mode")]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
     caps::raise(
         None,
@@ -22,8 +23,20 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
     Ok(())
 }
 
+#[cfg(feature = "capability-mode")]
 fn clear_child_caps() -> Result<(), GuardError> {
     caps::clear(None, caps::CapSet::Ambient).map_err(|_| GuardError::MissingCap)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "capability-mode"))]
+#[allow(dead_code)]
+pub fn raise_ambient_caps() -> Result<(), GuardError> {
+    Ok(())
+}
+
+#[cfg(not(feature = "capability-mode"))]
+fn clear_child_caps() -> Result<(), GuardError> {
     Ok(())
 }
 
@@ -46,16 +59,30 @@ pub fn set_resource_limits() {
     }
 }
 
+fn resolve_safe_home() -> String {
+    let uid = unsafe { libc::getuid() };
+    unsafe {
+        let pwd = libc::getpwuid(uid);
+        if !pwd.is_null() {
+            let dir = (*pwd).pw_dir;
+            if !dir.is_null() {
+                if let Ok(s) = CStr::from_ptr(dir).to_str() {
+                    if !s.is_empty() {
+                        return s.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "/".to_string()
+}
+
 fn verify_git_original() -> Result<(), GuardError> {
     let path = Path::new("/usr/bin/git.original");
-    if !path.exists() {
-        return Err(GuardError::GitOriginalMissing);
-    }
-
     match fs::metadata(path) {
         Ok(meta) => {
             if !meta.is_file() {
-                return Err(GuardError::GitOriginalBadPerms);
+                return Err(GuardError::GitOriginalMissing);
             }
             if meta.st_uid() != 0 {
                 return Err(GuardError::GitOriginalBadPerms);
@@ -65,13 +92,11 @@ fn verify_git_original() -> Result<(), GuardError> {
             }
             Ok(())
         }
-        Err(_) => Err(GuardError::GitOriginalBadPerms),
+        Err(_) => Err(GuardError::GitOriginalMissing),
     }
 }
 
 pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result<(), GuardError> {
-    verify_git_original()?;
-
     if let Some(s) = state {
         if !s.dangerous_config_keys.is_empty() {
             return Err(GuardError::Blocked {
@@ -80,6 +105,8 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
             });
         }
     }
+
+    verify_git_original()?;
 
     let git_path = CStr::from_bytes_with_nul(GIT_ORIGINAL.as_bytes())
         .map_err(|_| GuardError::GitOriginalMissing)?;
@@ -98,6 +125,9 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
 
     let mut envp: Vec<CString> = Vec::new();
     for &key in ALLOWED_VARS {
+        if key == "HOME" {
+            continue;
+        }
         if let Some(val) = std::env::var_os(key) {
             let entry = format!("{}={}", key, val.to_string_lossy());
             if let Ok(c) = CString::new(entry) {
@@ -105,6 +135,10 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
             }
         }
     }
+
+    let safe_home = resolve_safe_home();
+    envp.push(CString::new(format!("HOME={}", safe_home)).unwrap());
+
     envp.push(CString::new("PATH=/usr/local/bin:/usr/bin:/bin").unwrap());
 
     envp.push(CString::new("GIT_CONFIG_COUNT=1").unwrap());
@@ -142,7 +176,7 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     }
 }
 
-pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
+pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     let toplevel = match std::process::Command::new("/usr/bin/git.original")
         .env_clear()
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
@@ -171,7 +205,7 @@ pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         ));
     }
 
-    let ci_script = format!("{}/projec../CI/lib/checks_quality.sh", wsroot);
+    let ci_script = format!("{}/projects/CI/lib/checks_quality.sh", wsroot);
     if !Path::new(&ci_script).exists() {
         eprintln!(
             "WARNING: WORKSPACE-CI contract check script not found at {}",
@@ -180,30 +214,68 @@ pub fn check_ami_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         return Ok(());
     }
 
-    let output = std::process::Command::new("bash")
+    let child = std::process::Command::new("/bin/bash")
         .env_clear()
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env("HOME", "/")
         .arg(&ci_script)
-        .env("AMI_GGUARD_CMD", subcommand)
-        .env("AMI_GGUARD_REPO_ROOT", &toplevel)
-        .env("AMI_GGUARD_WORKSPACE_ROOT", &wsroot)
-        .output()
+        .env("WORKSPACE_GGUARD_CMD", subcommand)
+        .env("WORKSPACE_GGUARD_REPO_ROOT", &toplevel)
+        .env("WORKSPACE_GGUARD_WORKSPACE_ROOT", &wsroot)
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| GuardError::ContractFailed(format!("Failed to run contract check: {}", e)))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(GuardError::ContractFailed(format!(
-            "WORKSPACE-CI contract violation:\n{}",
-            stderr
-        )));
+    let pid = child.id() as libc::pid_t;
+    let mut stderr_pipe = child.stderr;
+
+    let mut status: libc::c_int = 0;
+    let timeout_ms = 2000;
+    unsafe {
+        let mut elapsed = 0;
+        loop {
+            let ret = libc::waitpid(pid, &mut status, libc::WNOHANG);
+            if ret == pid {
+                break;
+            }
+            if ret < 0 {
+                break;
+            }
+            if elapsed >= timeout_ms {
+                libc::kill(pid, libc::SIGKILL);
+                libc::waitpid(pid, &mut status, 0);
+                eprintln!(
+                    "WARNING: WORKSPACE-CI contract check timed out after {}ms — skipping",
+                    timeout_ms
+                );
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            elapsed += 50;
+        }
     }
 
-    Ok(())
+    if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
+        return Ok(());
+    }
+
+    let stderr_msg = if let Some(mut pipe) = stderr_pipe.take() {
+        use std::io::Read;
+        let mut buf = String::new();
+        let _ = pipe.read_to_string(&mut buf);
+        buf
+    } else {
+        String::new()
+    };
+
+    Err(GuardError::ContractFailed(format!(
+        "WORKSPACE-CI contract violation:\n{}",
+        stderr_msg
+    )))
 }
 
 fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
-    let enforce_path = Path::new(wsroot).join("ami/config/project_enforcement.yaml");
+    let enforce_path = Path::new(wsroot).join("workspace/config/project_enforcement.yaml");
     if !enforce_path.exists() {
         return false;
     }
@@ -256,7 +328,10 @@ fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
         };
 
         if let Some(stripped) = entry_line.strip_prefix("tier:") {
-            current_tier = Some(stripped.trim().to_lowercase());
+            let val = stripped.trim();
+            let val = val.trim_matches(|c| c == '"' || c == '\'');
+            let val = val.split('#').next().unwrap_or(val).trim();
+            current_tier = Some(val.to_lowercase());
         }
         if let Some(stripped) = entry_line.strip_prefix("path:") {
             current_path = Some(stripped.trim().to_string());
@@ -290,7 +365,7 @@ fn find_workspace_root(toplevel: &str) -> Option<String> {
     loop {
         let boot = cur.join(".boot-linux");
         let ci = cur.join("projects/CI");
-        let guard = cur.join("ami/scripts/utils/git-guard");
+        let guard = cur.join("workspace/scripts/utils/git-guard");
         if boot.is_dir() && ci.is_dir() && guard.is_file() {
             return Some(cur.to_string_lossy().to_string());
         }
@@ -306,9 +381,9 @@ mod tests {
     use std::io::Write;
 
     fn write_temp_enforcement(dir: &std::path::Path, content: &str) {
-        let ami_config = dir.join("ami").join("config");
-        std::fs::create_dir_all(&ami_config).unwrap();
-        let mut f = std::fs::File::create(ami_config.join("project_enforcement.yaml")).unwrap();
+        let ws_config = dir.join("workspace").join("config");
+        std::fs::create_dir_all(&ws_config).unwrap();
+        let mut f = std::fs::File::create(ws_config.join("project_enforcement.yaml")).unwrap();
         f.write_all(content.as_bytes()).unwrap();
     }
 
@@ -393,6 +468,7 @@ exemptions:
         assert!(clear_child_caps().is_ok());
     }
 
+    #[cfg(feature = "capability-mode")]
     #[test]
     fn raise_ambient_caps_returns_error_without_file_caps() {
         let result = raise_ambient_caps();

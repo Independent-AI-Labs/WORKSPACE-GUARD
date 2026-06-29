@@ -200,14 +200,22 @@ fn glob_match_segments(segs: &[&str], pats: &[&str]) -> bool {
 }
 
 pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
+pub const GIT_ORIGINAL_PATH: &str = "/usr/bin/git.original";
 pub const LOG_FILE: &str = ".workspace-guard.log";
 
 fn main() {
-    let result = run();
+    let argv_os: Vec<OsString> = std::env::args_os().collect();
+    let cmd_str: String = argv_os
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let result = run(&argv_os);
 
     match result {
         Ok(()) => {}
-        Err(GuardError::Blocked { reason, hint }) => block(&reason, &hint),
+        Err(GuardError::Blocked { reason, hint }) => block(&reason, &hint, &cmd_str),
         Err(GuardError::ContractFailed(msg)) => {
             eprintln!("{}", msg);
             process::exit(4);
@@ -225,7 +233,27 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), GuardError> {
+#[cfg(feature = "root-only")]
+fn check_privileges() -> Result<(), GuardError> {
+    let euid = unsafe { libc::geteuid() };
+    if euid != 0 {
+        eprintln!(
+            "FATAL: root-only mode requires euid 0 (got {}). \
+             Build without --features root-only for capability-based mode.",
+            euid
+        );
+        process::exit(2);
+    }
+    eprintln!(
+        "[workspace-guard] WARNING: running in root-only mode (soft barrier). \
+         Direct execution of /usr/bin/git.original bypasses this guard. \
+         See docs/ROOT-ONLY-MODE.md for threat model and limitations."
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "root-only"))]
+fn check_privileges() -> Result<(), GuardError> {
     if !caps::has_cap(
         None,
         caps::CapSet::Effective,
@@ -235,13 +263,16 @@ fn run() -> Result<(), GuardError> {
     {
         return Err(GuardError::MissingCap);
     }
-    exec::set_resource_limits();
     exec::raise_ambient_caps()?;
+    Ok(())
+}
 
-    let argv_os: Vec<OsString> = std::env::args_os().collect();
+fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
+    check_privileges()?;
+    exec::set_resource_limits();
 
     if argv_os.len() <= 1 {
-        return exec::execve_real_git(&argv_os, None);
+        return exec::execve_real_git(argv_os, None);
     }
 
     let argv: Vec<&[u8]> = argv_os.iter().map(|a| a.as_bytes()).collect();
@@ -250,15 +281,15 @@ fn run() -> Result<(), GuardError> {
     let state = args::parse_args(&argv)?;
 
     if let Some(ref sub) = state.subcommand {
-        block::check_blocked(&state, sub, &argv_os)?;
+        block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
 
         if sub == "commit" || sub == "push" || sub == "cherry-pick" || sub == "apply" || sub == "am"
         {
-            exec::check_ami_ci_contract(sub)?;
+            exec::check_workspace_ci_contract(sub)?;
         }
     }
 
-    exec::execve_real_git(&argv_os, Some(&state))
+    exec::execve_real_git(argv_os, Some(&state))
 }
 
 #[cfg(test)]

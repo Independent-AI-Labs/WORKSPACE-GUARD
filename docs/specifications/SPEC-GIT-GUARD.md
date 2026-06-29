@@ -41,7 +41,7 @@ The guard is a **thin SUID-root wrapper**. Its sole purpose is to:
 3. If safe, `execve()` the real git binary.
 4. If unsafe, block with an audit log entry.
 
-It does NOT re-implement git logic. It does NOT re-implement AMI-CI contract checks. It delegates contract verification to the existing `checks_quality.sh` script.
+It does NOT re-implement git logic. It does NOT re-implement WORKSPACE-CI contract checks. It delegates contract verification to the existing `checks_quality.sh` script.
 
 ### Key Design Principle
 
@@ -403,13 +403,12 @@ let argv_ptrs: Vec<*const libc::c_char> = argv_c.iter()
 
 // SAFETY: All pointers are valid null-terminated C strings.
 // execve replaces the process image and does not return on success.
-let ret = unsafe {
-    libc::execve(
-        GIT_ORIGINAL_PATH.as_ptr(),
-        argv_ptrs.as_ptr(),
-        envp_ptrs.as_ptr(),
-    )
-};
+// (The call site in src/exec.rs wraps this in the required unsafe block.)
+libc::execve(
+    GIT_ORIGINAL_PATH.as_ptr(),
+    argv_ptrs.as_ptr(),
+    envp_ptrs.as_ptr(),
+)
 
 // If execve returns, it failed
 eprintln!("FATAL: execve failed: {}", std::io::Error::last_os_error());
@@ -422,32 +421,32 @@ This approach has two advantages over `remove_var()`:
 
 ---
 
-## 6. AMI-CI Contract Enforcement
+## 6. WORKSPACE-CI Contract Enforcement
 
 ### 6.1 Workspace Detection
 
-The guard determines if the current repo is inside an AMI workspace by:
+The guard determines if the current repo is inside an WORKSPACE workspace by:
 1. Getting the repo's top-level directory (via `rev-parse --show-toplevel` subprocess, or scanning for `.git`).
 2. Walking up from that directory to `/`, checking each ancestor for:
    - `.boot-linux/` directory exists
-   - `projec../CI/` directory exists
-   - `ami/scripts/utils/git-guard` file exists
+   - `projects/CI/` directory exists
+   - `workspace/scripts/utils/git-guard` file exists
 
 The first ancestor with all three is the workspace root. If none found, skip contract enforcement.
 
 ### 6.2 Contract Check Delegation
 
-When the repo is in an AMI workspace and the subcommand is `commit` or `push`, the guard runs:
+When the repo is in an WORKSPACE workspace and the subcommand is `commit` or `push`, the guard runs:
 
 ```bash
-bash /path/to/projec../CI/lib/checks_quality.sh
+bash /path/to/projects/CI/lib/checks_quality.sh
 ```
 
 With environment variables:
 ```
-AMI_GGUARD_CMD=<commit|push>
-AMI_GGUARD_REPO_ROOT=<repo top-level>
-AMI_GGUARD_WORKSPACE_ROOT=<workspace root>
+WORKSPACE_GGUARD_CMD=<commit|push>
+WORKSPACE_GGUARD_REPO_ROOT=<repo top-level>
+WORKSPACE_GGUARD_WORKSPACE_ROOT=<workspace root>
 ```
 
 The script outputs violations to stderr. If it exits non-zero, the guard blocks with exit code 4 and passes through the script's stderr.
@@ -462,7 +461,7 @@ The contract checks involve:
 
 Re-implementing this in Rust would:
 1. Add YAML parsing dependency (violates the "no external dependencies" constraint)
-2. Duplicate logic that already exists and is maintained in AMI-CI
+2. Duplicate logic that already exists and is maintained in WORKSPACE-CI
 3. Create two sources of truth for contract rules
 
 Delegation keeps the guard binary thin and delegates policy to the policy engine.
@@ -483,7 +482,7 @@ If `checks_quality.sh` is not found at the expected path, the guard emits a warn
 
 Example:
 ```
-2026-05-18T14:32:01+00:00|/home/ami/projects/AMI-PORTAL|git reset|destructive subcommand|uid=1000
+2026-05-18T14:32:01+00:00|${HOME}/projects/AMI-PORTAL|git reset|destructive subcommand|uid=1000
 ```
 
 ### 7.2 Log Location
@@ -494,7 +493,7 @@ Example:
 
 When logging `-c key=value` blocks, only the key is logged:
 ```
-2026-05-18T14:32:01+00:00|/home/ami|git -c core.hooksPath=...|dangerous config key|uid=1000
+2026-05-18T14:32:01+00:00|${HOME}|git -c core.hooksPath=...|dangerous config key|uid=1000
 ```
 
 The value portion is replaced with `...` to avoid logging potentially sensitive paths or commands.

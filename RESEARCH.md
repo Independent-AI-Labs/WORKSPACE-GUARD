@@ -134,7 +134,7 @@ The file on disk is **never modified**. Traditional integrity checks (`sha256sum
 
 Published at lowlevel.re (January 2026). Demonstrates that **Full RELRO does not protect against dynamic linker metadata corruption**. By writing controlled data into a loaded DSO's `link_map` structure, an attacker can redirect `_dl_fixup()` resolution to arbitrary code.
 
-**Key insight:** Full RELRO makes GOT read-only and disables lazy binding. But at runtime, the loader's internal `link_map` structs remain writable, and the loader implicitly trusts its own metadata.
+**Key insight:** Full RELRO makes GOT read-only and disables deferred (on-demand) symbol binding. But at runtime, the loader's internal `link_map` structs remain writable, and the loader implicitly trusts its own metadata.
 
 ### 4.2 Attack Requirements
 
@@ -151,7 +151,7 @@ Published at lowlevel.re (January 2026). Demonstrates that **Full RELRO does not
 
 ### 4.4 Impact on WORKSPACE-GUARD
 
-- Guard is a Rust binary with no dynamic symbol resolution after startup. No `dlopen()`, no lazy binding.
+- Guard is a Rust binary with no dynamic symbol resolution after startup. No `dlopen()`, no deferred (on-demand) symbol binding.
 - musl-static builds eliminate `ld.so` entirely — **immune to ret2dso**.
 - gcc-dynamic builds still use `ld.so`. However:
   - Guard's code path is linear: AT_SECURE → parse → execve. No loops, no user interaction, no function pointer tables.
