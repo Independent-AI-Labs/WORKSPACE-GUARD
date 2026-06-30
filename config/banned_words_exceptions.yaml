@@ -45,7 +45,7 @@
 version: 1
 exceptions:
   - pattern: 'unsafe\s*\{'
-    paths: ['src/main.rs', 'src/exec.rs', 'src/log.rs']
+    paths: ['src/main.rs', 'src/exec.rs', 'src/exec_tests.rs', 'src/log.rs']
 
   - pattern: ' -- '
     paths: ['.pre-commit-config.yaml', 'Makefile', 'README.md', 'docs/specifications/SPEC-GIT-GUARD.md', 'config/banned_words_exceptions.yaml']

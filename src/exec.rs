@@ -90,9 +90,24 @@ fn verify_git_original() -> Result<(), GuardError> {
             if meta.st_mode() & 0o777 != 0o700 {
                 return Err(GuardError::GitOriginalBadPerms);
             }
+            if is_guard_binary(path) {
+                eprintln!(
+                    "FATAL: /usr/bin/git.original is the guard itself, not real git. \
+                     Restore: apt install --reinstall git"
+                );
+                return Err(GuardError::GitOriginalMissing);
+            }
             Ok(())
         }
         Err(_) => Err(GuardError::GitOriginalMissing),
+    }
+}
+
+fn is_guard_binary(path: &Path) -> bool {
+    let sentinel = b"workspace-guard";
+    match fs::read(path) {
+        Ok(bytes) => bytes.windows(sentinel.len()).any(|w| w == sentinel),
+        Err(_) => false,
     }
 }
 
@@ -376,127 +391,5 @@ fn find_workspace_root(toplevel: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn write_temp_enforcement(dir: &std::path::Path, content: &str) {
-        let ws_config = dir.join("workspace").join("config");
-        std::fs::create_dir_all(&ws_config).unwrap();
-        let mut f = std::fs::File::create(ws_config.join("project_enforcement.yaml")).unwrap();
-        f.write_all(content.as_bytes()).unwrap();
-    }
-
-    #[test]
-    fn vendored_tier_not_bypassed_for_safe_tier() {
-        let dir = tempfile::tempdir().unwrap();
-        let content = r#"
-version: 1
-defaults:
-  tier: strict
-exemptions:
-  - path: projects/WORKSPACE-GUARD/
-    tier: strict
-    reason: "test"
-"#;
-        write_temp_enforcement(dir.path(), content);
-        let wsroot = dir.path().to_string_lossy().to_string();
-        let toplevel = format!("{}/projects/WORKSPACE-GUARD", wsroot);
-        assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
-    }
-
-    #[test]
-    fn vendored_tier_bypass_detected() {
-        let dir = tempfile::tempdir().unwrap();
-        let content = r#"
-version: 1
-defaults:
-  tier: strict
-exemptions:
-  - path: projects/WORKSPACE-GUARD/
-    tier: vendored
-    reason: "test vendored bypass"
-"#;
-        write_temp_enforcement(dir.path(), content);
-        let wsroot = dir.path().to_string_lossy().to_string();
-        let toplevel = format!("{}/projects/WORKSPACE-GUARD", wsroot);
-        assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
-    }
-
-    #[test]
-    fn vendored_tier_no_exemptions() {
-        let dir = tempfile::tempdir().unwrap();
-        let content = r#"
-version: 1
-defaults:
-  tier: strict
-"#;
-        write_temp_enforcement(dir.path(), content);
-        let wsroot = dir.path().to_string_lossy().to_string();
-        let toplevel = format!("{}/projects/other", wsroot);
-        assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
-    }
-
-    #[test]
-    fn vendored_tier_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let wsroot = dir.path().to_string_lossy().to_string();
-        let toplevel = format!("{}/projects/WORKSPACE-GUARD", wsroot);
-        assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
-    }
-
-    #[test]
-    fn vendored_tier_path_prefix_match() {
-        let dir = tempfile::tempdir().unwrap();
-        let content = r#"
-version: 1
-defaults:
-  tier: strict
-exemptions:
-  - path: projects/WORKSPACE-GUARD/
-    tier: vendored
-    reason: "test"
-"#;
-        write_temp_enforcement(dir.path(), content);
-        let wsroot = dir.path().to_string_lossy().to_string();
-        let toplevel = format!("{}/projects/WORKSPACE-GUARD/subdir", wsroot);
-        assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
-    }
-
-    #[test]
-    fn clear_child_caps_succeeds() {
-        assert!(clear_child_caps().is_ok());
-    }
-
-    #[cfg(feature = "capability-mode")]
-    #[test]
-    fn raise_ambient_caps_returns_error_without_file_caps() {
-        let result = raise_ambient_caps();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn verify_git_original_returns_error_when_missing() {
-        if std::path::Path::new("/usr/bin/git.original").exists() {
-            return;
-        }
-        assert!(verify_git_original().is_err());
-    }
-
-    #[test]
-    fn fork_child_clears_and_exits() {
-        let pid = unsafe { libc::fork() };
-        assert!(pid >= 0, "fork should succeed");
-        if pid == 0 {
-            let _ = clear_child_caps();
-            std::process::exit(0);
-        } else {
-            let mut status: libc::c_int = 0;
-            unsafe {
-                libc::waitpid(pid, &mut status, 0);
-            }
-            assert!(libc::WIFEXITED(status));
-            assert_eq!(libc::WEXITSTATUS(status), 0);
-        }
-    }
-}
+#[path = "exec_tests.rs"]
+mod tests;
