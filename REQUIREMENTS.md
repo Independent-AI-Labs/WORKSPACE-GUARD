@@ -20,7 +20,7 @@ The core insight: if the *real* binary is mode 0700 root:root and the *guard* bi
 
 - **REQ-GGUARD-001**: The guard binary shall be installed at the target binary's system path with owner root:root and mode 4555 (SUID root, world-executable).
 - **REQ-GGUARD-002**: The real binary shall reside at `<path>.original` with owner root:root and mode 0700.
-- **REQ-GGUARD-003**: The guard shall detect privileged execution via `getauxval(AT_SECURE)` — not by comparing real/effective UID — to correctly handle file-capability contexts.
+- **REQ-GGUARD-003**: The guard shall detect privileged execution via `getauxval(AT_SECURE)`: not by comparing real/effective UID: to correctly handle file-capability contexts.
 - **REQ-GGUARD-004**: If `AT_SECURE` is not set, the guard shall refuse to operate and exit with code 3.
 - **REQ-GGUARD-005**: The guard shall call `setuid(getuid())` before `execve` to drop root privileges before the real binary runs.
 - **REQ-GGUARD-006**: The guard shall restrict file-descriptor limits (`RLIMIT_NOFILE`) to prevent fd-exhaustion attacks.
@@ -113,13 +113,13 @@ The core insight: if the *real* binary is mode 0700 root:root and the *guard* bi
 
 The following are explicitly out of scope:
 
-- **Filesystem-level mandatory access control** (SELinux, AppArmor) — assumed to be configured separately if needed
-- **Network-level controls** — the guard does not filter network access
-- **User authentication** — the guard does not re-authenticate the user
-- **Encryption** — the guard does not encrypt anything
-- **Container/namespace isolation** — the guard does not enter namespaces
-- **Runtime integrity monitoring** — the guard does not monitor itself for tampering after installation
-- **Library call interception** — the guard does not prevent libgit2, GitPython, or other git library bypasses (detected at install time only)
+- **Filesystem-level mandatory access control** (SELinux, AppArmor): assumed to be configured separately if needed
+- **Network-level controls**: the guard does not filter network access
+- **User authentication**: the guard does not re-authenticate the user
+- **Encryption**: the guard does not encrypt anything
+- **Container/namespace isolation**: the guard does not enter namespaces
+- **Runtime integrity monitoring**: the guard does not monitor itself for tampering after installation
+- **Library call interception**: the guard does not prevent libgit2, GitPython, or other git library bypasses (detected at install time only)
 
 ---
 
@@ -127,12 +127,12 @@ The following are explicitly out of scope:
 
 | Requirement | Source |
 |------------|--------|
-| REQ-GGUARD-001–008 | Privileged execution design |
-| REQ-GGUARD-020–024 | Argument parsing (args.rs) |
-| REQ-GGUARD-030–047 | Block logic (block.rs) |
-| REQ-GGUARD-060–066 | Environment sanitization (exec.rs + main.rs) |
-| REQ-GGUARD-080–084 | Audit logging (log.rs) |
-| REQ-GGUARD-100–103 | AMI-CI integration (exec.rs) |
-| REQ-GGUARD-120–128 | Deployment (bootstrap_rust_guard.sh, pre-req.sh) |
-| REQ-GGUARD-140–144 | Binary hardening (Cargo.toml, deploy) |
-| REQ-GGUARD-160–162 | Framework architecture |
+| REQ-GGUARD-001-008 | Privileged execution design |
+| REQ-GGUARD-020-024 | Argument parsing (args.rs) |
+| REQ-GGUARD-030-047 | Block logic (block.rs) |
+| REQ-GGUARD-060-066 | Environment sanitization (exec.rs + main.rs) |
+| REQ-GGUARD-080-084 | Audit logging (log.rs) |
+| REQ-GGUARD-100-103 | AMI-CI integration (exec.rs) |
+| REQ-GGUARD-120-128 | Deployment (bootstrap_rust_guard.sh, pre-req.sh) |
+| REQ-GGUARD-140-144 | Binary hardening (Cargo.toml, deploy) |
+| REQ-GGUARD-160-162 | Framework architecture |

@@ -6,19 +6,19 @@
 # (or sibling WORKSPACE-CI/docs/specifications/SPEC-BOOT-LAYOUT.md).
 #
 # Schema (SPEC §4.1):
-#   boot_dir  — directory (relative to repo root) where this repo's own
+#   boot_dir : directory (relative to repo root) where this repo's own
 #               .boot-linux/ tree lives. Default: '.boot-linux/'.
-#   venv_dir  — directory (relative to repo root) where this repo's own
+#   venv_dir : directory (relative to repo root) where this repo's own
 #               uv-managed .venv/ lives. Default: '.venv/'. Private per
 #               repo; NEVER shared or symlinked across project boundaries.
-#   inherit   — list of paths (relative to THIS repo root) to sibling or
+#   inherit  : list of paths (relative to THIS repo root) to sibling or
 #               ancestor .boot-linux/ trees whose bin/ subdirs should be
 #               prepended to PATH BEFORE this repo's own. Entries resolve
 #               via `cd <repo_root> && cd <entry> && pwd -P`. Later-listed
 #               entries win (land leftmost). Sibling refs use `../WORKSPACE-X/.boot-linux`.
 #               Ancestor refs are rarely needed (walk-up handles ancestors).
-#   version   — schema version (currently 1).
-#   comment   — free-form description.
+#   version  : schema version (currently 1).
+#   comment  : free-form description.
 
 version: 1
 

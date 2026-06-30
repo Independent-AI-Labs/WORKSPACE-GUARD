@@ -22,7 +22,7 @@ The kernel sets `AT_SECURE` in the auxiliary vector when executing a SUID binary
 - **Bypass via custom ld.so**: If an attacker can control `LD_LIBRARY_PATH` before `execve`, or use a static binary, `AT_SECURE` may not be set.
 - **Unsanitized SUID binaries**: Some SUID programs re-read environment variables after startup. If the program doesn't use glibc's secure-execution helpers, `AT_SECURE` may be bypassed entirely.
 
-**WORKSPACE-GUARD Mitigation**: The guard scrubs the environment itself before `execve` — only whitelisted variables survive. `PATH` is hardcoded. `GCONV_PATH`, `LD_*`, and all non-whitelisted variables are stripped regardless of `AT_SECURE`.
+**WORKSPACE-GUARD Mitigation**: The guard scrubs the environment itself before `execve`: only whitelisted variables survive. `PATH` is hardcoded. `GCONV_PATH`, `LD_*`, and all non-whitelisted variables are stripped regardless of `AT_SECURE`.
 
 ### 2.2 PATH / Binary Injection
 
@@ -32,11 +32,11 @@ A SUID binary that calls `execvp("git", ...)` or `system("git ...")` without an 
 
 ### 2.3 Shared Library Hijacking
 
-- **`LD_LIBRARY_PATH`**: Stripped by `AT_SECURE` — but only for glibc. Static binaries and musl-linked binaries do not use `ld.so` and may ignore `AT_SECURE`.
+- **`LD_LIBRARY_PATH`**: Stripped by `AT_SECURE`: but only for glibc. Static binaries and musl-linked binaries do not use `ld.so` and may ignore `AT_SECURE`.
 - **`/etc/ld.so.conf` / `ldconfig`**: If an attacker can write to a directory in ldconfig's cache, they can inject `.so` files that SUID binaries load. This requires root or write access to system config directories.
 - **Missing `RUNPATH` libraries**: A SUID binary that `dlopen()`s a library from a user-writable path can be exploited.
 
-**WORKSPACE-GUARD Mitigation**: Statically linked via musl (preferred) or linked with gcc + `RUNPATH` controlled at build time. No `dlopen()`. No dynamic library loading at runtime. Only `libc` dependency — and for musl builds, even that is linked statically.
+**WORKSPACE-GUARD Mitigation**: Statically linked via musl (preferred) or linked with gcc + `RUNPATH` controlled at build time. No `dlopen()`. No dynamic library loading at runtime. Only `libc` dependency: and for musl builds, even that is linked statically.
 
 ### 2.4 `GCONV_PATH` Injection
 
@@ -57,7 +57,7 @@ A SUID binary running as root is still debuggable by the user who launched it if
 - Write to `/proc/<pid>/mem` to modify its memory
 
 **WORKSPACE-GUARD Mitigation**: 
-- Guard drops privileges via `setuid(getuid())` before `execve` — after that point, the real binary runs as the user and is not useful to attack.
+- Guard drops privileges via `setuid(getuid())` before `execve`: after that point, the real binary runs as the user and is not useful to attack.
 - Guard sets `RLIMIT_CORE = 0` to prevent core dumps (memory leak).
 - Guard's execution window is narrow: AT_SECURE check → parse → block/execve. No interactive phase.
 
@@ -81,7 +81,7 @@ Between `stat()` and `execve()`, a TOCTOU attacker could replace the guard binar
 
 ---
 
-## 3. CVE-2026-31431 — "Copy Fail" (April 2026)
+## 3. CVE-2026-31431: "Copy Fail" (April 2026)
 
 ### 3.1 Summary
 
@@ -96,9 +96,9 @@ A critical Linux kernel vulnerability (CVSS 7.8) in the `algif_aead` module. An 
 1. Open read-only FD to target SUID binary (`/usr/bin/su`)
 2. Create `AF_ALG` socket bound to `authencesn(hmac(sha256),cbc(aes))`
 3. `splice()` pages from the target binary into the crypto pipeline
-4. `sendmsg()` with crafted AAD — `authencesn` scratch write deposits **4 bytes** at controlled offset in page cache
+4. `sendmsg()` with crafted AAD: `authencesn` scratch write deposits **4 bytes** at controlled offset in page cache
 5. Repeat to stage shellcode at successive offsets
-6. Execute the binary — kernel uses the corrupted in-memory copy, grants root
+6. Execute the binary: kernel uses the corrupted in-memory copy, grants root
 
 The file on disk is **never modified**. Traditional integrity checks (`sha256sum`, `tripwire`, `AIDE`) detect nothing.
 
@@ -111,9 +111,9 @@ The file on disk is **never modified**. Traditional integrity checks (`sha256sum
 
 ### 3.4 Impact on WORKSPACE-GUARD
 
-- The guard binary itself is a SUID target — Copy Fail can corrupt `/usr/bin/git` in memory.
+- The guard binary itself is a SUID target: Copy Fail can corrupt `/usr/bin/git` in memory.
 - However, guard's non-SUID exit (`AT_SECURE` check) provides partial defense: the corrupted guard runs → SUID not set → `NotSuid` → exit.
-- Real concern: attacker corrupts `/usr/bin/git.original`? No — mode 0700 is not world-readable, so a read-only FD cannot be opened.
+- Real concern: attacker corrupts `/usr/bin/git.original`? No: mode 0700 is not world-readable, so a read-only FD cannot be opened.
 - **Net effect**: WORKSPACE-GUARD is partially resilient to Copy Fail because:
   - `git.original` is unreadable by non-root (no FD to pass to `splice()`)
   - The guard itself, if corrupted, simply refuses to run (no SUID, no bypass)
@@ -128,7 +128,7 @@ The file on disk is **never modified**. Traditional integrity checks (`sha256sum
 
 ---
 
-## 4. ret2dso — Runtime Ret2dlresolve Under Full RELRO (January 2026)
+## 4. ret2dso: Runtime Ret2dlresolve Under Full RELRO (January 2026)
 
 ### 4.1 Summary
 
@@ -139,7 +139,7 @@ Published at lowlevel.re (January 2026). Demonstrates that **Full RELRO does not
 ### 4.2 Attack Requirements
 
 - A weak relative write primitive (e.g., 1 byte at a known offset from a mapped region)
-- No ASLR leak needed — relies on relative offsets between DSOs
+- No ASLR leak needed: relies on relative offsets between DSOs
 
 ### 4.3 Attack Flow
 
@@ -152,10 +152,10 @@ Published at lowlevel.re (January 2026). Demonstrates that **Full RELRO does not
 ### 4.4 Impact on WORKSPACE-GUARD
 
 - Guard is a Rust binary with no dynamic symbol resolution after startup. No `dlopen()`, no deferred (on-demand) symbol binding.
-- musl-static builds eliminate `ld.so` entirely — **immune to ret2dso**.
+- musl-static builds eliminate `ld.so` entirely: **immune to ret2dso**.
 - gcc-dynamic builds still use `ld.so`. However:
   - Guard's code path is linear: AT_SECURE → parse → execve. No loops, no user interaction, no function pointer tables.
-  - Guard uses `panic = "abort"` — unwinding is disabled, reducing exploitable surface.
+  - Guard uses `panic = "abort"`: unwinding is disabled, reducing exploitable surface.
   - The window between startup and `execve` is too small for a write primitive.
 
 ---
@@ -201,7 +201,7 @@ gVisor's Sentry process reimplements the Linux kernel API in userspace (Go). Ben
 - Docker-in-gVisor allows safe code execution (Hermes Agent architecture)
 
 **Limitations:**
-- I/O overhead 10–30% on syscall-heavy workloads
+- I/O overhead 10-30% on syscall-heavy workloads
 - Not all syscalls supported (some require platform-specific patches)
 - Does not protect against vulnerabilities in gVisor's own Sentry implementation (but this surface is much smaller than the full host kernel)
 
@@ -241,13 +241,13 @@ WORKSPACE-GUARD's function in an agentic context:
 
 ## 7. References
 
-1. CVE-2021-4034 — PwnKit: pkexec local privilege escalation (Qualys, Jan 2022)
-2. CVE-2026-31431 — Copy Fail: Linux kernel page cache corruption via AF_ALG (Xint Code / Theori, Apr 2026)
+1. CVE-2021-4034: PwnKit: pkexec local privilege escalation (Qualys, Jan 2022)
+2. CVE-2026-31431: Copy Fail: Linux kernel page cache corruption via AF_ALG (Xint Code / Theori, Apr 2026)
 3. ret2dso: Runtime Ret2dlresolve Under Full RELRO (lowlevel.re, Jan 2026)
-4. GTFOBins — SUID binary exploitation techniques (gtfobins.github.io)
-5. Zylos Research — AI Agent Sandboxing: MicroVMs, gVisor, WASM (Apr 2026)
-6. gVisor — Multi-Agent gVisor Isolation (MAGI) blog post (Apr 2026)
-7. Gemini CLI — LXC/gVisor sandbox support PR #20735 (Mar 2026)
-8. Agent Sandbox SIG — `kubernetes-sigs/agent-sandbox` (Nov 2025)
-9. Elastic Security — Copy Fail detection rule (Apr 2026)
-10. glibc `dl-fixup.c` — Dynamic linker resolution internals
+4. GTFOBins: SUID binary exploitation techniques (gtfobins.github.io)
+5. Zylos Research: AI Agent Sandboxing: MicroVMs, gVisor, WASM (Apr 2026)
+6. gVisor: Multi-Agent gVisor Isolation (MAGI) blog post (Apr 2026)
+7. Gemini CLI: LXC/gVisor sandbox support PR #20735 (Mar 2026)
+8. Agent Sandbox SIG: `kubernetes-sigs/agent-sandbox` (Nov 2025)
+9. Elastic Security: Copy Fail detection rule (Apr 2026)
+10. glibc `dl-fixup.c`: Dynamic linker resolution internals

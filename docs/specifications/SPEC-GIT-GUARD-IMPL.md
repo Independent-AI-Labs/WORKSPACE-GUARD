@@ -36,14 +36,14 @@ No other dependencies. Argument parsing is manual. No `clap`, no `thiserror`, no
 
 Only two FFI sites need the `unsafe` gate (their call-site blocks live in `src/exec.rs`; the snippets below show the raw FFI signatures without the gating block):
 
-1. **`getauxval(AT_SECURE)`** — libc FFI call:
+1. **`getauxval(AT_SECURE)`**: libc FFI call:
    ```rust
    // SAFETY: getauxval is a standard libc function. AT_SECURE is a valid
    // auxiliary vector key defined by the ELF ABI. Returns 0 if not found.
    libc::getauxval(libc::AT_SECURE)
    ```
 
-2. **`execve()`** — libc FFI call with C strings:
+2. **`execve()`**: libc FFI call with C strings:
    ```rust
    // SAFETY: git_path, argv_c, and envp_c are all valid null-terminated
    // CStrings. Their pointers remain valid for the duration of the call.
@@ -74,15 +74,15 @@ libc = "0.2"
 
 Primary target: `x86_64-unknown-linux-musl` (statically linked).
 
-Static linking eliminates shared library injection vectors — there are no `.so` files to preload or replace. The binary is fully self-contained.
+Static linking eliminates shared library injection vectors: there are no `.so` files to preload or replace. The binary is fully self-contained.
 
 If musl toolchain is unavailable, fall back to `x86_64-unknown-linux-gnu` (dynamically linked). In that case, only `libc` and the musl-compatible minimal set of libraries are linked.
 
 ### 8.6 Resource Limits
 
 Before `execve()`, the guard sets:
-- `RLIMIT_NOFILE` to 256 — limits open file descriptors
-- `RLIMIT_CORE` to 0 — disables core dumps (prevents memory disclosure from SUID context)
+- `RLIMIT_NOFILE` to 256: limits open file descriptors
+- `RLIMIT_CORE` to 0: disables core dumps (prevents memory disclosure from SUID context)
 
 Set via `libc::prctl()` and `libc::setrlimit()`.
 
@@ -138,7 +138,7 @@ No panics. `panic = "abort"` in release mode. Any unexpected condition is treate
 
 | Threat | Reason |
 |--------|--------|
-| User has root access | Root can remove SUID bit, reinstall git, remove diversion, etc. The guard protects against workspace users, not root. Root access IS a security boundary violation — all root actions are audited. |
+| User has root access | Root can remove SUID bit, reinstall git, remove diversion, etc. The guard protects against workspace users, not root. Root access IS a security boundary violation: all root actions are audited. |
 | Kernel exploit | Out of scope. If the kernel is compromised, no user-space mechanism helps. |
 | Hardware-level attack | Out of scope. |
 
@@ -146,22 +146,22 @@ No panics. `panic = "abort"` in release mode. Any unexpected condition is treate
 
 The guard implements multiple independent layers of defense:
 
-1. **SUID Root** — Only the guard can invoke real git; real git is 0700 root:root
-2. **Argument Validation** — All args parsed and validated before execve
-3. **Environment Sanitisation** — Allow-list approach; no dangerous env vars passed through
-4. **PATH Reset** — Known-safe PATH prevents PATH injection
-5. **dpkg-divert** — Prevents apt from overwriting the guard
-6. **Immutable Attribute** — `chattr +i` prevents filesystem-level tampering
-7. **Apt Hook** — Detects git package changes and warns
-8. **Pre-commit Hooks** — Second layer of defense at the repo level
-9. **Audit Logging** — All blocks logged with timestamps, UIDs, and commands
-10. **Static Linking** — No shared library injection vectors
-11. **Resource Limits** — RLIMIT_CORE=0, RLIMIT_NOFILE=256 limit blast radius
+1. **SUID Root**: Only the guard can invoke real git; real git is 0700 root:root
+2. **Argument Validation**: All args parsed and validated before execve
+3. **Environment Sanitisation**: Allow-list approach; no dangerous env vars passed through
+4. **PATH Reset**: Known-safe PATH prevents PATH injection
+5. **dpkg-divert**: Prevents apt from overwriting the guard
+6. **Immutable Attribute**: `chattr +i` prevents filesystem-level tampering
+7. **Apt Hook**: Detects git package changes and warns
+8. **Pre-commit Hooks**: Second layer of defense at the repo level
+9. **Audit Logging**: All blocks logged with timestamps, UIDs, and commands
+10. **Static Linking**: No shared library injection vectors
+11. **Resource Limits**: RLIMIT_CORE=0, RLIMIT_NOFILE=256 limit blast radius
 
 ### 9.4 Blast Radius
 
 If the guard binary has a bug that allows arbitrary code execution with root privileges:
-- The binary is ~500 LOC — small audit surface
+- The binary is ~500 LOC: small audit surface
 - Static linking removes shared library attack vectors
 - No network I/O, no file parsing, no deserialisation
 - No heap allocations from untrusted input (argv is bounded)
@@ -169,7 +169,7 @@ If the guard binary has a bug that allows arbitrary code execution with root pri
 - `RLIMIT_NOFILE=256` limits file descriptor exhaustion
 - The only privileged operation is `execve()` of a known-good binary
 
-The worst-case RCE allows the attacker to run arbitrary commands as root — which they could already do if they compromised the real git binary. The guard doesn't increase the blast radius beyond what the existing SUID model already allows.
+The worst-case RCE allows the attacker to run arbitrary commands as root: which they could already do if they compromised the real git binary. The guard doesn't increase the blast radius beyond what the existing SUID model already allows.
 
 ---
 
@@ -255,7 +255,7 @@ The worst-case RCE allows the attacker to run arbitrary commands as root — whi
 | REQ-GGUARD-132 | §4.2 | Covered |
 | REQ-GGUARD-140 | SPEC-GIT-GUARD-INSTALL §1, §9 | Covered |
 | REQ-GGUARD-141 | SPEC-GIT-GUARD-INSTALL §2 | Covered |
-| REQ-GGUARD-142 | SPEC-GIT-GUARD-INSTALL §4.1–4.2 | Covered |
+| REQ-GGUARD-142 | SPEC-GIT-GUARD-INSTALL §4.1-4.2 | Covered |
 | REQ-GGUARD-143 | SPEC-GIT-GUARD-INSTALL §4.3, §5.1 | Covered |
 | REQ-GGUARD-144 | SPEC-GIT-GUARD-INSTALL §5.2 | Covered |
 | REQ-GGUARD-145 | SPEC-GIT-GUARD-INSTALL §5.3 | Covered |

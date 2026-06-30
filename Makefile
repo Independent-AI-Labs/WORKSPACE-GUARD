@@ -1,4 +1,4 @@
-# WORKSPACE-GUARD Makefile — SUID guard framework (git PoC).
+# WORKSPACE-GUARD Makefile: SUID guard framework (git PoC).
 #
 # This repo is a sibling of WORKSPACE-CI under projects/.
 

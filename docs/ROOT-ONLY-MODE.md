@@ -1,4 +1,4 @@
-# Root-Only Mode — WORKSPACE-GUARD
+# Root-Only Mode: WORKSPACE-GUARD
 
 **Date:** 2026-06-24
 **Status:** ACTIVE
@@ -32,7 +32,7 @@ environments where `setcap`, `chattr +i`, and `dpkg-divert` are unavailable:
 ### What Root-Only Mode Does NOT Protect Against
 
 1. **Direct execution of `/usr/bin/git.original`**: In capability mode,
-   `git.original` is mode 0700 root:root — only root can execute it. In
+   `git.original` is mode 0700 root:root: only root can execute it. In
    root-only mode, the user IS root, so they can run `git.original` directly,
    bypassing the guard entirely.
 
@@ -67,7 +67,7 @@ cargo build --release
 
 ## Installation in Root-Only Mode
 
-Root-only mode uses a simplified installation — no `setcap`, no `chattr`,
+Root-only mode uses a simplified installation: no `setcap`, no `chattr`,
 no `dpkg-divert`:
 
 ```bash
@@ -118,6 +118,6 @@ When built with `root-only`, the guard:
 
 ## Security Recommendation
 
-Root-only mode is a **soft barrier** — it prevents accidental damage and
+Root-only mode is a **soft barrier**: it prevents accidental damage and
 raises the bar for adversarial agents, but it is NOT a security boundary.
 For production environments with non-root users, always use capability mode.

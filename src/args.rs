@@ -135,13 +135,13 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 "--no-verify" => {
                     return Err(GuardError::Blocked {
                         reason: "--no-verify flag".into(),
-                        hint: "Remove --no-verify — hooks enforce policy".into(),
+                        hint: "Remove --no-verify: hooks enforce policy".into(),
                     });
                 }
                 "--upload-pack" | "--receive-pack" | "--exec" => {
                     return Err(GuardError::Blocked {
                         reason: format!("dangerous flag: {}", arg_str),
-                        hint: "Remove this flag — it enables arbitrary command execution".into(),
+                        hint: "Remove this flag: it enables arbitrary command execution".into(),
                     });
                 }
                 "--config" => {
@@ -161,7 +161,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                     let flag_name = s.split('=').next().unwrap_or(s);
                     return Err(GuardError::Blocked {
                         reason: format!("dangerous flag: {}", flag_name),
-                        hint: "Remove this flag — it enables arbitrary command execution".into(),
+                        hint: "Remove this flag: it enables arbitrary command execution".into(),
                     });
                 }
                 s if s.starts_with("--config=") => {
@@ -248,7 +248,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                     b'n' | b'N' => {
                         return Err(GuardError::Blocked {
                             reason: "-n flag (short form of --no-verify)".into(),
-                            hint: "Remove -n — hooks enforce policy".into(),
+                            hint: "Remove -n: hooks enforce policy".into(),
                         });
                     }
                     _ => {}

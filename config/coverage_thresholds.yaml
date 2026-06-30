@@ -1,7 +1,7 @@
 # WORKSPACE-GUARD Test Coverage Thresholds
 #
 # Rust coverage tooling (tarpaulin/llvm-cov) cannot run under PRoot, so
-# coverage measurement is disabled — the suite runs `cargo test --workspace`
+# coverage measurement is disabled: the suite runs `cargo test --workspace`
 # and verifies pass/fail only.
 
 version: 1

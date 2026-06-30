@@ -13,7 +13,7 @@ The current git-guard is a 337-line bash script at `workspace/scripts/utils/git-
 
 The replacement is a **Rust binary** installed as a **capability-enabled** executable at `/usr/bin/git`, with the real git binary relocated to `/usr/bin/git.original` (owner root, mode 700). The guard validates all arguments in compiled code, sanitises the execution environment, and only then `execve()`s the real git. A user who reads the binary cannot trivially bypass it because:
 
-1. The real git at `/usr/bin/git.original` is mode 700 root:root — unreadable and unexecutable by non-root.
+1. The real git at `/usr/bin/git.original` is mode 700 root:root: unreadable and unexecutable by non-root.
 2. No sudoers rule allows direct execution of git.original.
 3. The guard itself is a compiled Rust binary, not a readable script.
 
@@ -31,7 +31,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-002**: The real git binary shall reside at `/usr/bin/git.original` with owner root:root and mode 0700.
 - **REQ-GGUARD-003**: The binary shall detect privileged execution via `caps::has_cap()` (capability mode) or `geteuid() == 0` (root-only mode).
 - **REQ-GGUARD-004**: If the capability check fails (capability mode) or euid is not 0 (root-only mode), the binary shall refuse to operate and exit with code 2. This prevents an attacker from compiling their own binary that bypasses the guard.
-- **REQ-GGUARD-005**: The binary shall call `execve()` with an **absolute path** to `/usr/bin/git.original` — never `execvp()` or PATH-based lookup.
+- **REQ-GGUARD-005**: The binary shall call `execve()` with an **absolute path** to `/usr/bin/git.original`: never `execvp()` or PATH-based lookup.
 - **REQ-GGUARD-006**: The binary shall verify that `/usr/bin/git.original` exists, is a regular file, is owned by root, and has mode 0700 before exec-ing it. If verification fails, exit with code 2.
 - **REQ-GGUARD-007**: The binary shall NOT use `system()`, `Command::new("sh")`, or any shell invocation at any point. All subprocess execution shall use explicit argument vectors.
 
@@ -68,13 +68,13 @@ This document specifies the requirements for the Rust binary. The installation/d
 ### 5. Dangerous Git Config Key Injection
 
 - **REQ-GGUARD-040**: The following git config keys, when set via `-c` or `-C`, shall be blocked:
-  - `core.hooksPath` — redirects hook execution to attacker-controlled directory
-  - `core.sshCommand` — replaces SSH command, enabling arbitrary execution
-  - `core.editor` / `core.excludesFile` — can be used to execute arbitrary commands
-  - `protocol.<name>.allow` — can enable dangerous protocols (e.g., `ext::`)
-  - `safe.directory` — can bypass repository ownership checks
-  - `core.gitProxy` — intercepts git network operations
-  - `url.<base>.insteadOf` — can redirect remotes to attacker-controlled URLs
+  - `core.hooksPath`: redirects hook execution to attacker-controlled directory
+  - `core.sshCommand`: replaces SSH command, enabling arbitrary execution
+  - `core.editor` / `core.excludesFile`: can be used to execute arbitrary commands
+  - `protocol.<name>.allow`: can enable dangerous protocols (e.g., `ext::`)
+  - `safe.directory`: can bypass repository ownership checks
+  - `core.gitProxy`: intercepts git network operations
+  - `url.<base>.insteadOf`: can redirect remotes to attacker-controlled URLs
 - **REQ-GGUARD-041**: A `-c key=value` argument shall be parsed by splitting on the first `=`. The key portion shall be compared case-insensitively against the block list.
 - **REQ-GGUARD-042**: The `-c` and `-C` flags with keys NOT in the block list shall be allowed (pass through to real git).
 
@@ -97,25 +97,25 @@ This document specifies the requirements for the Rust binary. The installation/d
 ### 8. Environment Variable Sanitisation
 
 - **REQ-GGUARD-070**: Before calling `execve()`, the binary shall **unset** the following environment variables if present:
-  - `GIT_EXEC_PATH` — can redirect git subcommand lookup to attacker-controlled directory
-  - `GIT_TEMPLATE_DIR` — can install malicious hooks via template
-  - `GIT_SSH` — can replace SSH command with arbitrary executable
-  - `GIT_SSH_COMMAND` — same
-  - `GIT_ASKPASS` — can execute arbitrary commands during auth prompts
-  - `GIT_TERMINAL_PROMPT` — can affect interactive behaviour
-  - `GIT_EDITOR` / `GIT_SEQUENCE_EDITOR` — can execute arbitrary commands
-  - `GIT_CONFIG` / `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` — can redirect config loading
-  - `GIT_CEILING_DIRECTORIES` — can affect repo discovery
-  - `GIT_DIR` / `GIT_WORK_TREE` / `GIT_NAMESPACE` — can redirect git to wrong repository
-  - `GIT_INDEX_FILE` — can point to attacker-controlled index
-  - `LD_PRELOAD` / `LD_LIBRARY_PATH` / `LD_AUDIT` / `LD_DEBUG` — dynamic linker injection (glibc ignores these for SUID, but defense-in-depth)
-  - `GCONV_PATH` / `GETCONF_DIR` / `NLSPATH` / `TMPDIR` / `TZDIR` / `RES_OPTIONS` / `HOSTALIASES` / `LOCALDOMAIN` / `NIS_PATH` / `RESOLV_HOST_CONF` / `LOCPATH` / `MALLOC_TRACE` — glibc `unsecvars` list, defense-in-depth
-  - `GLIBC_TUNABLES` — can affect malloc behaviour, defense-in-depth
+  - `GIT_EXEC_PATH`: can redirect git subcommand lookup to attacker-controlled directory
+  - `GIT_TEMPLATE_DIR`: can install malicious hooks via template
+  - `GIT_SSH`: can replace SSH command with arbitrary executable
+  - `GIT_SSH_COMMAND`: same
+  - `GIT_ASKPASS`: can execute arbitrary commands during auth prompts
+  - `GIT_TERMINAL_PROMPT`: can affect interactive behaviour
+  - `GIT_EDITOR` / `GIT_SEQUENCE_EDITOR`: can execute arbitrary commands
+  - `GIT_CONFIG` / `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`: can redirect config loading
+  - `GIT_CEILING_DIRECTORIES`: can affect repo discovery
+  - `GIT_DIR` / `GIT_WORK_TREE` / `GIT_NAMESPACE`: can redirect git to wrong repository
+  - `GIT_INDEX_FILE`: can point to attacker-controlled index
+  - `LD_PRELOAD` / `LD_LIBRARY_PATH` / `LD_AUDIT` / `LD_DEBUG`: dynamic linker injection (glibc ignores these for SUID, but defense-in-depth)
+  - `GCONV_PATH` / `GETCONF_DIR` / `NLSPATH` / `TMPDIR` / `TZDIR` / `RES_OPTIONS` / `HOSTALIASES` / `LOCALDOMAIN` / `NIS_PATH` / `RESOLV_HOST_CONF` / `LOCPATH` / `MALLOC_TRACE`: glibc `unsecvars` list, defense-in-depth
+  - `GLIBC_TUNABLES`: can affect malloc behaviour, defense-in-depth
 - **REQ-GGUARD-071**: The binary shall **unset** the following hook-bypass variables:
-  - `SKIP` — used by pre-commit framework to skip hooks
-  - `PRE_COMMIT_ALLOW_NO_CONFIG` — used by pre-commit framework to bypass config requirement
+  - `SKIP`: used by pre-commit framework to skip hooks
+  - `PRE_COMMIT_ALLOW_NO_CONFIG`: used by pre-commit framework to bypass config requirement
 - **REQ-GGUARD-072**: The binary shall set `PATH` to a **known-safe value** (`/usr/local/bin:/usr/bin:/bin`) before exec-ing real git, preventing PATH injection.
-- **REQ-GGUARD-073**: The binary shall NOT modify `HOME`, `USER`, `LANG`, `LC_*`, or locale variables — these are needed by git for normal operation.
+- **REQ-GGUARD-073**: The binary shall NOT modify `HOME`, `USER`, `LANG`, `LC_*`, or locale variables: these are needed by git for normal operation.
 - **REQ-GGUARD-074**: The binary shall use `secure_getenv()` (via the `nix` crate or libc binding) when reading environment variables during its own execution, to prevent an attacker from influencing the guard's own logic via crafted env vars in the SUID context.
 
 ### 9. WORKSPACE-CI Contract Enforcement
@@ -123,11 +123,11 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-080**: Contract enforcement shall run ONLY for `git commit` and `git push` subcommands. All other invocations skip this section entirely.
 - **REQ-GGUARD-081**: The binary shall determine if the current repository is within an WORKSPACE workspace by walking up from the repo's `.git` directory (or `git rev-parse --show-toplevel`) and checking for the presence of `.boot-linux/` directory, `projects/CI/` directory, and `workspace/scripts/utils/git-guard` file at the same root.
 - **REQ-GGUARD-082**: If the repo is NOT in an WORKSPACE workspace, contract enforcement shall be skipped.
-- **REQ-GGUARD-083**: For WORKSPACE workspace repos, the binary shall source and execute the contract checks from `projects/CI/lib/checks_quality.sh`. The binary shall NOT re-implement the contract logic — it delegates to the WORKSPACE-CI shell script.
+- **REQ-GGUARD-083**: For WORKSPACE workspace repos, the binary shall source and execute the contract checks from `projects/CI/lib/checks_quality.sh`. The binary shall NOT re-implement the contract logic: it delegates to the WORKSPACE-CI shell script.
 - **REQ-GGUARD-084**: The binary shall pass the following information to the contract check script via environment variables:
-  - `WORKSPACE_GGUARD_CMD` — the git subcommand (`commit` or `push`)
-  - `WORKSPACE_GGUARD_REPO_ROOT` — the repo's top-level directory
-  - `WORKSPACE_GGUARD_WORKSPACE_ROOT` — the WORKSPACE workspace root
+  - `WORKSPACE_GGUARD_CMD`: the git subcommand (`commit` or `push`)
+  - `WORKSPACE_GGUARD_REPO_ROOT`: the repo's top-level directory
+  - `WORKSPACE_GGUARD_WORKSPACE_ROOT`: the WORKSPACE workspace root
 - **REQ-GGUARD-085**: If the contract check script exits non-zero, the binary shall exit with code 4, showing the script's stderr output.
 - **REQ-GGUARD-086**: If the contract check script is not found at the expected path, contract enforcement shall be skipped with a warning to stderr (graceful skip).
 
@@ -135,7 +135,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 - **REQ-GGUARD-090**: Every blocked invocation shall be logged to `${HOME}/.workspace-guard.log` with the following fields: timestamp (ISO 8601), blocked command/reason, current working directory, full argv, and real UID of the invoking user.
 - **REQ-GGUARD-091**: Log lines shall be pipe-delimited for machine parsing: `timestamp | cwd | cmd | reason | uid=<uid>`.
-- **REQ-GGUARD-092**: If the log file cannot be opened (permission error, disk full, etc.), the block shall still be enforced — logging failure shall not bypass blocking.
+- **REQ-GGUARD-092**: If the log file cannot be opened (permission error, disk full, etc.), the block shall still be enforced: logging failure shall not bypass blocking.
 - **REQ-GGUARD-093**: The binary shall NOT log argument values that could contain secrets (e.g., the value portion of `-c` config overrides). Only the key portion shall be logged.
 
 ### 11. Exit Codes
@@ -151,12 +151,12 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-110**: Block messages shall be written to **both** stderr and `/dev/tty` (if writable). The `/dev/tty` write ensures messages survive `> /dev/null 2>&1` redirection in interactive use.
 - **REQ-GGUARD-111**: Block messages shall include: a `BLOCKED` prefix, the specific command/reason, and a brief hint for the correct alternative (e.g., "use `git branch -d` instead of `-D`").
 - **REQ-GGUARD-112**: Warning messages (non-blocking, such as background push detection unavailable) shall be written to stderr only.
-- **REQ-GGUARD-113**: The binary shall NOT produce any output for allowed invocations — all output comes from real git.
+- **REQ-GGUARD-113**: The binary shall NOT produce any output for allowed invocations: all output comes from real git.
 
 ### 13. Security Hardening (Rust-Specific)
 
 - **REQ-GGUARD-120**: The binary shall be compiled with the following Rust security flags:
-  - `panic = "abort"` — no panic unwinding in a SUID binary
+  - `panic = "abort"`: no panic unwinding in a SUID binary
   - Relocation read-only (`relro = "full"`)
   - Stack protector enabled
   - Code generation with `overflow-checks = true` in debug, configurable in release
@@ -177,7 +177,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 15. Deployment and Installation
 
-- **REQ-GGUARD-140**: The git guard shall be installed by `make build-guard` and `make install-guard` — not by `make install`. `make install` shall NOT touch the git binary or git guard.
+- **REQ-GGUARD-140**: The git guard shall be installed by `make build-guard` and `make install-guard`: not by `make install`. `make install` shall NOT touch the git binary or git guard.
 - **REQ-GGUARD-141**: The `make install-guard` script shall inform the user **before** any git-related changes are made, including: that the existing system git will be relocated, that a capability-enabled binary will be installed at `/usr/bin/git`, and that the real git will be restricted to mode 0700 root:root.
 - **REQ-GGUARD-142**: The installation script shall build the `workspace-guard` Rust binary from source (`projects/WORKSPACE-GUARD/`) before installing it. The build shall use `cargo build --release` with appropriate feature flags.
 - **REQ-GGUARD-143**: Before relocating the real git, the script shall verify that: (a) the Rust binary compiled successfully, (b) the compiled binary is a valid ELF executable, and (c) `/usr/bin/git` exists and is the system git.
@@ -207,7 +207,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-151**: The installation script shall remove the older bash wrapper at `.boot-linux/bin/git` to prevent PATH-based bypass. If `.boot-linux/bin/git` exists, it shall be removed during guard installation.
 - **REQ-GGUARD-152**: If the guard detects that `/usr/bin/git` has been replaced (e.g., by a manual override or failed divert), the guard binary shall refuse to `execve()` real git if the inode of `/usr/bin/git` does not match its own. This prevents a scenario where an attacker replaces the SUID binary at the filesystem level.
 - **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `make install-guard`. The hook shall NOT reinstall the guard on its own; it only warns.
-- **REQ-GGUARD-154**: The installation script shall detect and warn about alternative git installations (`snap`, `flatpak`, `nix`, `/usr/local/bin/git`). The user shall be informed that these provide alternate paths to git that bypass the guard. This is informational only — the guard does not attempt to disable them.
+- **REQ-GGUARD-154**: The installation script shall detect and warn about alternative git installations (`snap`, `flatpak`, `nix`, `/usr/local/bin/git`). The user shall be informed that these provide alternate paths to git that bypass the guard. This is informational only: the guard does not attempt to disable them.
 
 ### 15A. Root-Only Mode
 
@@ -243,20 +243,20 @@ This document specifies the requirements for the Rust binary. The installation/d
 ## Constraints
 
 - **Rust 1.75+** (minimum stable toolchain available on target systems).
-- **Dependencies**: `libc` (required), `caps` (optional, capability mode only). No `clap` or argument parsing frameworks — manual `std::env::args_os()` parsing to minimise dependency surface.
+- **Dependencies**: `libc` (required), `caps` (optional, capability mode only). No `clap` or argument parsing frameworks: manual `std::env::args_os()` parsing to minimise dependency surface.
 - **Statically linked preferred** to avoid shared library injection vectors. If dynamically linked, only link against `libc`, `libgcc_s`, and `libm`.
 - **Target**: `x86_64-unknown-linux-musl` (static) or `x86_64-unknown-linux-gnu` (dynamic) or `aarch64-unknown-linux-gnu` depending on availability of musl toolchain and target architecture.
-- **No shell, no Python, no interpreter** — the binary is fully self-contained.
+- **No shell, no Python, no interpreter**: the binary is fully self-contained.
 - **Binary size target**: under 500KB stripped.
-- **Deployment is via `make build-guard` + `make install-guard`** — the `make install` flow shall NOT handle git or the git guard.
+- **Deployment is via `make build-guard` + `make install-guard`**: the `make install` flow shall NOT handle git or the git guard.
 
 ## Non-Requirements
 
-- **Contract check logic** — the WORKSPACE-CI contract checks remain in shell (`checks_quality.sh`). The guard only invokes them; it does not re-implement them.
-- **Pre-commit hook generation** — hook installation is handled by WORKSPACE-CI's `make install-hooks`.
-- **Tier/enforcement resolution** — `project_enforcement.yaml` parsing is done by the WORKSPACE-CI shell script, not by the guard binary.
-- **Interactive prompts** — the guard never prompts the user. It blocks or allows. User interaction is the responsibility of pre-commit hooks.
-- **Network operations** — the guard does not make any network requests. All checks are local.
-- **Windows/macOS support** — this binary is Linux-only. SUID has no equivalent on Windows, and macOS has different security semantics.
-- **Subcommand aliasing** — the guard does not support git aliases. Aliases are resolved by real git after the guard passes through.
-- **Custom block lists** — the destructive command list is hardcoded in the binary, not configurable at runtime. Configuration lives in WORKSPACE-CI's shell-based pre-commit hooks, not in the guard.
+- **Contract check logic**: the WORKSPACE-CI contract checks remain in shell (`checks_quality.sh`). The guard only invokes them; it does not re-implement them.
+- **Pre-commit hook generation**: hook installation is handled by WORKSPACE-CI's `make install-hooks`.
+- **Tier/enforcement resolution**: `project_enforcement.yaml` parsing is done by the WORKSPACE-CI shell script, not by the guard binary.
+- **Interactive prompts**: the guard never prompts the user. It blocks or allows. User interaction is the responsibility of pre-commit hooks.
+- **Network operations**: the guard does not make any network requests. All checks are local.
+- **Windows/macOS support**: this binary is Linux-only. SUID has no equivalent on Windows, and macOS has different security semantics.
+- **Subcommand aliasing**: the guard does not support git aliases. Aliases are resolved by real git after the guard passes through.
+- **Custom block lists**: the destructive command list is hardcoded in the binary, not configurable at runtime. Configuration lives in WORKSPACE-CI's shell-based pre-commit hooks, not in the guard.

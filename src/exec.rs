@@ -199,7 +199,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
 
     if check_vendored_tier_bypass(&wsroot, &toplevel) {
         return Err(GuardError::ContractFailed(
-            "Project tier is set to 'vendored' in project_enforcement.yaml — \
+            "Project tier is set to 'vendored' in project_enforcement.yaml: \
              quality gates are disabled. Restore 'strict' tier before committing."
                 .into(),
         ));
@@ -245,7 +245,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
                 libc::kill(pid, libc::SIGKILL);
                 libc::waitpid(pid, &mut status, 0);
                 eprintln!(
-                    "WARNING: WORKSPACE-CI contract check timed out after {}ms — skipping",
+                    "WARNING: WORKSPACE-CI contract check timed out after {}ms: skipping",
                     timeout_ms
                 );
                 return Ok(());

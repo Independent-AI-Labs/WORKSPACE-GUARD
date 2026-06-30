@@ -1,7 +1,7 @@
 // Integration tests for the guard binary.
 // These tests run against the debug binary, which has no file capabilities,
 // so the guard exits with FATAL: missing CAP_DAC_OVERRIDE. This is expected
-// — the guard only operates when installed with file capabilities at /usr/bin/git.
+// the guard only operates when installed with file capabilities at /usr/bin/git.
 // These tests verify the binary compiles and runs without crashes.
 
 use std::process::Command;

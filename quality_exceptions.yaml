@@ -1,4 +1,4 @@
-# quality_exceptions.yaml — per-project exception declarations.
+# quality_exceptions.yaml: per-project exception declarations.
 #
 # This file is MANDATORY at every strict-tier project root.
 # Exists permanently at repo root so every reviewer sees it on every PR.

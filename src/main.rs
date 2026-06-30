@@ -222,7 +222,7 @@ fn main() {
         }
         Err(GuardError::MissingCap) => {
             eprintln!(
-                "FATAL: missing CAP_DAC_OVERRIDE — guard must be installed with file capabilities"
+                "FATAL: missing CAP_DAC_OVERRIDE: guard must be installed with file capabilities"
             );
             process::exit(2);
         }

@@ -64,7 +64,7 @@ The `install-git-guard` target definition remains in the Makefile (as a no-op wi
 ```makefile
 .PHONY: install-git-guard
 install-git-guard:
-	@echo "⚠️  install-git-guard is deprecated — git guard is now installed via sudo make pre-req"
+	@echo "⚠️  install-git-guard is deprecated: git guard is now installed via sudo make pre-req"
 	@echo "    The SUID guard replaces the .boot-linux/bin/git wrapper."
 ```
 
@@ -120,7 +120,7 @@ The installation script verifies that no PATH entries contain alternate git bina
 IFS=':' read -ra PATH_ENTRIES <<< "$PATH"
 for entry in "${PATH_ENTRIES[@]}"; do
     if [[ -x "$entry/git" && "$entry" != "/usr/bin" ]]; then
-        echo "[WARN] PATH contains alternate git at $entry/git — this bypasses the guard"
+        echo "[WARN] PATH contains alternate git at $entry/git: this bypasses the guard"
         echo "       Remove $entry from PATH or restrict $entry/git"
     fi
 done
@@ -147,18 +147,18 @@ The installation script checks for git libraries that could bypass the guard:
 ```bash
 # Check for libgit2 installations
 if dpkg -l libgit2-dev 2>/dev/null | grep -q '^ii'; then
-    echo "[WARN] libgit2-dev is installed — applications can bypass the guard via libgit2"
+    echo "[WARN] libgit2-dev is installed: applications can bypass the guard via libgit2"
     echo "       Consider: sudo apt remove libgit2-dev"
 fi
 
 # Check for GitPython via pip
 if pip3 list 2>/dev/null | grep -q 'GitPython'; then
-    echo "[WARN] GitPython is installed — Python scripts can bypass the guard"
+    echo "[WARN] GitPython is installed: Python scripts can bypass the guard"
     echo "       Consider: pip3 uninstall GitPython"
 fi
 ```
 
-This is informational only — removing libraries may break legitimate applications.
+This is informational only: removing libraries may break legitimate applications.
 
 ### 11.5 Pre-commit Hook Enforcement
 
@@ -205,7 +205,7 @@ systemctl restart rsyslog
 |-------------|-------------|--------|
 | REQ-GGUARD-140 | §1, §9 | Covered |
 | REQ-GGUARD-141 | §2 | Covered |
-| REQ-GGUARD-142 | §4.1–4.2 | Covered |
+| REQ-GGUARD-142 | §4.1-4.2 | Covered |
 | REQ-GGUARD-143 | §4.3, §5.1 | Covered |
 | REQ-GGUARD-144 | §5.2 | Covered |
 | REQ-GGUARD-145 | §5.3 | Covered |

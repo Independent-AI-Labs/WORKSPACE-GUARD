@@ -88,7 +88,7 @@ tasks:
     # rc-capture pattern: git pull may fail (offline dev, detached HEAD);
     # we surface the rc + stderr to the user then proceed to make sync.
     # NO 2>/dev/null swallow, NO || true swallow (per the swallow canon).
-    command: 'bash -c "rc=0; git pull --ff-only || rc=$?; if [[ $rc -ne 0 ]]; then echo \"[WARN] git pull failed (exit $rc) — continuing with make sync\" >&2; fi; make sync"'
+    command: 'bash -c "rc=0; git pull --ff-only || rc=$?; if [[ $rc -ne 0 ]]; then echo \"[WARN] git pull failed (exit $rc): continuing with make sync\" >&2; fi; make sync"'
     deps:
       - '^:update'
     options:

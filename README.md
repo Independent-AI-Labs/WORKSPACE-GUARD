@@ -1,8 +1,8 @@
-# WORKSPACE-GUARD — Compiled Privilege Enforcement for Git
+# WORKSPACE-GUARD: Compiled Privilege Enforcement for Git
 
 A Rust binary that replaces `/usr/bin/git` to enforce immutable, unbypassable
 policies on destructive and history-rewriting operations. Uses **file
-capabilities** (`CAP_DAC_OVERRIDE`) rather than SUID — more granular, correctly
+capabilities** (`CAP_DAC_OVERRIDE`) rather than SUID: more granular, correctly
 handles `NO_NEW_PRIVS` contexts, and avoids the `geteuid() != getuid()` trap.
 
 For environments where file capabilities are unavailable (PRoot, containers
@@ -19,7 +19,7 @@ with the same policy engine but reduced bypass resistance.
 ### Build Commands
 
 ```bash
-# Capability mode (default — production)
+# Capability mode (default: production)
 cargo build --release
 # or:
 make build-guard
@@ -36,13 +36,13 @@ model and limitations.
 ## Why
 
 Shell-based git guards (bash wrappers, pre-commit hooks) are readable, editable,
-and bypassable — run `git` from an alternate path or unset the wrapper.
+and bypassable: run `git` from an alternate path or unset the wrapper.
 WORKSPACE-GUARD solves this by:
 
 1. Installing a **compiled Rust binary** as `/usr/bin/git` (mode 4555, with
    `CAP_DAC_OVERRIDE` file capability)
 2. Relocating the real git to `/usr/bin/git.original` (mode **0700 root:root**
-   — unreadable and unexecutable by non-root)
+  : unreadable and unexecutable by non-root)
 3. Guarding all arguments, config keys, and environment **before** `execve()`-ing
    the real binary
 4. Sanitizing the execution environment from scratch (22-variable allow-list,
@@ -141,7 +141,7 @@ zero or more segments. Keys are matched case-insensitively.
 ## Environment Sanitization
 
 The guard **constructs the child environment from scratch** using an allow-list
-rather than stripping dangerous variables. This is a closed surface — future
+rather than stripping dangerous variables. This is a closed surface: future
 glibc or git variables cannot sneak through.
 
 **Allowed variables (22):** `HOME`, `USER`, `LANG`, `LC_ALL`, `LC_CTYPE`,
@@ -153,7 +153,7 @@ glibc or git variables cannot sneak through.
 **Hardcoded:** `PATH=/usr/local/bin:/usr/bin:/bin`
 
 **Injected for safety:** `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`,
-`GIT_CONFIG_VALUE_0=*` — suppresses git's own repository ownership checks since
+`GIT_CONFIG_VALUE_0=*`: suppresses git's own repository ownership checks since
 the guard handles authorization.
 
 ## WORKSPACE-CI Contract Enforcement
@@ -162,7 +162,7 @@ Before `git commit` and `git push`, the guard:
 1. Finds the git repository root via `git.original rev-parse --show-toplevel`
 2. Walks up the directory tree to locate the workspace root (marked by
    `.boot-linux/`, `projects/CI/`, and `workspace/scripts/utils/git-guard`)
-3. Checks for **vendored tier bypass** — reads
+3. Checks for **vendored tier bypass**: reads
    `workspace/config/project_enforcement.yaml`, parses exemptions manually
    (no YAML dependency), blocks if the current project is exempted as
    `"vendored"` (quality gates disabled)
@@ -180,8 +180,8 @@ source of truth.
 | Code | Meaning |
 |------|---------|
 | 0 | Operation allowed, real git ran successfully |
-| 1 | Policy block — destructive or disallowed operation |
-| 2 | Infrastructure error — missing caps, missing git.original, bad permissions, null bytes |
+| 1 | Policy block: destructive or disallowed operation |
+| 2 | Infrastructure error: missing caps, missing git.original, bad permissions, null bytes |
 | 4 | WORKSPACE-CI contract failure |
 | (real git exit) | Forwarded from `/usr/bin/git.original` |
 
@@ -195,7 +195,7 @@ Every blocked operation is logged to **`~/.workspace-guard.log`** with:
 
 The home directory is resolved via `libc::getpwuid()` using the **real UID**
 (not `$HOME` which can be spoofed). Block messages are written to **both
-stderr and `/dev/tty`** — the `/dev/tty` write ensures visibility even when
+stderr and `/dev/tty`**: the `/dev/tty` write ensures visibility even when
 stderr is redirected.
 
 ## Deployment
@@ -258,7 +258,7 @@ WORKSPACE-GUARD/
 ├── Makefile                    # Build, test, lint, compliance (includes CI contract)
 ├── .pre-commit-config.yaml     # 14 hooks: Rust + WORKSPACE-CI quality gates
 ├── .cargo/config.toml          # Linker config (system gcc for GNU target)
-├── quality_exceptions.yaml     # WORKSPACE-CI compliance (empty — fully compliant)
+├── quality_exceptions.yaml     # WORKSPACE-CI compliance (empty: fully compliant)
 ├── config/
 │   ├── banned_words_exceptions.yaml    # Allows `unsafe` in FFI code
 │   ├── coverage_thresholds.yaml        # min_coverage: 1 (placeholder)
@@ -286,11 +286,11 @@ WORKSPACE-GUARD/
 ## Security Properties
 
 1. **Compiled enforcement**: Guard logic is opaque binary, not readable or editable
-2. **No privilege retained**: Capabilities cleared in child before `execve` — real
+2. **No privilege retained**: Capabilities cleared in child before `execve`: real
    git runs as the user, not with elevated caps
 3. **File capabilities over SUID**: `CAP_DAC_OVERRIDE` is more granular,
    `NO_NEW_PRIVS`-safe, and avoids `geteuid() != getuid()` edge cases
-4. **dpkg-divert protected**: `apt` cannot overwrite `/usr/bin/git` — divert
+4. **dpkg-divert protected**: `apt` cannot overwrite `/usr/bin/git`: divert
    redirects to `git.distrib`
 5. **Allow-list environment**: Only 22 whitelisted variables reach the child;
    `PATH` is hardcoded; `safe.directory=*` injected to suppress ownership checks
@@ -332,8 +332,8 @@ by creating separate guard crates with their own allow/block lists.
 
 The binary is ~1,600 lines of Rust across 5 modules (guard). The only
 dependencies are `libc` (FFI: fork, execve, waitpid, getuid, setrlimit,
-localtime_r) and `caps` (optional, Linux capability management — only needed
-for capability mode). No YAML, HTTP, or async dependencies — the binary
+localtime_r) and `caps` (optional, Linux capability management: only needed
+for capability mode). No YAML, HTTP, or async dependencies: the binary
 stays small and auditable.
 
 ## License

@@ -10,10 +10,10 @@
 
 ## 1. Overview
 
-The SUID git guard is installed exclusively by `sudo make pre-req`. This is the **only** entry point — `make install` does NOT touch the git binary or git guard.
+The SUID git guard is installed exclusively by `sudo make pre-req`. This is the **only** entry point: `make install` does NOT touch the git binary or git guard.
 
 The installation performs three phases:
-1. **Install system dependencies** (apt + bootstrap) — existing behaviour
+1. **Install system dependencies** (apt + bootstrap): existing behaviour
 2. **Build the Rust guard binary** from source
 3. **Relocate real git** and install the SUID guard at `/usr/bin/git`
 
@@ -89,7 +89,7 @@ if rustup target list --installed | grep -q musl; then
     cargo build --release --target x86_64-unknown-linux-musl
     GUARD_BIN="target/x86_64-unknown-linux-musl/release/workspace-guard"
 else
-    echo "[INFO] musl target not available — building dynamically linked (gnu)..."
+    echo "[INFO] musl target not available: building dynamically linked (gnu)..."
     cargo build --release --target x86_64-unknown-linux-gnu
     GUARD_BIN="target/x86_64-unknown-linux-gnu/release/workspace-guard"
 fi
@@ -115,13 +115,13 @@ Before modifying `/usr/bin/git`, the script scans for alternative git binaries t
 ```bash
 for path in /snap/bin/git /usr/local/bin/git ~/.nix-profile/bin/git; do
     if [[ -x "$path" ]]; then
-        echo "[WARN] Alternative git found at $path — this bypasses the guard"
+        echo "[WARN] Alternative git found at $path: this bypasses the guard"
         echo "       The guard only protects /usr/bin/git (the canonical path)"
     fi
 done
 ```
 
-This is informational only. The guard does not attempt to disable snap, nix, or user-installed binaries — it protects the system git path.
+This is informational only. The guard does not attempt to disable snap, nix, or user-installed binaries: it protects the system git path.
 
 ### 5.1 Pre-Flight Checks
 
@@ -167,7 +167,7 @@ After this, any future `apt install git` will place the real git at `/usr/bin/gi
 ORIG_HASH=$(sha256sum /usr/bin/git | awk '{print $1}')
 COPY_HASH=$(sha256sum /usr/bin/git.original | awk '{print $1}')
 if [[ "$ORIG_HASH" != "$COPY_HASH" ]]; then
-    echo "[ERROR] Checksum mismatch — git.original does not match system git"
+    echo "[ERROR] Checksum mismatch: git.original does not match system git"
     rm -f /usr/bin/git.original
     dpkg-divert --remove /usr/bin/git 2>/dev/null || true
     exit 1
@@ -254,7 +254,7 @@ If any step in Phase 3 fails, the script attempts to restore the original state:
 
 ```bash
 rollback_git() {
-    echo "[WARN] Installation failed — attempting rollback..."
+    echo "[WARN] Installation failed: attempting rollback..."
 
     # Remove the guard binary
     rm -f /usr/bin/git
@@ -269,7 +269,7 @@ rollback_git() {
         chmod 0755 /usr/bin/git
         echo "[INFO] Restored /usr/bin/git from git.original"
     else
-        echo "[ERROR] Cannot rollback — git.original not available"
+        echo "[ERROR] Cannot rollback: git.original not available"
         echo "[ERROR] You must manually reinstall git: sudo apt install --reinstall git"
     fi
 }
@@ -295,16 +295,16 @@ if [[ -f /usr/bin/git.original ]]; then
     mv /usr/bin/git.original /usr/bin/git
     chown root:root /usr/bin/git
     chmod 0755 /usr/bin/git
-    echo "✅ Git guard uninstalled — /usr/bin/git restored"
+    echo "✅ Git guard uninstalled: /usr/bin/git restored"
 else
-    # git.distrib was created by dpkg-divert — use that
+    # git.distrib was created by dpkg-divert: use that
     if [[ -f /usr/bin/git.distrib ]]; then
         mv /usr/bin/git.distrib /usr/bin/git
         chown root:root /usr/bin/git
         chmod 0755 /usr/bin/git
-        echo "✅ Git guard uninstalled — restored from git.distrib"
+        echo "✅ Git guard uninstalled: restored from git.distrib"
     else
-        echo "[ERROR] No git backup found — cannot restore"
+        echo "[ERROR] No git backup found: cannot restore"
         exit 1
     fi
 fi

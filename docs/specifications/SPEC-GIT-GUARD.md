@@ -1,4 +1,4 @@
-# Specification: WORKSPACE-GUARD — SUID Guard Framework (Git PoC)
+# Specification: WORKSPACE-GUARD: SUID Guard Framework (Git PoC)
 
 **Date:** 2026-05-18
 **Status:** DRAFT
@@ -45,7 +45,7 @@ It does NOT re-implement git logic. It does NOT re-implement WORKSPACE-CI contra
 
 ### Key Design Principle
 
-> **Deny-list, not allow-list.** The guard blocks known-dangerous operations and passes everything else through. An allow-list would require knowing every git subcommand and flag combination — impossible to maintain. The deny-list covers the operations that actually cause data loss or security breaches.
+> **Deny-list, not allow-list.** The guard blocks known-dangerous operations and passes everything else through. An allow-list would require knowing every git subcommand and flag combination: impossible to maintain. The deny-list covers the operations that actually cause data loss or security breaches.
 
 ---
 
@@ -74,7 +74,7 @@ If `AT_SECURE` returns 0, the binary refuses to operate (exit code 3). This prev
 ### 2.3 Real Git Verification
 
 Before `execve()`, the binary verifies `/usr/bin/git.original`:
-1. `stat()` the path — must exist and be a regular file (`S_IFREG`).
+1. `stat()` the path: must exist and be a regular file (`S_IFREG`).
 2. Owner UID must be 0.
 3. Mode bits must be exactly `0700` (owner rwx only).
 
@@ -88,9 +88,9 @@ If any check fails, exit code 3. This prevents an attacker from replacing git.or
 
 Parsing is a multi-pass process over the argv array. Each phase operates on the result of the previous phase.
 
-**Phase 1 — Null-byte scan:** Every argument byte is checked for `0x00`. If found, exit 2 immediately.
+**Phase 1: Null-byte scan:** Every argument byte is checked for `0x00`. If found, exit 2 immediately.
 
-**Phase 2 — Subcommand identification:** Scan argv left-to-right, maintaining state:
+**Phase 2: Subcommand identification:** Scan argv left-to-right, maintaining state:
 
 ```
 state = scanning_flags
@@ -122,7 +122,7 @@ for each arg in argv[1..]:
             if key in DANGEROUS_CONFIG_KEYS:
                 dangerous_config_keys.push(key)
         else:
-            # -c or -C without value — git will error, but check anyway
+            # -c or -C without value: git will error, but check anyway
             if arg in DANGEROUS_CONFIG_KEYS:
                 dangerous_config_keys.push(arg)
         state = scanning_flags
@@ -158,7 +158,7 @@ for each arg in argv[1..]:
         for ch in chars:
             if ch == 'c' or ch == 'C':
                 state = expecting_config_value
-                break  # remaining chars after -C are part of next arg? No — git treats -Cf as -C -f, but -C needs value
+                break  # remaining chars after -C are part of next arg? No: git treats -Cf as -C -f, but -C needs value
             if ch == 'f': has_force_flag = True
             if ch == 'D': has_branch_D = True
         continue
@@ -172,7 +172,7 @@ for each arg in argv[1..]:
     continue
 ```
 
-**Phase 3 — Subcommand-specific flag collection:** After the subcommand is identified, continue scanning remaining args for subcommand-specific flags:
+**Phase 3: Subcommand-specific flag collection:** After the subcommand is identified, continue scanning remaining args for subcommand-specific flags:
 
 - For `push`: check for `--force`, `-f`, `--force-with-lease` in remaining args
 - For `stash`: check for `drop` or `clear` as positional subcommands
@@ -180,7 +180,7 @@ for each arg in argv[1..]:
 - For `commit`: check for `--amend` in remaining args
 - For `revert`: identify the target commit (first non-flag arg after `revert`, or HEAD)
 
-**Phase 4 — Decision:** Apply the block decision engine (§4) using the collected state. If no block, proceed to `execve()`.
+**Phase 4: Decision:** Apply the block decision engine (§4) using the collected state. If no block, proceed to `execve()`.
 
 ### 3.2 Edge Cases
 
@@ -189,10 +189,10 @@ for each arg in argv[1..]:
 | `git` (no args) | Pass through to real git |
 | `git --` | Pass through (no subcommand, separator only) |
 | `git -- --hard` | `--hard` is a pathspec after `--`, NOT a flag → pass through |
-| `git -c` (no value) | Pass through — git will error on missing value |
+| `git -c` (no value) | Pass through: git will error on missing value |
 | `git -C key=value` | Parse `key=value`, check against dangerous keys |
 | `git -Cf key=value` | `-C` expects value, so `key=value` is the config. `-f` is a dangling flag. |
-| `git -c core.hooksPath=/tmp/evil` | Blocked — key is `core.hooksPath` |
+| `git -c core.hooksPath=/tmp/evil` | Blocked: key is `core.hooksPath` |
 | `git --upload-pack=/bin/sh clone ...` | Blocked if `--upload-pack` is in the block list (it is a dangerous flag) |
 
 ### 3.3 Subcommand Recognition
@@ -210,7 +210,7 @@ The guard only needs to classify subcommands into two categories: **blocked unco
 | `gc` | `merge` (protected branch check) |
 | `prune` | |
 
-Any argument that doesn't match a blocked or flagged subcommand and doesn't start with `-` passes through — git itself validates and rejects unknown subcommands.
+Any argument that doesn't match a blocked or flagged subcommand and doesn't start with `-` passes through: git itself validates and rejects unknown subcommands.
 
 ### 3.4 The `--` Separator
 
@@ -230,7 +230,7 @@ git -- --hard   # "--" makes "--hard" a pathspec, not a flag
 
 ## 4. Block Decision Engine
 
-The guard applies checks in this order. The first block wins — later checks are not evaluated.
+The guard applies checks in this order. The first block wins: later checks are not evaluated.
 
 ```
 1. Destructive subcommand? → BLOCK (reset, checkout, clean, restore, rm, rebase, gc, prune)
@@ -259,7 +259,7 @@ BLOCKED: git <command> <reason> (<ISO-8601-timestamp>)
   → Hint: <alternative action>
 ```
 
-Written to both stderr and `/dev/tty` (if openable). The `/dev/tty` write bypasses stdout/stderr redirection — a user running `git reset --hard > /dev/null 2>&1` will still see the block message on their terminal.
+Written to both stderr and `/dev/tty` (if openable). The `/dev/tty` write bypasses stdout/stderr redirection: a user running `git reset --hard > /dev/null 2>&1` will still see the block message on their terminal.
 
 ### 4.2 Subprocess Checks
 
@@ -417,7 +417,7 @@ std::process::exit(3);
 
 This approach has two advantages over `remove_var()`:
 1. **Completeness**: Any variable not in `ALLOWED_VARS` is absent from the child's environment. No future glibc variable can sneak through.
-2. **Auditability**: The allowed list is the single source of truth — reviewers can verify each entry against its justification.
+2. **Auditability**: The allowed list is the single source of truth: reviewers can verify each entry against its justification.
 
 ---
 
@@ -487,7 +487,7 @@ Example:
 
 ### 7.2 Log Location
 
-`${HOME}/.workspace-guard.log` — the HOME is the **real user's** home directory (from `getpwuid(getuid())`), not root's home. Since the guard runs as SUID root but the real UID is the invoking user, we must use the real UID to find the correct HOME.
+`${HOME}/.workspace-guard.log`: the HOME is the **real user's** home directory (from `getpwuid(getuid())`), not root's home. Since the guard runs as SUID root but the real UID is the invoking user, we must use the real UID to find the correct HOME.
 
 ### 7.3 Secret-Safe Logging
 
@@ -500,4 +500,4 @@ The value portion is replaced with `...` to avoid logging potentially sensitive 
 
 ### 7.4 Log Write Timing
 
-The log file is opened and written **only after** the block decision is made — not during argument processing. This minimises the number of file descriptors opened during the critical path.
+The log file is opened and written **only after** the block decision is made: not during argument processing. This minimises the number of file descriptors opened during the critical path.

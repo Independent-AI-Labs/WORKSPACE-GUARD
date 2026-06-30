@@ -20,7 +20,7 @@ pub fn check_blocked(
         if !state.dangerous_config_keys.is_empty() {
             let keys = state.dangerous_config_keys.join(", ");
             return Err(GuardError::Blocked {
-                reason: format!("git config — dangerous config key(s): {}", keys),
+                reason: format!("git config: dangerous config key(s): {}", keys),
                 hint: "Remove the -c flag with the dangerous config key".into(),
             });
         }
@@ -46,7 +46,7 @@ pub fn check_blocked(
             }
             if is_dangerous_config_key(&s) {
                 return Err(GuardError::Blocked {
-                    reason: format!("git config — dangerous config key: {}", s),
+                    reason: format!("git config: dangerous config key: {}", s),
                     hint: "Use a non-dangerous config key instead".into(),
                 });
             }
@@ -98,14 +98,14 @@ pub fn check_blocked(
     if subcommand == "tag" && state.has_force_flag {
         return Err(GuardError::Blocked {
             reason: "git tag -f (force move tag)".into(),
-            hint: "Tags are immutable — create a new tag instead of force-moving".into(),
+            hint: "Tags are immutable: create a new tag instead of force-moving".into(),
         });
     }
 
     if subcommand == "tag" && state.has_branch_d {
         return Err(GuardError::Blocked {
             reason: "git tag -d / -D (delete tag)".into(),
-            hint: "Tags are immutable — archive rather than delete".into(),
+            hint: "Tags are immutable: archive rather than delete".into(),
         });
     }
 
@@ -121,7 +121,7 @@ pub fn check_blocked(
     if subcommand == "push" && state.has_delete_flag {
         return Err(GuardError::Blocked {
             reason: "git push --delete / -d (delete remote branch)".into(),
-            hint: "Deleting remote branches is forbidden — archive or rename instead".into(),
+            hint: "Deleting remote branches is forbidden: archive or rename instead".into(),
         });
     }
 
@@ -146,7 +146,7 @@ pub fn check_blocked(
     if subcommand == "commit" && state.has_amend {
         return Err(GuardError::Blocked {
             reason: "git commit --amend".into(),
-            hint: "Make a new commit instead — history is immutable, amends are forbidden".into(),
+            hint: "Make a new commit instead: history is immutable, amends are forbidden".into(),
         });
     }
 
