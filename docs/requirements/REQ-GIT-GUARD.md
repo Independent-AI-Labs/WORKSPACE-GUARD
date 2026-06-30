@@ -212,7 +212,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 ### 15A. Root-Only Mode
 
 - **REQ-GGUARD-155**: When built with `--features root-only`, the guard shall skip the `CAP_DAC_OVERRIDE` capability check and instead verify `geteuid() == 0`.
-- **REQ-GGUARD-156**: Root-only mode shall print a warning to stderr on every invocation, documenting that it is a soft barrier and that direct execution of `/usr/bin/git.original` bypasses the guard.
+- **REQ-GGUARD-156**: Root-only mode shall print a notice to stderr on every invocation, documenting that it is a soft barrier. The notice shall NOT reveal the bypass mechanism.
 - **REQ-GGUARD-157**: Root-only mode shall apply the same 17-rule policy engine, environment sanitization, and audit logging as capability mode.
 - **REQ-GGUARD-158**: Root-only mode shall NOT attempt `setcap`, `chattr +i`, or `dpkg-divert` during installation. The bootstrap script shall detect the absence of `setcap` and fall back to a simple copy + symlink installation.
 

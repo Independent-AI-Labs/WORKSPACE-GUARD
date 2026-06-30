@@ -27,14 +27,14 @@ environments where `setcap`, `chattr +i`, and `dpkg-divert` are unavailable:
 | Accidental `git push --force` | Yes | Guard blocks before exec |
 | CI agent running destructive git | Yes | Guard policy engine applies |
 | Adversarial agent trying `git reset` | Yes (soft) | Guard blocks, but bypass is possible |
-| Adversarial agent with root access | No | Root can execute `git.original` directly |
+| Adversarial agent with root access | No | Root can bypass the guard entirely |
 
 ### What Root-Only Mode Does NOT Protect Against
 
-1. **Direct execution of `/usr/bin/git.original`**: In capability mode,
-   `git.original` is mode 0700 root:root: only root can execute it. In
-   root-only mode, the user IS root, so they can run `git.original` directly,
-   bypassing the guard entirely.
+1. **Direct execution of the original git binary**: In capability mode,
+   the backup is mode 0700 root:root: only root can execute it. In
+   root-only mode, the user IS root, so they can bypass the guard
+   entirely by invoking the original binary directly.
 
 2. **PATH manipulation**: A root user can install a git binary anywhere in
    PATH, or modify PATH to skip `/usr/bin/git`.
@@ -50,7 +50,7 @@ environments where `setcap`, `chattr +i`, and `dpkg-divert` are unavailable:
 | Requires `setcap` | Yes | No |
 | Requires `chattr +i` | Yes (recommended) | No |
 | Requires `dpkg-divert` | Yes | No |
-| `git.original` accessible to user | No (mode 0700, root-only) | Yes (user is root) |
+| Backup binary accessible to user | No (mode 0700, root-only) | Yes (user is root) |
 | Bypass resistance | High (requires root + cap manipulation) | Low (root can bypass) |
 | Suitable for production | Yes | No (soft barrier only) |
 | Suitable for PRoot/containers | No (no setcap) | Yes (soft barrier) |
@@ -96,10 +96,9 @@ to root-only installation automatically.
 When built with `root-only`, the guard:
 
 1. Skips the `CAP_DAC_OVERRIDE` capability check
-2. Prints a warning to stderr on every invocation:
+2. Prints a notice to stderr on every invocation:
    ```
-   [workspace-guard] WARNING: running in root-only mode (soft barrier).
-     Direct execution of /usr/bin/git.original bypasses this guard.
+   [workspace-guard] running in root-only mode (soft barrier).
      See docs/ROOT-ONLY-MODE.md for threat model and limitations.
    ```
 3. Applies the full 17-rule policy engine (same as capability mode)

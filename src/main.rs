@@ -245,8 +245,7 @@ fn check_privileges() -> Result<(), GuardError> {
         process::exit(2);
     }
     eprintln!(
-        "[workspace-guard] WARNING: running in root-only mode (soft barrier). \
-         Direct execution of /usr/bin/git.original bypasses this guard. \
+        "[workspace-guard] running in root-only mode (soft barrier). \
          See docs/ROOT-ONLY-MODE.md for threat model and limitations."
     );
     Ok(())
