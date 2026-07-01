@@ -76,7 +76,7 @@ fn timestamp() -> String {
     };
 
     if len > 0 {
-        let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) };
+        let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, len) };
         String::from_utf8_lossy(bytes).to_string()
     } else {
         "1970-01-01T00:00:00+0000".to_string()

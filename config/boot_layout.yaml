@@ -3,7 +3,7 @@
 # Single source of truth for the boot-path resolver (lib/ci.sh::ci_resolve_boot_path)
 # and the compliance audit (ci/check_boot_venv_layout.py). See:
 #   https://github.com/<owner>/<repo>/blob/main/docs/specifications/SPEC-BOOT-LAYOUT.md
-# (or sibling WORKSPACE-CI/docs/specifications/SPEC-BOOT-LAYOUT.md).
+# (or sibling CI/docs/specifications/SPEC-BOOT-LAYOUT.md).
 #
 # Schema (SPEC §4.1):
 #   boot_dir : directory (relative to repo root) where this repo's own
@@ -25,10 +25,10 @@ version: 1
 boot_dir: .boot-linux/
 venv_dir: .venv/  # GUARD has no Python; unused unless a future Python tool lands here.
 inherit:
-  - ../WORKSPACE-CI/.boot-linux
+  - ../CI/.boot-linux
 comment: >
   WORKSPACE-GUARD is a Rust repo. It does not own a Python venv (its
   hooks invoke the CI checks via `uv run --project ../CI --no-sync`
-  rather than via a local .venv). It inherits ../WORKSPACE-CI/.boot-linux
-  for gitleaks binaries owned by WORKSPACE-CI. Boot-layout
+  rather than via a local .venv). It inherits ../CI/.boot-linux
+  for gitleaks binaries owned by CI. Boot-layout
   inheritance mirrors moon.yml::dependsOn: [ci].
