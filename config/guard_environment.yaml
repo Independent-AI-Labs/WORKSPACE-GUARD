@@ -1,0 +1,51 @@
+# workspace-guard environment variable policy.
+#
+# Single source of truth for environment variable lists used by the
+# guard's env sanitization and hook-bypass detection.
+# Compiled into the guard binary at build time via build.rs.
+#
+# Schema:
+#   version              : schema version (currently 1).
+#   allowed              : env vars allowed through the sanitized execve env.
+#   sudo_gated_identity  : git identity env vars gated to root (dropped for non-root).
+#   sudo_gated_editor    : git editor env vars gated to root (dropped for non-root).
+#   blocked_bypass       : hook-bypass env vars that are blocked when non-empty.
+
+version: 1
+
+allowed:
+  - HOME
+  - USER
+  - LANG
+  - LC_ALL
+  - LC_CTYPE
+  - LC_COLLATE
+  - LC_MESSAGES
+  - LC_MONETARY
+  - LC_NUMERIC
+  - LC_TIME
+  - TERM
+  - DISPLAY
+  - WAYLAND_DISPLAY
+  - SSH_AUTH_SOCK
+  - GPG_TTY
+  - PINENTRY_USER_DATA
+  - SHELL
+  - PWD
+
+sudo_gated_identity:
+  - GIT_AUTHOR_NAME
+  - GIT_AUTHOR_EMAIL
+  - GIT_COMMITTER_NAME
+  - GIT_COMMITTER_EMAIL
+  - EMAIL
+
+sudo_gated_editor:
+  - EDITOR
+  - VISUAL
+  - GIT_EDITOR
+  - GIT_SEQUENCE_EDITOR
+
+blocked_bypass:
+  - SKIP
+  - PRE_COMMIT_ALLOW_NO_CONFIG

@@ -1,0 +1,31 @@
+# Schema for guard_environment.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+config: guard_environment
+description: "Environment variable policy: allowed vars, sudo-gated vars, and blocked hook-bypass vars."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: allowed
+    type: list<string>
+    required: true
+    description: "Environment variables allowed through the sanitized execve env to real git (e.g. HOME, USER, LANG)."
+
+  - path: sudo_gated_identity
+    type: list<string>
+    required: true
+    description: "Git identity env vars gated to root. Non-root users have these dropped/ignored (e.g. GIT_AUTHOR_NAME, GIT_COMMITTER_EMAIL)."
+
+  - path: sudo_gated_editor
+    type: list<string>
+    required: true
+    description: "Git editor env vars gated to root. Non-root users have these dropped/ignored (e.g. EDITOR, GIT_EDITOR)."
+
+  - path: blocked_bypass
+    type: list<string>
+    required: true
+    description: "Hook-bypass env vars that are blocked when set to a non-empty value (e.g. SKIP, PRE_COMMIT_ALLOW_NO_CONFIG)."

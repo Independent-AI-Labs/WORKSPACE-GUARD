@@ -1,0 +1,19 @@
+# workspace-guard resource limit policy.
+#
+# Single source of truth for rlimit thresholds and contract-check
+# timing parameters enforced by the guard.
+# Compiled into the guard binary at build time via build.rs.
+#
+# Schema:
+#   version             : schema version (currently 1).
+#   nofile              : max open file descriptors (RLIMIT_NOFILE).
+#   core                : core dump limit (RLIMIT_CORE), 0 = disabled.
+#   contract_timeout_ms : WORKSPACE-CI contract check kill timeout in milliseconds.
+#   contract_poll_ms    : contract check poll interval in milliseconds.
+
+version: 1
+
+nofile: 256
+core: 0
+contract_timeout_ms: 2000
+contract_poll_ms: 50

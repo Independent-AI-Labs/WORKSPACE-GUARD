@@ -1,0 +1,26 @@
+# Schema for guard_config_keys.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+config: guard_config_keys
+description: "Dangerous git config key glob patterns and sudo-gated keys blocked by the guard."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: dangerous
+    type: list<string>
+    required: true
+    description: "Glob patterns for git config keys that are unconditionally blocked for all users. Patterns use * (single segment) and ** (multi-segment) wildcards."
+
+  - path: sudo_gated
+    type: list<string>
+    required: true
+    description: "Git config keys blocked for non-root users only (e.g. user.email, core.editor). Root users may set these."
+
+  - path: value_taking_opts
+    type: list<string>
+    required: true
+    description: "Git config CLI options that consume the next argument as a value (used by the positional-key scanner to skip values)."

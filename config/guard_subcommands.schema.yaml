@@ -1,0 +1,38 @@
+# Schema for guard_subcommands.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+# Consumed by the wiki's ConfigFieldTable component to render
+# field/type/default/description for the configuration reference.
+#
+# Field shape:
+#   config:        the config file name (without .yaml)
+#   description:   one-line summary of the config's purpose
+#   fields:        ordered list of field descriptors
+#     path:          dot-notation path; [] suffix denotes a list
+#     type:          yaml | string | integer | boolean | list | list<T> | map | object
+#     required:      true | false (defaults to false)
+#     default:       default value when omitted (omit if none)
+#     description:   human-readable description of the field
+config: guard_subcommands
+description: "Git subcommand policy: which subcommands are blocked, partially blocked, or require contract checks."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: blocked
+    type: list<string>
+    required: true
+    description: "Git subcommands that are unconditionally denied (e.g. reset, checkout, clean)."
+
+  - path: partial
+    type: list<string>
+    required: true
+    description: "Git subcommands subject to conditional/flag-based blocking (e.g. push with --force, stash drop)."
+
+  - path: contract_check
+    type: list<string>
+    required: true
+    description: "Git subcommands that must pass WORKSPACE-CI quality gates before execution (e.g. commit, push)."

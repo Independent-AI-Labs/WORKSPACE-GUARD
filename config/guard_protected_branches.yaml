@@ -1,0 +1,23 @@
+# workspace-guard protected branch policy.
+#
+# Single source of truth for branch names and prefixes that require
+# --ff-only / --rebase for pull and merge operations.
+# Compiled into the guard binary at build time via build.rs.
+#
+# Schema:
+#   version   : schema version (currently 1).
+#   branches  : branch names (case-insensitive) requiring safe pull/merge.
+#   prefixes  : branch name prefixes (case-insensitive) requiring safe pull/merge.
+
+version: 1
+
+branches:
+  - main
+  - master
+  - develop
+  - production
+  - staging
+  - release
+
+prefixes:
+  - release/

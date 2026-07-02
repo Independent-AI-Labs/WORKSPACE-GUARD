@@ -2,7 +2,10 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::process::ExitStatusExt;
 
-use crate::{args::ArgState, is_config_key_blocked, GuardError, BLOCKED_SUBCOMMANDS};
+use crate::{
+    args::ArgState, is_config_key_blocked, GuardError, BLOCKED_BYPASS_VARS, BLOCKED_SUBCOMMANDS,
+    CHILD_PATH, PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, VALUE_TAKING_OPTS,
+};
 
 pub fn check_blocked(
     state: &ArgState,
@@ -27,7 +30,6 @@ pub fn check_blocked(
         }
         // Check positional key argument (git config <key> <value>)
         // Also catches keys after value-taking options like --file <path> <key>
-        const VALUE_TAKING_OPTS: &[&str] = &["--file", "-f", "--blob", "--get-urlmatch"];
         let mut skip_next = false;
         for arg in argv_os.iter().skip(1) {
             let s = arg.to_string_lossy();
@@ -211,20 +213,14 @@ pub fn check_blocked(
         });
     }
 
-    if let Ok(skip) = std::env::var("SKIP") {
-        if !skip.is_empty() {
-            return Err(GuardError::Blocked {
-                reason: "SKIP environment variable set (hook bypass)".into(),
-                hint: "Unset SKIP before running git commands".into(),
-            });
-        }
-    }
-    if let Ok(allow) = std::env::var("PRE_COMMIT_ALLOW_NO_CONFIG") {
-        if !allow.is_empty() {
-            return Err(GuardError::Blocked {
-                reason: "PRE_COMMIT_ALLOW_NO_CONFIG environment variable set (hook bypass)".into(),
-                hint: "Unset PRE_COMMIT_ALLOW_NO_CONFIG before running git commands".into(),
-            });
+    for &var in BLOCKED_BYPASS_VARS {
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                return Err(GuardError::Blocked {
+                    reason: format!("{} environment variable set (hook bypass)", var),
+                    hint: format!("Unset {} before running git commands", var),
+                });
+            }
         }
     }
 
@@ -233,12 +229,8 @@ pub fn check_blocked(
 
 fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
     let mut cmd = std::process::Command::new(git_path);
-    cmd.env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
-        .env("HOME", "/")
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", "safe.directory")
-        .env("GIT_CONFIG_VALUE_0", "*");
+    cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
+    crate::apply_safe_directory(&mut cmd);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -258,18 +250,13 @@ fn get_current_branch(git_path: &str, cwd: Option<&str>) -> Result<String, ()> {
 }
 
 fn is_protected_branch(git_path: &str, cwd: Option<&str>) -> bool {
-    const PROTECTED: &[&str] = &[
-        "main",
-        "master",
-        "develop",
-        "production",
-        "staging",
-        "release",
-    ];
     match get_current_branch(git_path, cwd) {
         Ok(ref b) => {
             let lower = b.to_lowercase();
-            PROTECTED.contains(&lower.as_str()) || lower.starts_with("release/")
+            PROTECTED_BRANCHES.contains(&lower.as_str())
+                || PROTECTED_BRANCH_PREFIXES
+                    .iter()
+                    .any(|p| lower.starts_with(p))
         }
         Err(_) => false,
     }

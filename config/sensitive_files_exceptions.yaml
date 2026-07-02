@@ -1,2 +1,14 @@
 safe_exceptions:
   - config.toml
+  - guard_config_keys.yaml
+  - guard_config_keys.schema.yaml
+  - guard_environment.yaml
+  - guard_environment.schema.yaml
+  - guard_subcommands.yaml
+  - guard_subcommands.schema.yaml
+  - guard_protected_branches.yaml
+  - guard_protected_branches.schema.yaml
+  - guard_resource_limits.yaml
+  - guard_resource_limits.schema.yaml
+  - guard_paths.yaml
+  - guard_paths.schema.yaml

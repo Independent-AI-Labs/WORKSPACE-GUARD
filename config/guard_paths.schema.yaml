@@ -1,0 +1,40 @@
+# Schema for guard_paths.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+config: guard_paths
+description: "Filesystem paths and path patterns used by the guard for logging, child PATH, scripts, and workspace detection."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: log_file
+    type: string
+    required: true
+    default: .workspace-guard.log
+    description: "Per-user block/warn log filename. Joined onto the user's $HOME directory."
+
+  - path: child_path
+    type: string
+    required: true
+    default: /usr/local/bin:/usr/bin:/bin
+    description: "PATH value passed to child git and bash processes. Centralized to eliminate duplication across call sites."
+
+  - path: contract_script
+    type: string
+    required: true
+    default: projects/CI/lib/checks_quality.sh
+    description: "WORKSPACE-CI quality gate script path, relative to the workspace root."
+
+  - path: enforcement_config
+    type: string
+    required: true
+    default: workspace/config/project_enforcement.yaml
+    description: "Project enforcement YAML path, relative to the workspace root. Used for vendored-tier bypass detection."
+
+  - path: workspace_markers
+    type: list<string>
+    required: true
+    description: "Paths checked to identify the workspace root. All must exist for a directory to be recognized as the workspace root."

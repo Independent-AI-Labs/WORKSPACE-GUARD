@@ -1,0 +1,53 @@
+# workspace-guard subcommand policy.
+#
+# Single source of truth for which git subcommands are blocked,
+# partially blocked, or subject to WORKSPACE-CI contract checks.
+# Compiled into the guard binary at build time via build.rs.
+#
+# Schema:
+#   version          : schema version (currently 1).
+#   blocked          : git subcommands unconditionally denied.
+#   partial          : git subcommands subject to conditional/flag-based blocking.
+#   contract_check   : git subcommands that must pass WORKSPACE-CI quality gates.
+
+version: 1
+
+blocked:
+  - reset
+  - checkout
+  - clean
+  - restore
+  - gc
+  - prune
+  - bisect
+  - filter-branch
+  - filter-repo
+  - submodule
+  - worktree
+  - reflog
+  - replace
+  - lfs
+  - daemon
+  - fast-import
+
+partial:
+  - rm
+  - stash
+  - branch
+  - push
+  - commit
+  - revert
+  - pull
+  - merge
+  - rebase
+  - tag
+  - cherry-pick
+  - apply
+  - am
+
+contract_check:
+  - commit
+  - push
+  - cherry-pick
+  - apply
+  - am

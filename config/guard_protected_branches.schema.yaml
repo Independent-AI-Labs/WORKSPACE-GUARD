@@ -1,0 +1,21 @@
+# Schema for guard_protected_branches.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+config: guard_protected_branches
+description: "Protected branch names and prefixes that require --ff-only/--rebase for pull and merge."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: branches
+    type: list<string>
+    required: true
+    description: "Branch names (case-insensitive) that require --ff-only or --rebase for pull/merge operations (e.g. main, master, develop)."
+
+  - path: prefixes
+    type: list<string>
+    required: true
+    description: "Branch name prefixes (case-insensitive) that require --ff-only or --rebase for pull/merge operations (e.g. release/)."

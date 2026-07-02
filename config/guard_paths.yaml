@@ -1,0 +1,25 @@
+# workspace-guard path constants.
+#
+# Single source of truth for filesystem paths and path patterns used
+# by the guard for logging, child process PATH, contract scripts,
+# enforcement config, and workspace-root detection.
+# Compiled into the guard binary at build time via build.rs.
+#
+# Schema:
+#   version            : schema version (currently 1).
+#   log_file           : per-user block/warn log filename (joined onto $HOME).
+#   child_path         : PATH value passed to child git/bash processes.
+#   contract_script    : WORKSPACE-CI quality gate script (relative to workspace root).
+#   enforcement_config : project enforcement YAML (relative to workspace root).
+#   workspace_markers  : paths checked to identify the workspace root.
+
+version: 1
+
+log_file: .workspace-guard.log
+child_path: /usr/local/bin:/usr/bin:/bin
+contract_script: projects/CI/lib/checks_quality.sh
+enforcement_config: workspace/config/project_enforcement.yaml
+workspace_markers:
+  - .boot-linux
+  - projects/CI
+  - workspace/scripts/utils/git-guard

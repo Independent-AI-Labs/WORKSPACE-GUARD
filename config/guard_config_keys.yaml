@@ -1,0 +1,104 @@
+# workspace-guard dangerous git config key policy.
+#
+# Single source of truth for git config key glob patterns that are
+# blocked or sudo-gated. Glob patterns use * (single segment) and
+# ** (multi-segment) wildcards, matched by the DP routine in
+# config_keys.rs::glob_match_segments.
+# Compiled into the guard binary at build time via build.rs.
+#
+# Schema:
+#   version           : schema version (currently 1).
+#   dangerous         : glob patterns for git config keys that are
+#                       unconditionally blocked (all users).
+#   sudo_gated        : git config keys blocked for non-root users only.
+#   value_taking_opts : git config options that consume the next arg
+#                       (used by the positional-key scanner to skip values).
+
+version: 1
+
+dangerous:
+  - core.hookspath
+  - core.sshcommand
+  - core.excludesfile
+  - core.pager
+  - core.askpass
+  - core.fsmonitor
+  - core.alternaterefscommand
+  - core.gitproxy
+  - diff.external
+  - gpg.program
+  - gpg.*.program
+  - protocol.allow
+  - protocol.*.allow
+  - safe.directory
+  - include.path
+  - includeif.**.path
+  - alias.*
+  - url.**.insteadof
+  - credential.helper
+  - credential.**.helper
+  - http.proxy
+  - https.proxy
+  - http.sslverify
+  - http.sslcainfo
+  - http.sslcert
+  - http.sslkey
+  - http.sslcertpasswordprotected
+  - http.extraheader
+  - http.cookiefile
+  - filter.*.clean
+  - filter.*.smudge
+  - diff.*.textconv
+  - diff.*.cachetextconv
+  - difftool.*.cmd
+  - mergetool.*.cmd
+  - mergetool.*.trustexitcode
+  - browser.*.cmd
+  - remote.*.proxy
+  - remote.*.promisor
+  - remote.*.uploadpack
+  - remote.*.receivepack
+  - submodule.*.url
+  - submodule.*.update
+  - submodule.recurse
+  - commit.gpgsign
+  - commit.template
+  - commit.cleanup
+  - rebase.autosquash
+  - rebase.autostash
+  - rebase.instructionFormat
+  - receive.denyCurrentBranch
+  - receive.denyNonFastForwards
+  - receive.denyDeletes
+  - receive.hideRefs
+  - uploadpack.hideRefs
+  - uploadpack.allowReachableSHA1InWant
+  - uploadpack.allowAnySHA1InWant
+  - fetch.fsckObjects
+  - transfer.fsckObjects
+  - receive.fsckObjects
+  - fetch.prune
+  - clone.rejectShallow
+  - push.default
+  - push.followTags
+  - push.gpgSign
+  - merge.ff
+  - merge.verifySignatures
+  - pull.ff
+  - pull.rebase
+  - format.signoff
+  - sendemail.smtpserver
+  - help.autocorrect
+
+sudo_gated:
+  - core.editor
+  - sequence.editor
+  - user.email
+  - user.name
+  - user.signingkey
+
+value_taking_opts:
+  - --file
+  - -f
+  - --blob
+  - --get-urlmatch

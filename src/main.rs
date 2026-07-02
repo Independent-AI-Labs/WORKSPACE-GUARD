@@ -22,72 +22,11 @@ pub enum GuardError {
     ContractFailed(String),
 }
 
-const BLOCKED_SUBCOMMANDS: &[&str] = &[
-    "reset",
-    "checkout",
-    "clean",
-    "restore",
-    "gc",
-    "prune",
-    "bisect",
-    "filter-branch",
-    "filter-repo",
-    "submodule",
-    "worktree",
-    "reflog",
-    "replace",
-    "lfs",
-    "daemon",
-    "fast-import",
-];
+mod guard_config {
+    include!(concat!(env!("OUT_DIR"), "/guard_config.rs"));
+}
 
-const SUBCOMMANDS_WITH_PARTIAL_BLOCKS: &[&str] = &[
-    "rm",
-    "stash",
-    "branch",
-    "push",
-    "commit",
-    "revert",
-    "pull",
-    "merge",
-    "rebase",
-    "tag",
-    "cherry-pick",
-    "apply",
-    "am",
-];
-
-pub const ALLOWED_VARS: &[&str] = &[
-    "HOME",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
-    "LC_COLLATE",
-    "LC_MESSAGES",
-    "LC_MONETARY",
-    "LC_NUMERIC",
-    "LC_TIME",
-    "TERM",
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
-    "SSH_AUTH_SOCK",
-    "GPG_TTY",
-    "PINENTRY_USER_DATA",
-    "SHELL",
-    "PWD",
-];
-
-pub const SUDO_GATED_IDENTITY_ENV_VARS: &[&str] = &[
-    "GIT_AUTHOR_NAME",
-    "GIT_AUTHOR_EMAIL",
-    "GIT_COMMITTER_NAME",
-    "GIT_COMMITTER_EMAIL",
-    "EMAIL",
-];
-
-pub const SUDO_GATED_EDITOR_ENV_VARS: &[&str] =
-    &["EDITOR", "VISUAL", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR"];
+pub use guard_config::*;
 
 pub fn is_sudo() -> bool {
     unsafe { libc::getuid() == 0 }
@@ -95,7 +34,18 @@ pub fn is_sudo() -> bool {
 
 pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
 pub const GIT_ORIGINAL_PATH: &str = "/usr/bin/git.original";
-pub const LOG_FILE: &str = ".workspace-guard.log";
+
+pub fn apply_safe_directory(cmd: &mut std::process::Command) {
+    cmd.env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "safe.directory")
+        .env("GIT_CONFIG_VALUE_0", "*");
+}
+
+pub fn push_safe_directory_env(envp: &mut Vec<std::ffi::CString>) {
+    envp.push(std::ffi::CString::new("GIT_CONFIG_COUNT=1").unwrap());
+    envp.push(std::ffi::CString::new("GIT_CONFIG_KEY_0=safe.directory").unwrap());
+    envp.push(std::ffi::CString::new("GIT_CONFIG_VALUE_0=*").unwrap());
+}
 
 fn main() {
     let argv_os: Vec<OsString> = std::env::args_os().collect();
@@ -176,8 +126,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     if let Some(ref sub) = state.subcommand {
         block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
 
-        if sub == "commit" || sub == "push" || sub == "cherry-pick" || sub == "apply" || sub == "am"
-        {
+        if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
             exec::check_workspace_ci_contract(sub)?;
         }
     }

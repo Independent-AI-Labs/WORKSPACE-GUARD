@@ -1,0 +1,35 @@
+# Schema for guard_resource_limits.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+config: guard_resource_limits
+description: "Resource limit thresholds and contract-check timing parameters."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: nofile
+    type: integer
+    required: true
+    default: 256
+    description: "Maximum number of open file descriptors (RLIMIT_NOFILE) for the guard and child git process."
+
+  - path: core
+    type: integer
+    required: true
+    default: 0
+    description: "Core dump limit (RLIMIT_CORE). 0 disables core dumps."
+
+  - path: contract_timeout_ms
+    type: integer
+    required: true
+    default: 2000
+    description: "WORKSPACE-CI contract check kill timeout in milliseconds. The contract check child is SIGKILLed after this duration."
+
+  - path: contract_poll_ms
+    type: integer
+    required: true
+    default: 50
+    description: "Contract check poll interval in milliseconds. The guard sleeps this long between waitpid(WNOHANG) retries."

@@ -4,7 +4,11 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::{args::ArgState, GuardError, ALLOWED_VARS, GIT_ORIGINAL};
+use crate::{
+    args::ArgState, GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT,
+    CONTRACT_TIMEOUT_MS, CORE_LIMIT, ENFORCEMENT_CONFIG, GIT_ORIGINAL, NOFILE_LIMIT,
+    WORKSPACE_MARKERS,
+};
 
 #[cfg(feature = "capability-mode")]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
@@ -45,15 +49,15 @@ pub fn set_resource_limits() {
         libc::setrlimit(
             libc::RLIMIT_NOFILE,
             &libc::rlimit {
-                rlim_cur: 256,
-                rlim_max: 256,
+                rlim_cur: NOFILE_LIMIT,
+                rlim_max: NOFILE_LIMIT,
             },
         );
         libc::setrlimit(
             libc::RLIMIT_CORE,
             &libc::rlimit {
-                rlim_cur: 0,
-                rlim_max: 0,
+                rlim_cur: CORE_LIMIT,
+                rlim_max: CORE_LIMIT,
             },
         );
     }
@@ -187,11 +191,9 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     let safe_home = resolve_safe_home();
     envp.push(CString::new(format!("HOME={}", safe_home)).unwrap());
 
-    envp.push(CString::new("PATH=/usr/local/bin:/usr/bin:/bin").unwrap());
+    envp.push(CString::new(format!("PATH={}", CHILD_PATH)).unwrap());
 
-    envp.push(CString::new("GIT_CONFIG_COUNT=1").unwrap());
-    envp.push(CString::new("GIT_CONFIG_KEY_0=safe.directory").unwrap());
-    envp.push(CString::new("GIT_CONFIG_VALUE_0=*").unwrap());
+    crate::push_safe_directory_env(&mut envp);
 
     if sudo {
         for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS
@@ -239,16 +241,13 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
 }
 
 pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
-    let toplevel = match std::process::Command::new("/usr/bin/git.original")
+    let mut toplevel_cmd = std::process::Command::new("/usr/bin/git.original");
+    toplevel_cmd
         .env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
-        .env("HOME", "/")
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", "safe.directory")
-        .env("GIT_CONFIG_VALUE_0", "*")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-    {
+        .env("PATH", CHILD_PATH)
+        .env("HOME", "/");
+    crate::apply_safe_directory(&mut toplevel_cmd);
+    let toplevel = match toplevel_cmd.args(["rev-parse", "--show-toplevel"]).output() {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => return Ok(()),
     };
@@ -267,7 +266,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         ));
     }
 
-    let ci_script = format!("{}/projects/CI/lib/checks_quality.sh", wsroot);
+    let ci_script = format!("{}/{}", wsroot, CONTRACT_SCRIPT);
     if !Path::new(&ci_script).exists() {
         eprintln!(
             "WARNING: WORKSPACE-CI contract check script not found at {}",
@@ -278,7 +277,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
 
     let child = std::process::Command::new("/bin/bash")
         .env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("PATH", CHILD_PATH)
         .env("HOME", "/")
         .arg(&ci_script)
         .env("WORKSPACE_GGUARD_CMD", subcommand)
@@ -292,9 +291,9 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     let mut stderr_pipe = child.stderr;
 
     let mut status: libc::c_int = 0;
-    let timeout_ms = 2000;
+    let timeout_ms = CONTRACT_TIMEOUT_MS;
     unsafe {
-        let mut elapsed = 0;
+        let mut elapsed: u64 = 0;
         loop {
             let ret = libc::waitpid(pid, &mut status, libc::WNOHANG);
             if ret == pid {
@@ -312,8 +311,8 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
                 );
                 return Ok(());
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            elapsed += 50;
+            std::thread::sleep(std::time::Duration::from_millis(CONTRACT_POLL_MS));
+            elapsed += CONTRACT_POLL_MS;
         }
     }
 
@@ -337,7 +336,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
 }
 
 fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
-    let enforce_path = Path::new(wsroot).join("workspace/config/project_enforcement.yaml");
+    let enforce_path = Path::new(wsroot).join(ENFORCEMENT_CONFIG);
     if !enforce_path.exists() {
         return false;
     }
@@ -425,10 +424,7 @@ fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
 fn find_workspace_root(toplevel: &str) -> Option<String> {
     let mut cur = std::path::PathBuf::from(toplevel);
     loop {
-        let boot = cur.join(".boot-linux");
-        let ci = cur.join("projects/CI");
-        let guard = cur.join("workspace/scripts/utils/git-guard");
-        if boot.is_dir() && ci.is_dir() && guard.is_file() {
+        if WORKSPACE_MARKERS.iter().all(|m| cur.join(m).exists()) {
             return Some(cur.to_string_lossy().to_string());
         }
         if !cur.pop() {
