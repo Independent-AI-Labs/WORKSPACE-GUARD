@@ -12,6 +12,7 @@ pub struct ArgState {
     pub has_stash_drop: bool,
     pub has_stash_clear: bool,
     pub safe_pull_flag: bool,
+    pub has_rebase_safe_flag: bool,
     pub has_ff_only: bool,
     pub has_cached: bool,
     pub has_delete_flag: bool,
@@ -68,6 +69,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         has_stash_drop: false,
         has_stash_clear: false,
         safe_pull_flag: false,
+        has_rebase_safe_flag: false,
         has_ff_only: false,
         has_cached: false,
         has_delete_flag: false,
@@ -332,6 +334,22 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                     }
                     if s == "--ff-only" {
                         state.has_ff_only = true;
+                    }
+                }
+            }
+            if resolved == "rebase" {
+                let mut past_dash = false;
+                for &sarg in &argv[i + 1..] {
+                    let s = std::str::from_utf8(sarg).unwrap_or("");
+                    if s == "--" {
+                        past_dash = true;
+                        continue;
+                    }
+                    if past_dash {
+                        continue;
+                    }
+                    if s == "--continue" || s == "--abort" || s == "--skip" {
+                        state.has_rebase_safe_flag = true;
                     }
                 }
             }

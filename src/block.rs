@@ -203,6 +203,13 @@ pub fn check_blocked(
         });
     }
 
+    if subcommand == "rebase" && !state.has_rebase_safe_flag {
+        return Err(GuardError::Blocked {
+            reason: "git rebase (destructive rewrite of history)".into(),
+            hint: "Use 'git rebase --continue/--abort/--skip' to complete an in-progress rebase, or use 'git pull --rebase' instead".into(),
+        });
+    }
+
     if let Ok(skip) = std::env::var("SKIP") {
         if !skip.is_empty() {
             return Err(GuardError::Blocked {
