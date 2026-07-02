@@ -27,7 +27,7 @@ repos:
         always_run: true
 
       - id: ci-check-silent-swallow
-        name: Block error-swallow patterns (staged diff)
+        name: Block error-swallow patterns (all files)
         entry: "bash -c 'source ../CI/lib/checks.sh && ci_check_silent_swallow'"
         language: system
         pass_filenames: false
