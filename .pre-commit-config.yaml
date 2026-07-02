@@ -20,8 +20,8 @@ repos:
         always_run: true
 
       - id: gitleaks
-        name: Block secrets in staged content (gitleaks)
-        entry: gitleaks protect --staged --redact --no-banner --verbose
+        name: Block secrets in all files (gitleaks)
+        entry: "bash -c 'source ../CI/lib/checks.sh && ci_scan_secrets'"
         language: system
         pass_filenames: false
         always_run: true
