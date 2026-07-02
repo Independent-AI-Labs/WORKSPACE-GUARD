@@ -70,7 +70,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-040**: The following git config keys, when set via `-c` or `-C`, shall be blocked:
   - `core.hooksPath`: redirects hook execution to attacker-controlled directory
   - `core.sshCommand`: replaces SSH command, enabling arbitrary execution
-  - `core.editor` / `core.excludesFile`: can be used to execute arbitrary commands
+  - `core.editor` / `core.excludesFile`: can be used to execute arbitrary commands (`core.editor` is sudo-gated: blocked for non-root via `-c`, allowed for root)
   - `protocol.<name>.allow`: can enable dangerous protocols (e.g., `ext::`)
   - `safe.directory`: can bypass repository ownership checks
   - `core.gitProxy`: intercepts git network operations
@@ -103,7 +103,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   - `GIT_SSH_COMMAND`: same
   - `GIT_ASKPASS`: can execute arbitrary commands during auth prompts
   - `GIT_TERMINAL_PROMPT`: can affect interactive behaviour
-  - `GIT_EDITOR` / `GIT_SEQUENCE_EDITOR`: can execute arbitrary commands
+  - `GIT_EDITOR` / `GIT_SEQUENCE_EDITOR`: can execute arbitrary commands (sudo-gated: dropped with a warning for non-root, passed through for root)
   - `GIT_CONFIG` / `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`: can redirect config loading
   - `GIT_CEILING_DIRECTORIES`: can affect repo discovery
   - `GIT_DIR` / `GIT_WORK_TREE` / `GIT_NAMESPACE`: can redirect git to wrong repository

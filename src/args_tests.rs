@@ -323,7 +323,7 @@ fn parse_args_rm_cached() {
 #[test]
 fn parse_args_config_key_trim_newline() {
     let key = "core.hooksPath\n";
-    assert!(is_dangerous_config_key(key));
+    assert!(is_config_key_blocked(key, false));
 }
 
 #[test]

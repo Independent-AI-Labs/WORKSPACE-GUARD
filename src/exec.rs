@@ -111,7 +111,36 @@ fn is_guard_binary(path: &Path) -> bool {
     }
 }
 
+fn collect_sudo_gated_env_warnings(sudo: bool) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if sudo {
+        return warnings;
+    }
+    for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS {
+        if let Some(val) = std::env::var_os(var) {
+            if !val.is_empty() {
+                warnings.push(format!(
+                    "[{}] NON-ROOT USER HAS SET CUSTOM GIT CONFIG COMMITTER DATA - IGNORING.",
+                    var
+                ));
+            }
+        }
+    }
+    for &var in crate::SUDO_GATED_EDITOR_ENV_VARS {
+        if let Some(val) = std::env::var_os(var) {
+            if !val.is_empty() {
+                warnings.push(format!(
+                    "[{}] NON-ROOT USER HAS SET CUSTOM GIT EDITOR - IGNORING.",
+                    var
+                ));
+            }
+        }
+    }
+    warnings
+}
+
 pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result<(), GuardError> {
+    let sudo = crate::is_sudo();
     if let Some(s) = state {
         if !s.dangerous_config_keys.is_empty() {
             return Err(GuardError::Blocked {
@@ -122,6 +151,10 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     }
 
     verify_git_original()?;
+
+    for msg in collect_sudo_gated_env_warnings(sudo) {
+        crate::log::warn(&msg);
+    }
 
     let git_path = CStr::from_bytes_with_nul(GIT_ORIGINAL.as_bytes())
         .map_err(|_| GuardError::GitOriginalMissing)?;
@@ -159,6 +192,20 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     envp.push(CString::new("GIT_CONFIG_COUNT=1").unwrap());
     envp.push(CString::new("GIT_CONFIG_KEY_0=safe.directory").unwrap());
     envp.push(CString::new("GIT_CONFIG_VALUE_0=*").unwrap());
+
+    if sudo {
+        for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS
+            .iter()
+            .chain(crate::SUDO_GATED_EDITOR_ENV_VARS.iter())
+        {
+            if let Some(val) = std::env::var_os(var) {
+                let entry = format!("{}={}", var, val.to_string_lossy());
+                if let Ok(c) = CString::new(entry) {
+                    envp.push(c);
+                }
+            }
+        }
+    }
 
     let mut argv_ptrs: Vec<*const libc::c_char> = argv_c.iter().map(|s| s.as_ptr()).collect();
     argv_ptrs.push(std::ptr::null());

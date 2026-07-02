@@ -136,3 +136,24 @@ fn fork_child_clears_and_exits() {
         assert_eq!(libc::WEXITSTATUS(status), 0);
     }
 }
+
+#[test]
+fn sudo_gated_env_warnings_non_sudo_drops_with_message() {
+    std::env::set_var("GIT_AUTHOR_NAME", "evil");
+    std::env::set_var("GIT_COMMITTER_EMAIL", "c@d.com");
+    std::env::set_var("EDITOR", "vim");
+    let msgs = collect_sudo_gated_env_warnings(false);
+    std::env::remove_var("GIT_AUTHOR_NAME");
+    std::env::remove_var("GIT_COMMITTER_EMAIL");
+    std::env::remove_var("EDITOR");
+
+    assert!(msgs.iter().any(|m| m.contains("[GIT_AUTHOR_NAME]")
+        && m.contains("NON-ROOT USER HAS SET CUSTOM GIT CONFIG COMMITTER DATA - IGNORING.")));
+    assert!(msgs.iter().any(|m| m.contains("[GIT_COMMITTER_EMAIL]")
+        && m.contains("NON-ROOT USER HAS SET CUSTOM GIT CONFIG COMMITTER DATA - IGNORING.")));
+    assert!(msgs.iter().any(|m| m.contains("[EDITOR]")
+        && m.contains("NON-ROOT USER HAS SET CUSTOM GIT EDITOR - IGNORING.")));
+
+    let msgs_sudo = collect_sudo_gated_env_warnings(true);
+    assert!(msgs_sudo.is_empty());
+}

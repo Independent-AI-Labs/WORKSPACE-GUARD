@@ -59,12 +59,15 @@ The core insight: if the *real* binary is mode 0700 root:root and the *guard* bi
 ### 4. Environment Sanitization
 
 - **REQ-GGUARD-060**: The guard shall construct a minimal environment for `execve` containing only a whitelisted set of variables.
-- **REQ-GGUARD-061**: The whitelist shall include: `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `DISPLAY`, `WAYLAND_DISPLAY`, `SSH_AUTH_SOCK`, `GPG_TTY`, `GIT_*`, `EMAIL`, `EDITOR`, `VISUAL`, `SHELL`, `PWD`.
+- **REQ-GGUARD-061**: The whitelist shall include: `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `DISPLAY`, `WAYLAND_DISPLAY`, `SSH_AUTH_SOCK`, `GPG_TTY`, `PINENTRY_USER_DATA`, `SHELL`, `PWD`. (See REQ-GGUARD-069 for sudo-gated vars.)
 - **REQ-GGUARD-062**: The guard shall set `PATH` to a hardcoded value: `/usr/local/bin:/usr/bin:/bin`.
 - **REQ-GGUARD-063**: The guard shall inject `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, `GIT_CONFIG_VALUE_0=*` to suppress git's ownership check without needing a user-level config.
-- **REQ-GGUARD-064**: The guard shall block `-c` flags with dangerous config keys: `core.hookspath`, `core.sshcommand`, `core.editor`, `core.excludesfile`, `protocol.allow`, `protocol.ext.allow`, `safe.directory`, `core.gitproxy`, `url.insteadof`, `credential.helper`, `http.proxy`, `https.proxy`.
+- **REQ-GGUARD-064**: The guard shall block `-c` flags with dangerous config keys: `core.hookspath`, `core.sshcommand`, `core.excludesfile`, `protocol.allow`, `protocol.ext.allow`, `safe.directory`, `core.gitproxy`, `url.insteadof`, `credential.helper`, `http.proxy`, `https.proxy`. (See REQ-GGUARD-068 for sudo-gated keys.)
 - **REQ-GGUARD-065**: The guard shall block `SKIP` and `PRE_COMMIT_ALLOW_NO_CONFIG` environment variables.
 - **REQ-GGUARD-066**: The guard shall sanitize `-c` flags passed via `--c=key=val` long-form syntax.
+- **REQ-GGUARD-067**: The guard shall treat an invocation with real UID 0 (`getuid()==0`, e.g. `sudo git`) as privileged.
+- **REQ-GGUARD-068**: The guard shall block `-c`/`-C`/`--config`/`--config-env`/`git config <key>` use of sudo-gated config keys (`core.editor`, `sequence.editor`, `user.name`, `user.email`, `user.signingkey`) for non-root users (exit 1 + audit); root may set them.
+- **REQ-GGUARD-069**: For non-root users, the guard shall drop sudo-gated environment variables (`EDITOR`, `VISUAL`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`, `EMAIL`) with an explicit warning written to stderr, `/dev/tty`, and the audit log (no exit); root shall pass them through to the child.
 
 ### 5. Audit Logging
 

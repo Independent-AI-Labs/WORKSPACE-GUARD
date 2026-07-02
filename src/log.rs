@@ -40,6 +40,33 @@ pub fn block(reason: &str, hint: &str, cmd: &str) -> ! {
     process::exit(1);
 }
 
+pub fn warn(message: &str) {
+    let ts = timestamp();
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "?".to_string());
+    let uid = unsafe { libc::getuid() };
+
+    eprintln!("{}", message);
+
+    if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
+        let _ = writeln!(&tty, "{}", message);
+    }
+
+    let home = get_user_home(uid);
+    if let Some(ref home_dir) = home {
+        let log_path = Path::new(home_dir).join(LOG_FILE);
+        if let Ok(mut f) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&log_path)
+        {
+            let _ = writeln!(f, "{}|{}|WARN|{}|uid={}", ts, cwd, message, uid);
+        }
+    }
+}
+
 fn get_user_home(uid: u32) -> Option<String> {
     unsafe {
         let pw = libc::getpwuid(uid);

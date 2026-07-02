@@ -290,8 +290,8 @@ GIT_SSH              → SSH command replacement
 GIT_SSH_COMMAND      → SSH command replacement (newer)
 GIT_ASKPASS          → auth prompt command
 GIT_TERMINAL_PROMPT  → interactive prompt control
-GIT_EDITOR           → editor command
-GIT_SEQUENCE_EDITOR  → editor for interactive rebase
+GIT_EDITOR           → editor command (sudo-gated: passed through only for root)
+GIT_SEQUENCE_EDITOR  → editor for interactive rebase (sudo-gated: passed through only for root)
 GIT_CONFIG           → config file override
 GIT_CONFIG_GLOBAL    → global config file override
 GIT_CONFIG_SYSTEM    → system config file override
@@ -362,11 +362,17 @@ DISPLAY, WAYLAND_DISPLAY → GUI git tools (gitk, git-gui)
 SSH_AUTH_SOCK        → SSH agent for git+ssh operations
 GPG_TTY, PINENTRY_USER_DATA → GPG signing
 GIT_PAGER            → output pager
-EDITOR, VISUAL       → user's preferred editor (distinct from GIT_EDITOR)
+EDITOR, VISUAL       → user's preferred editor (sudo-gated: dropped with a warning for non-root)
 SHELL                → user's shell
 PATH                 → set to known-safe value (§5.2)
 PWD                  → current directory
 ```
+
+The commit-identity vars `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`, and `EMAIL`, plus the editor vars
+above (`EDITOR`, `VISUAL`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`), are
+**sudo-gated**: dropped (with an explicit warning, no exit) for non-root and
+passed through only when the guard runs as root (`getuid()==0`).
 
 ### 5.4 Implementation: Allow-List Approach
 

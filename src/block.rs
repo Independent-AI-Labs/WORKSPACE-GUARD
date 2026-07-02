@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::process::ExitStatusExt;
 
-use crate::{args::ArgState, is_dangerous_config_key, GuardError, BLOCKED_SUBCOMMANDS};
+use crate::{args::ArgState, is_config_key_blocked, GuardError, BLOCKED_SUBCOMMANDS};
 
 pub fn check_blocked(
     state: &ArgState,
@@ -11,6 +11,7 @@ pub fn check_blocked(
     git_path: &str,
     cwd: Option<&str>,
 ) -> Result<(), GuardError> {
+    let sudo = crate::is_sudo();
     if subcommand == "config" {
         // Only block git config when setting a dangerous key.
         // Legitimate git config (user.name, user.email, etc.) is allowed.
@@ -44,7 +45,7 @@ pub fn check_blocked(
                 }
                 continue;
             }
-            if is_dangerous_config_key(&s) {
+            if is_config_key_blocked(&s, sudo) {
                 return Err(GuardError::Blocked {
                     reason: format!("git config: dangerous config key: {}", s),
                     hint: "Use a non-dangerous config key instead".into(),

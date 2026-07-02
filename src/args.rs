@@ -1,5 +1,5 @@
 use crate::{
-    is_dangerous_config_key, GuardError, BLOCKED_SUBCOMMANDS, SUBCOMMANDS_WITH_PARTIAL_BLOCKS,
+    is_config_key_blocked, GuardError, BLOCKED_SUBCOMMANDS, SUBCOMMANDS_WITH_PARTIAL_BLOCKS,
 };
 
 pub struct ArgState {
@@ -44,7 +44,8 @@ fn check_and_record_dangerous_config(key: &str, dangerous_keys: &mut Vec<String>
     if key.is_empty() {
         return;
     }
-    if is_dangerous_config_key(key) {
+    let sudo = crate::is_sudo();
+    if is_config_key_blocked(key, sudo) {
         dangerous_keys.push(key.to_string());
     }
 }
@@ -98,7 +99,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if let Some(pos) = arg_str.find('=') {
                 let key = arg_str[..pos].trim();
                 check_and_record_dangerous_config(key, &mut state.dangerous_config_keys);
-            } else if is_dangerous_config_key(arg_str.trim()) {
+            } else if is_config_key_blocked(arg_str.trim(), crate::is_sudo()) {
                 state.dangerous_config_keys.push(arg_str.to_string());
             }
             expecting_config = false;

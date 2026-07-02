@@ -45,7 +45,7 @@ WORKSPACE-GUARD solves this by:
   : unreadable and unexecutable by non-root)
 3. Guarding all arguments, config keys, and environment **before** `execve()`-ing
    the real binary
-4. Sanitizing the execution environment from scratch (22-variable allow-list,
+4. Sanitizing the execution environment from scratch (18-variable allow-list,
    hardcoded `PATH`, injected `safe.directory=*` to suppress ownership checks)
 
 The user cannot bypass the guard: they cannot read, modify, or directly execute
@@ -68,7 +68,7 @@ User: git push --force
   │    └─ check_null_bytes, resolve abbreviations,
   │       detect --amend, --force, --hard, --no-verify, -n/-N,
   │       --upload-pack, --receive-pack, --exec, --delete,
-  │       parse -c/-C config keys against 101-pattern glob list
+   │       parse -c/-C config keys against 96-pattern glob list
   ├─ check_blocked(&state, &argv)                    ← policy engine (17 rules)
   │    └─ blocked? → BLOCKED + audit log → exit 1
   ├─ check_workspace_ci_contract(subcommand)         ← commit/push only
@@ -114,14 +114,14 @@ Real git runs with user's uid/gid, sanitised env, no extra caps
 `--hard`, `--no-verify`, `-n`, `-N`, `--upload-pack`, `--receive-pack`, `--exec`,
 any `\0` byte in arguments
 
-## Dangerous Config Key Patterns (101 Patterns)
+## Dangerous Config Key Patterns (96 Patterns)
 
 The `-c`/`-C`/`--config`/`--config-env` flags are intercepted. A dynamic
-programming glob matcher checks each key against 101 patterns covering:
+programming glob matcher checks each key against 96 patterns covering:
 
 | Category | Examples |
 |----------|----------|
-| Core internals | `core.hookspath`, `core.sshcommand`, `core.editor`, `core.fsmonitor`, `core.pager` |
+| Core internals | `core.hookspath`, `core.sshcommand`, `core.fsmonitor`, `core.pager` |
 | Protocol | `protocol.*.allow`, `protocol.allow` |
 | Safe directory | `safe.directory` |
 | Include files | `include.path`, `includeif.**.path` |
@@ -133,10 +133,43 @@ programming glob matcher checks each key against 101 patterns covering:
 | Diff/Merge tools | `diff.*.textconv`, `difftool.*.cmd`, `mergetool.*.cmd` |
 | Remotes | `remote.*.proxy`, `remote.*.uploadpack`, `remote.*.receivepack` |
 | Submodules | `submodule.*.url`, `submodule.recurse` |
-| User identity | `user.email`, `user.name`, `user.signingkey` |
 
 Glob syntax: `*` matches one config-key segment (between dots), `**` matches
 zero or more segments. Keys are matched case-insensitively.
+
+## Sudo-Gated Keys & Environment Variables
+
+Certain user-identity and editor settings are **not** in the always-allowed
+env list or the always-dangerous config list: they are *sudo-gated*. An
+invocation is privileged when the real UID is 0 (`getuid()==0`, i.e. the guard
+was run via `sudo`/as root).
+
+**Config keys** (`-c`/`-C`/`--config`/`--config-env`/`git config <key>`):
+`core.editor`, `sequence.editor`, `user.name`, `user.email`, `user.signingkey`.
+
+| Caller | Behavior |
+|--------|----------|
+| Non-root | Blocked (exit 1 + audit) |
+| Root (`sudo`) | Allowed |
+
+**Environment variables:** `EDITOR`, `VISUAL`, `GIT_EDITOR`,
+`GIT_SEQUENCE_EDITOR`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`, `EMAIL`.
+
+| Caller | Behavior |
+|--------|----------|
+| Non-root | **Dropped** (not passed to the child) with an explicit warning to stderr, `/dev/tty`, and the audit log. The command still runs. |
+| Root (`sudo`) | Passed through to the child |
+
+The guard cannot distinguish an inline `export X=... && git` from a var that
+was exported beforehand; both simply appear in the child's `envp`. So any
+presence of a gated env var under non-root is treated uniformly: warn + drop.
+Every dropped variable emits an explicit warning.
+
+Warning strings:
+
+- Identity vars: `[<VAR>] NON-ROOT USER HAS SET CUSTOM GIT CONFIG COMMITTER DATA - IGNORING.`
+- Editor vars: `[<VAR>] NON-ROOT USER HAS SET CUSTOM GIT EDITOR - IGNORING.`
 
 ## Environment Sanitization
 
@@ -144,11 +177,12 @@ The guard **constructs the child environment from scratch** using an allow-list
 rather than stripping dangerous variables. This is a closed surface: future
 glibc or git variables cannot sneak through.
 
-**Allowed variables (22):** `HOME`, `USER`, `LANG`, `LC_ALL`, `LC_CTYPE`,
+**Allowed variables (18):** `HOME`, `USER`, `LANG`, `LC_ALL`, `LC_CTYPE`,
 `LC_COLLATE`, `LC_MESSAGES`, `LC_MONETARY`, `LC_NUMERIC`, `LC_TIME`, `TERM`,
 `DISPLAY`, `WAYLAND_DISPLAY`, `SSH_AUTH_SOCK`, `GPG_TTY`, `PINENTRY_USER_DATA`,
-`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`,
-`GIT_COMMITTER_EMAIL`, `EMAIL`, `SHELL`, `PWD`
+`SHELL`, `PWD`. (The 9 user-identity/editor vars `GIT_AUTHOR_*`,
+`GIT_COMMITTER_*`, `EMAIL`, `EDITOR`, `VISUAL`, `GIT_EDITOR`,
+`GIT_SEQUENCE_EDITOR` are sudo-gated; see above.)
 
 **Hardcoded:** `PATH=/usr/local/bin:/usr/bin:/bin`
 
@@ -292,7 +326,7 @@ WORKSPACE-GUARD/
    `NO_NEW_PRIVS`-safe, and avoids `geteuid() != getuid()` edge cases
 4. **dpkg-divert protected**: `apt` cannot overwrite `/usr/bin/git`: divert
    redirects to `git.distrib`
-5. **Allow-list environment**: Only 22 whitelisted variables reach the child;
+5. **Allow-list environment**: Only 18 whitelisted variables reach the child;
    `PATH` is hardcoded; `safe.directory=*` injected to suppress ownership checks
 6. **No core dumps**: `RLIMIT_CORE=0` prevents memory disclosure from crashes
 7. **File descriptor limits**: `RLIMIT_NOFILE=256` prevents fd exhaustion attacks
