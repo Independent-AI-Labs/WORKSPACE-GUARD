@@ -2,8 +2,8 @@
 
 A Rust binary that replaces `/usr/bin/git` to enforce immutable, unbypassable
 policies on destructive and history-rewriting operations. Uses **file
-capabilities** (`CAP_DAC_OVERRIDE`) rather than SUID: more granular, correctly
-handles `NO_NEW_PRIVS` contexts, and avoids the `geteuid() != getuid()` trap.
+capabilities** (`CAP_DAC_OVERRIDE`): more granular, correctly handles
+`NO_NEW_PRIVS` contexts, and keeps privilege analysis straightforward.
 
 For environments where file capabilities are unavailable (PRoot, containers
 running as root, user namespaces), a **root-only mode** provides a soft barrier
@@ -39,7 +39,7 @@ Shell-based git guards (bash wrappers, pre-commit hooks) are readable, editable,
 and bypassable: run `git` from an alternate path or unset the wrapper.
 WORKSPACE-GUARD solves this by:
 
-1. Installing a **compiled Rust binary** as `/usr/bin/git` (mode 4555, with
+1. Installing a **compiled Rust binary** as `/usr/bin/git` (mode 0755, with
    `CAP_DAC_OVERRIDE` file capability)
 2. Relocating the real git to `/usr/bin/git.original` (mode **0700 root:root**
   : unreadable and unexecutable by non-root)
@@ -313,7 +313,7 @@ WORKSPACE-GUARD/
 │   ├── exec.rs                 # File cap checks, execve, env construct, CI contract
 │   ├── log.rs                  # block() diverging fn, audit logging, /dev/tty output
 ├── tests/
-│   └── integration_test.rs     # Non-SUID operations: cap check, compile, blocked cmd
+│   └── integration_test.rs     # Operations: cap check, compile, blocked cmd
 └── README.md
 ```
 
@@ -322,8 +322,8 @@ WORKSPACE-GUARD/
 1. **Compiled enforcement**: Guard logic is opaque binary, not readable or editable
 2. **No privilege retained**: Capabilities cleared in child before `execve`: real
    git runs as the user, not with elevated caps
-3. **File capabilities over SUID**: `CAP_DAC_OVERRIDE` is more granular,
-   `NO_NEW_PRIVS`-safe, and avoids `geteuid() != getuid()` edge cases
+3. **File capabilities**: `CAP_DAC_OVERRIDE` is granular,
+   `NO_NEW_PRIVS`-safe, and keeps privilege analysis straightforward
 4. **dpkg-divert protected**: `apt` cannot overwrite `/usr/bin/git`: divert
    redirects to `git.distrib`
 5. **Allow-list environment**: Only 18 whitelisted variables reach the child;
@@ -360,7 +360,7 @@ command.
 ## Framework Design
 
 WORKSPACE-GUARD is a **framework** for hardening access to any tool via the
-same SUID/caps + compiled policy pattern. The initial PoC targets `git`, but
+same caps + compiled policy pattern. The initial PoC targets `git`, but
 the architecture supports extending to other binaries (ssh, rsync, make, etc.)
 by creating separate guard crates with their own allow/block lists.
 
