@@ -1,4 +1,4 @@
-# WORKSPACE-GUARD: Compiled Privilege Enforcement for Git
+# Compiled Privilege Enforcement for Git
 
 A Rust binary that replaces `/usr/bin/git` to enforce immutable, unbypassable
 policies on destructive and history-rewriting operations. Uses **file
