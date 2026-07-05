@@ -4,7 +4,8 @@ use std::os::unix::process::ExitStatusExt;
 
 use crate::{
     args::ArgState, is_config_key_blocked, GuardError, BLOCKED_BYPASS_VARS, BLOCKED_SUBCOMMANDS,
-    CHILD_PATH, PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, VALUE_TAKING_OPTS,
+    CHILD_PATH, PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, SUDO_GATED_SUBCOMMANDS,
+    VALUE_TAKING_OPTS,
 };
 
 pub fn check_blocked(
@@ -53,6 +54,19 @@ pub fn check_blocked(
                     hint: "Use a non-dangerous config key instead".into(),
                 });
             }
+        }
+    } else if SUDO_GATED_SUBCOMMANDS.contains(&subcommand) {
+        if !sudo {
+            return Err(GuardError::Blocked {
+                reason: format!(
+                    "sudo-gated subcommand: git {} (non-root denied)",
+                    subcommand
+                ),
+                hint: format!(
+                    "Run with sudo: 'sudo git {}' (root-only operation)",
+                    subcommand
+                ),
+            });
         }
     } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
         return Err(GuardError::Blocked {
@@ -231,6 +245,9 @@ fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
     let mut cmd = std::process::Command::new(git_path);
     cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
     crate::apply_safe_directory(&mut cmd);
+    for (k, v) in crate::gitdir::hardened_git_env() {
+        cmd.env(k, v);
+    }
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -280,3 +297,7 @@ fn run_git(git_path: &str, cwd: Option<&str>, args: &[&str]) -> std::process::Ex
         .status()
         .unwrap_or_else(|_| std::process::ExitStatus::from_raw(1))
 }
+
+#[cfg(test)]
+#[path = "block_tests.rs"]
+mod tests;

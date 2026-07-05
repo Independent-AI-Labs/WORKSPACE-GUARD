@@ -18,12 +18,12 @@ pre-req.sh main flow:
   3. Install missing (if --install mode)
      ├── Install apt packages
      └── Bootstrap gcc if needed
-  4. Build and install git guard (NEW SECTION)
-     ├── Notify user about SUID installation
-     ├── Build Rust binary
-     ├── Relocate real git
-     ├── Install SUID guard
-     └── Verify + rollback on failure
+4. Build and install git guard (NEW SECTION)
+         ├── Notify user about capability installation
+         ├── Build Rust binary
+         ├── Relocate real git
+         ├── Install capability guard (setcap: cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep)
+         └── Verify + rollback on failure
 ```
 
 The git guard section runs unconditionally after dependency installation (not gated on missing packages). If the guard is already installed, it skips without notice (unless `--reinstall-git-guard` is passed).
@@ -32,7 +32,7 @@ The git guard section runs unconditionally after dependency installation (not ga
 
 | Flag | Behaviour |
 |------|-----------|
-| `--uninstall-git-guard` | Uninstall the SUID guard, restore system git |
+| `--uninstall-git-guard` | Uninstall the capability guard, restore system git |
 | `--reinstall-git-guard` | Force re-install even if already installed |
 
 These flags are mutually exclusive with `--install` and `--ci`.
@@ -196,6 +196,63 @@ EOF
 
 systemctl restart rsyslog
 ```
+
+### 11.7 `.git` Ownership Lock (Capability Mode)
+
+The guard (capability mode only) calls `gitdir::lock()` which recursively
+claims the **entire** `.git/` directory tree as `root:root`. Users cannot
+directly write to ANY part of `.git/`. They can still operate the repository
+because the guard grants `CAP_DAC_OVERRIDE` to `git.original` via the Ambient
+capability set for the duration of the authorized subcommand only.
+
+The lock runs **twice** per invocation:
+
+1. **Before the policy engine**: resolves `.git` via
+   `git.original rev-parse --absolute-git-dir` under a hardened environment
+   (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`,
+   `GIT_CONFIG_SYSTEM=/dev/null`, plus injected `core.fsmonitor=`,
+   `core.hooksPath=` via `GIT_CONFIG_*` overrides). Then recursively chowns
+   the entire `.git/` tree to `root:root` (0o755 dirs, 0o644 files, 0o755 hooks).
+2. **After `git.original` exits**: the parent process re-locks `.git/`
+   immediately after `waitpid()`, reclaiming any files git.original created
+   or modified (which will be owned by the real user's uid) back to
+   `root:root`. This closes the backdoor window.
+
+The lock is idempotent (skips the `chown`/`chmod` syscall when the path is
+already `root:root` with the target mode) and best-effort (never blocks a
+legitimate git invocation that already passed the policy engine). The lock is
+skipped under `sudo` (real UID 0): root already owns the paths. Root-only mode
+does NOT apply the lock (`src/gitdir.rs` is gated by
+`#[cfg(feature = "capability-mode")]`).
+
+The installer must `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep' /usr/bin/git`
+(CAP_SETPCAP is needed so the forked child can raise CAP_DAC_OVERRIDE into
+its Ambient set before exec'ing git.original; the other caps are needed
+for the guard's own chown/chmod of the `.git/` tree).
+
+Because `.git/hooks/*` files are root-owned in capability mode, hook
+installation must run **as root** so the script can write into the root-owned
+hooks directory: `sudo make install-hooks`. Hook files are kept at 0o755
+(executable) so git actually invokes them (non-executable hooks are skipped
+skipped by git, which would bypass all enforcement. The WORKSPACE-CI
+`generate-hooks` flow inherits the guard's caps when it runs `git` internally,
+so the hooks it writes are owned `root:root` with the exec bit set.
+
+#### Capability flow
+
+The guard binary has 5 file caps:
+`cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep`.
+
+At startup, `raise_ambient_caps()` raises all 5 into the **Inheritable** set
+but does NOT raise anything into **Ambient**. This means:
+- Policy-check sub-calls (block.rs `git_cmd()`): fork+exec git.original from
+  the parent) get **no caps** (ambient empty → least-privilege read-only).
+- The main exec path (`execve_real_git`) forks → child calls
+  `raise_child_dac_override()` which clears Ambient, then raises
+  `CAP_DAC_OVERRIDE` into Ambient → execs git.original.
+  git.original (a non-privileged binary with no file caps) inherits
+  `CAP_DAC_OVERRIDE` in effective+permitted+ambient → can write to
+  root-owned `.git/` files. When git.original exits, the cap dies with it.
 
 ---
 

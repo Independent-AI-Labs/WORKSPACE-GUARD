@@ -6,7 +6,8 @@
 #
 # Schema:
 #   version          : schema version (currently 1).
-#   blocked          : git subcommands unconditionally denied.
+#   blocked          : git subcommands unconditionally denied (even for sudo).
+#   sudo_gated       : git subcommands denied for non-root, allowed for root.
 #   partial          : git subcommands subject to conditional/flag-based blocking.
 #   contract_check   : git subcommands that must pass WORKSPACE-CI quality gates.
 
@@ -22,13 +23,15 @@ blocked:
   - bisect
   - filter-branch
   - filter-repo
-  - submodule
   - worktree
   - reflog
   - replace
   - lfs
   - daemon
   - fast-import
+
+sudo_gated:
+  - submodule
 
 partial:
   - rm

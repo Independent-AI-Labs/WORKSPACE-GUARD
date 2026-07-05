@@ -1,6 +1,18 @@
-# WORKSPACE-GUARD Makefile: SUID guard framework (git PoC).
+# WORKSPACE-GUARD Makefile: Capability guard framework (git PoC).
 #
-# This repo is a sibling of WORKSPACE-CI under projects/.
+# This repo is a sibling of WORKSPACE-CI under projects/. The actual
+# installation of the guard binary (setcap, dpkg-divert, chattr, apt hook)
+# is owned by WORKSPACE-CI's bootstrap-workspace-guard script, invoked
+# from this repo's Makefile via the build-guard/install-guard/check-guard
+# targets that delegate to ../CI/Makefile.
+#
+# IMPORTANT: In capability mode, gitdir::lock() claims the entire .git/
+# tree as root:root. Hook files under .git/hooks/ are kept at 0o755
+# (executable) so git actually invokes them. Hook installation still
+# REQUIRES root (so the script can write into the root-owned hooks dir).
+# Run `sudo make install-hooks` in capability mode. The generate-hooks
+# flow in WORKSPACE-CI inherits the guard's caps when it runs git
+# internally, so the hooks it writes are root-owned with the exec bit set.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -76,6 +88,13 @@ install-ci: preflight install-gitleaks ## CI install: gitleaks + no hooks (CI en
 
 .PHONY: install-hooks
 install-hooks: preflight ## Regenerate native git hooks from .pre-commit-config.yaml
+	@if [ -d .git/hooks ] && [ "$$(stat -c '%u' .git/hooks)" = "0" ] \
+			&& [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: .git/hooks is root:root (locked by gitdir::lock in capability mode)." >&2; \
+		echo "       Hook installation requires root: sudo make install-hooks" >&2; \
+		echo "       (or run before the guard is installed / in root-only mode)" >&2; \
+		exit 1; \
+	fi
 	@if [ -x "$(CI_DIR)/scripts/cleanup-precommit" ]; then \
 		bash "$(CI_DIR)/scripts/cleanup-precommit"; \
 	fi

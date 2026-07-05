@@ -6,6 +6,28 @@ mod args;
 mod block;
 mod config_keys;
 mod exec;
+#[cfg(feature = "capability-mode")]
+mod gitdir;
+
+#[cfg(not(feature = "capability-mode"))]
+mod gitdir {
+    #[allow(dead_code)]
+    pub fn lock() {}
+    pub fn hardened_git_env() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_CONFIG_SYSTEM", "/dev/null"),
+            ("GIT_CONFIG_COUNT", "3"),
+            ("GIT_CONFIG_KEY_0", "safe.directory"),
+            ("GIT_CONFIG_VALUE_0", "*"),
+            ("GIT_CONFIG_KEY_1", "core.fsmonitor"),
+            ("GIT_CONFIG_VALUE_1", ""),
+            ("GIT_CONFIG_KEY_2", "core.hooksPath"),
+            ("GIT_CONFIG_VALUE_2", ""),
+        ]
+    }
+}
 mod log;
 
 pub use config_keys::{is_config_key_blocked, is_dangerous_config_key};
@@ -66,7 +88,9 @@ fn main() {
         }
         Err(GuardError::MissingCap) => {
             eprintln!(
-                "FATAL: missing CAP_DAC_OVERRIDE: guard must be installed with file capabilities"
+                "FATAL: missing file capabilities (needs \
+                 cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep): \
+                 reinstall guard"
             );
             process::exit(2);
         }
@@ -97,14 +121,17 @@ fn check_privileges() -> Result<(), GuardError> {
 
 #[cfg(not(feature = "root-only"))]
 fn check_privileges() -> Result<(), GuardError> {
-    if !caps::has_cap(
-        None,
-        caps::CapSet::Effective,
+    const REQUIRED_CAPS: [caps::Capability; 5] = [
+        caps::Capability::CAP_SETPCAP,
+        caps::Capability::CAP_CHOWN,
         caps::Capability::CAP_DAC_OVERRIDE,
-    )
-    .unwrap_or(false)
-    {
-        return Err(GuardError::MissingCap);
+        caps::Capability::CAP_FOWNER,
+        caps::Capability::CAP_FSETID,
+    ];
+    for cap in REQUIRED_CAPS.iter().copied() {
+        if !caps::has_cap(None, caps::CapSet::Effective, cap).unwrap_or(false) {
+            return Err(GuardError::MissingCap);
+        }
     }
     exec::raise_ambient_caps()?;
     Ok(())
@@ -125,6 +152,14 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 
     if let Some(ref sub) = state.subcommand {
         block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
+
+        // Capability-mode .git ownership lock: claim the security-sensitive
+        // paths (.git/config, .git/hooks/*, repo-root .gitmodules) as
+        // root:root before any further git.original subprocess can fire a
+        // payload planted inside them. Best-effort; never blocks a pass.
+        // Root-only builds are no-ops (user is already root).
+        #[cfg(feature = "capability-mode")]
+        gitdir::lock();
 
         if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
             exec::check_workspace_ci_contract(sub)?;

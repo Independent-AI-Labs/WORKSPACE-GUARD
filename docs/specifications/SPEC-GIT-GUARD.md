@@ -488,7 +488,7 @@ If `checks_quality.sh` is not found at the expected path, the guard emits a warn
 
 Example:
 ```
-2026-05-18T14:32:01+00:00|${HOME}/projects/AMI-PORTAL|git reset|destructive subcommand|uid=1000
+2026-05-18T14:32:01+00:00|${HOME}/projects/WORKSPACE-PORTAL|git reset|destructive subcommand|uid=1000
 ```
 
 ### 7.2 Log Location

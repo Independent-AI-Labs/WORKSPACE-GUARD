@@ -85,8 +85,8 @@ exemptions:
 }
 
 #[test]
-fn clear_child_caps_succeeds() {
-    assert!(clear_child_caps().is_ok());
+fn raise_child_dac_override_does_not_panic() {
+    raise_child_dac_override();
 }
 
 #[cfg(feature = "capability-mode")]
@@ -125,7 +125,7 @@ fn fork_child_clears_and_exits() {
     let pid = unsafe { libc::fork() };
     assert!(pid >= 0, "fork should succeed");
     if pid == 0 {
-        let _ = clear_child_caps();
+        raise_child_dac_override();
         std::process::exit(0);
     } else {
         let mut status: libc::c_int = 0;

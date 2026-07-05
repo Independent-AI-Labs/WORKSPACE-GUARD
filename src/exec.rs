@@ -12,25 +12,40 @@ use crate::{
 
 #[cfg(feature = "capability-mode")]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
-    caps::raise(
-        None,
-        caps::CapSet::Inheritable,
+    // Raise all guard caps into the Inheritable set so forked children
+    // can promote them into Ambient before exec. We do NOT raise
+    // anything into Ambient here: the parent already has Effective caps
+    // from the file's +ep flags and does not need Ambient. Keeping
+    // Ambient empty ensures policy-check sub-calls (block.rs git_cmd)
+    // that fork+exec git.original from the parent get NO caps.
+    const INHERITABLE_CAPS: [caps::Capability; 5] = [
+        caps::Capability::CAP_SETPCAP,
+        caps::Capability::CAP_CHOWN,
         caps::Capability::CAP_DAC_OVERRIDE,
-    )
-    .map_err(|_| GuardError::MissingCap)?;
-    caps::raise(
-        None,
-        caps::CapSet::Ambient,
-        caps::Capability::CAP_DAC_OVERRIDE,
-    )
-    .map_err(|_| GuardError::MissingCap)?;
+        caps::Capability::CAP_FOWNER,
+        caps::Capability::CAP_FSETID,
+    ];
+    for cap in INHERITABLE_CAPS.iter().copied() {
+        caps::raise(None, caps::CapSet::Inheritable, cap).map_err(|_| GuardError::MissingCap)?;
+    }
     Ok(())
 }
 
+/// Called in the child process after fork, just before execve(git.original).
+/// Raises CAP_DAC_OVERRIDE into the child's Ambient set so that
+/// git.original (a non-privileged binary with no file caps) inherits it
+/// across exec and can write to root-owned .git/ files.
+///
+/// Requires CAP_SETPCAP in Effective (inherited from parent via fork)
+/// and CAP_DAC_OVERRIDE in Inheritable+Permitted (also inherited).
 #[cfg(feature = "capability-mode")]
-fn clear_child_caps() -> Result<(), GuardError> {
-    caps::clear(None, caps::CapSet::Ambient).map_err(|_| GuardError::MissingCap)?;
-    Ok(())
+fn raise_child_dac_override() {
+    let _ = caps::clear(None, caps::CapSet::Ambient);
+    let _ = caps::raise(
+        None,
+        caps::CapSet::Ambient,
+        caps::Capability::CAP_DAC_OVERRIDE,
+    );
 }
 
 #[cfg(not(feature = "capability-mode"))]
@@ -40,9 +55,7 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
 }
 
 #[cfg(not(feature = "capability-mode"))]
-fn clear_child_caps() -> Result<(), GuardError> {
-    Ok(())
-}
+fn raise_child_dac_override() {}
 
 pub fn set_resource_limits() {
     unsafe {
@@ -218,7 +231,7 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     match pid {
         -1 => Err(GuardError::GitOriginalMissing),
         0 => {
-            let _ = clear_child_caps();
+            raise_child_dac_override();
             unsafe {
                 libc::execve(git_path.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
                 libc::_exit(3);
@@ -228,6 +241,10 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
             let mut status: libc::c_int = 0;
             unsafe {
                 libc::waitpid(pid, &mut status, 0);
+            }
+            #[cfg(feature = "capability-mode")]
+            {
+                crate::gitdir::lock();
             }
             if libc::WIFEXITED(status) {
                 std::process::exit(libc::WEXITSTATUS(status));

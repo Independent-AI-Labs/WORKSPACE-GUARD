@@ -1,5 +1,6 @@
 use crate::{
     is_config_key_blocked, GuardError, BLOCKED_SUBCOMMANDS, SUBCOMMANDS_WITH_PARTIAL_BLOCKS,
+    SUDO_GATED_SUBCOMMANDS,
 };
 
 pub struct ArgState {
@@ -23,6 +24,7 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
     let raw_lower = raw.to_lowercase();
     let all_candidates: Vec<&&str> = BLOCKED_SUBCOMMANDS
         .iter()
+        .chain(SUDO_GATED_SUBCOMMANDS.iter())
         .chain(SUBCOMMANDS_WITH_PARTIAL_BLOCKS.iter())
         .collect();
 

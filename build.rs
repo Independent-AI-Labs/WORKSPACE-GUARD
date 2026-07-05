@@ -14,6 +14,8 @@ struct SubcommandsConfig {
     #[serde(default = "default_version")]
     _version: u32,
     blocked: Vec<String>,
+    #[serde(default)]
+    sudo_gated: Vec<String>,
     partial: Vec<String>,
     contract_check: Vec<String>,
 }
@@ -112,6 +114,7 @@ fn main() {
 
     code.push_str("// --- guard_subcommands.yaml ---\n");
     emit_str_list(&mut code, "BLOCKED_SUBCOMMANDS", &subcommands.blocked);
+    emit_str_list(&mut code, "SUDO_GATED_SUBCOMMANDS", &subcommands.sudo_gated);
     emit_str_list(
         &mut code,
         "SUBCOMMANDS_WITH_PARTIAL_BLOCKS",

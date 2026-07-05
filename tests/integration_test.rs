@@ -1,6 +1,6 @@
 // Integration tests for the guard binary.
 // These tests run against the debug binary, which has no file capabilities,
-// so the guard exits with FATAL: missing CAP_DAC_OVERRIDE. This is expected
+// so the guard exits with FATAL: missing file capabilities. This is expected
 // the guard only operates when installed with file capabilities at /usr/bin/git.
 // These tests verify the binary compiles and runs without crashes.
 
@@ -24,8 +24,8 @@ fn guard_exits_missing_cap() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("CAP_DAC_OVERRIDE"),
-        "stderr should mention CAP_DAC_OVERRIDE: {stderr}"
+        stderr.contains("missing file capabilities"),
+        "stderr should mention missing file capabilities: {stderr}"
     );
 }
 
@@ -42,8 +42,8 @@ fn guard_exits_missing_cap_on_blocked_cmd() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("CAP_DAC_OVERRIDE"),
-        "stderr should mention CAP_DAC_OVERRIDE: {stderr}"
+        stderr.contains("missing file capabilities"),
+        "stderr should mention missing file capabilities: {stderr}"
     );
 }
 
