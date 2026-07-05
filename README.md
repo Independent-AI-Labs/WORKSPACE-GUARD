@@ -104,12 +104,15 @@ User: git push --force
 Real git runs with user's uid/gid, sanitised env, no extra caps
 ```
 
-## Blocked Operations (17 Policy Rules)
+## Blocked Operations (18 Policy Rules)
 
 ### Unconditionally Blocked Subcommands
-`reset`, `checkout`, `clean`, `restore`, `rebase`, `gc`, `prune`, `bisect`,
-`filter-branch`, `filter-repo`, `submodule`, `worktree`, `reflog`, `replace`,
+`reset`, `clean`, `restore`, `rebase`, `gc`, `prune`, `bisect`,
+`filter-branch`, `filter-repo`, `worktree`, `reflog`, `replace`,
 `lfs`, `daemon`, `fast-import`
+
+### Sudo-Gated Subcommands (denied for non-root; allowed for root via `sudo`)
+`submodule`, `checkout`
 
 ### Flag-Gated Blocks
 
@@ -452,8 +455,8 @@ already root) and `gitdir::lock()` is a no-op (the module is `#[cfg(feature =
 cargo build                                              # Debug (capability-mode)
 cargo build --no-default-features --features root-only   # Debug (root-only)
 cargo build --release                                    # Release (opt-level=z, LTO, abort-on-panic, stripped)
-cargo test                                               # Cap mode: 86 unit + 3 integration tests
-cargo test --no-default-features --features root-only    # Root-only: 80 unit + 3 integration tests
+cargo test                                               # Cap mode: 88 unit + 3 integration tests
+cargo test --no-default-features --features root-only    # Root-only: 82 unit + 3 integration tests
 cargo fmt --all -- --check                               # Format check
 cargo clippy --workspace --all-targets -- -D warnings    # Strict lint
 make test                                                # Full workspace test suite (cargo test + integration)

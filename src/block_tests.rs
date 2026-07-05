@@ -51,3 +51,22 @@ fn blocked_still_blocked_for_root() {
     let result = check_blocked(&state, "reset", &argv_os, "/nonexistent-git", None);
     assert!(matches!(result, Err(GuardError::Blocked { .. })));
 }
+
+#[test]
+fn sudo_gated_checkout_allowed_for_root() {
+    let state = empty_state("checkout");
+    let argv_os = argv(&["git", "checkout", "--", "."]);
+    let sudo = crate::is_sudo();
+    let result = check_blocked(&state, "checkout", &argv_os, "/nonexistent-git", None);
+    if sudo {
+        assert!(result.is_ok(), "root should be allowed: {:?}", result);
+    } else {
+        assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    }
+}
+
+#[test]
+fn checkout_not_in_blocked_list() {
+    assert!(!BLOCKED_SUBCOMMANDS.contains(&"checkout"));
+    assert!(SUDO_GATED_SUBCOMMANDS.contains(&"checkout"));
+}

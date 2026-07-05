@@ -15,7 +15,6 @@ version: 1
 
 blocked:
   - reset
-  - checkout
   - clean
   - restore
   - gc
@@ -32,6 +31,7 @@ blocked:
 
 sudo_gated:
   - submodule
+  - checkout
 
 partial:
   - rm

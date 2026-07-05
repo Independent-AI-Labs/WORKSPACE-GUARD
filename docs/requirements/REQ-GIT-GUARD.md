@@ -47,13 +47,15 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 - **REQ-GGUARD-020**: The following subcommands shall be unconditionally blocked with exit code 1:
   - `reset`
-  - `checkout`
   - `clean`
   - `restore`
   - `rm`
   - `rebase`
   - `gc`
   - `prune`
+- **REQ-GGUARD-020a**: The following subcommands shall be sudo-gated (denied for non-root, allowed for root via `sudo`):
+  - `submodule`
+  - `checkout`
 - **REQ-GGUARD-021**: The block message shall include the blocked command, a timestamp (ISO 8601), and shall be written to both stderr and `/dev/tty` (if available) so it cannot be silenced by `> /dev/null 2>&1`.
 
 ### 4. Destructive Flag Blocks (Global)

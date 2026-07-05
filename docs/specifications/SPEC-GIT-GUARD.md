@@ -233,7 +233,7 @@ git -- --hard   # "--" makes "--hard" a pathspec, not a flag
 The guard applies checks in this order. The first block wins: later checks are not evaluated.
 
 ```
-1. Destructive subcommand? → BLOCK (reset, checkout, clean, restore, rm, rebase, gc, prune)
+1. Destructive subcommand? → BLOCK (reset, clean, restore, rm, rebase, gc, prune). Sudo-gated (non-root blocked, root allowed): submodule, checkout
 2. Global destructive flag? → BLOCK (--hard, --no-verify)
 3. Dangerous -c/-C key? → BLOCK (core.hooksPath, core.sshCommand, etc.)
 4. Subcommand-specific block?
@@ -272,7 +272,7 @@ Some checks require invoking real git:
 | `revert` (is-on-remote) | `git merge-base --is-ancestor <target> origin/<branch>` | 2s | Skip check (warn) |
 | Protected branch | `git rev-parse --abbrev-ref HEAD` | 2s | Skip check (warn) |
 
-When a subprocess times out, the associated safety check is **skipped** (not blocked). The rationale: these are preventive checks, not destructive command blocks. The destructive commands themselves (reset, checkout, etc.) are blocked by the static deny-list regardless of subprocess availability.
+When a subprocess times out, the associated safety check is **skipped** (not blocked). The rationale: these are preventive checks, not destructive command blocks. The destructive commands themselves (reset, clean, restore, etc.) are blocked by the static deny-list regardless of subprocess availability. `checkout` is sudo-gated (root may run it via sudo for conflict resolution).
 
 ---
 
