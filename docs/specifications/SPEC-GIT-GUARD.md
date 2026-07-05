@@ -237,7 +237,7 @@ The guard applies checks in this order. The first block wins: later checks are n
 2. Global destructive flag? → BLOCK (--hard, --no-verify)
 3. Dangerous -c/-C key? → BLOCK (core.hooksPath, core.sshCommand, etc.)
 4. Subcommand-specific block?
-   4a. stash drop/clear? → BLOCK
+   4a. stash drop/clear (non-root)? → BLOCK
    4b. branch -D? → BLOCK
    4c. push --force/-f/--force-with-lease? → BLOCK
    4d. push from background? → BLOCK
@@ -245,7 +245,7 @@ The guard applies checks in this order. The first block wins: later checks are n
    4f. revert on unpushed commit? → BLOCK
 5. Protected branch rule?
    5a. pull on main/master without --ff-only/--rebase? → BLOCK
-   5b. merge on main/master without --ff-only (and without --abort)? → BLOCK
+   5b. merge on main/master without --ff-only (and without --abort, non-root)? → BLOCK
 6. Hook-bypass env var? → BLOCK (SKIP, PRE_COMMIT_ALLOW_NO_CONFIG)
 7. AMI-CI contract check? → BLOCK if contract fails (enforce mode)
 8. ALL CLEAR → execve real git

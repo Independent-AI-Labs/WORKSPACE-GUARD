@@ -70,3 +70,31 @@ fn checkout_not_in_blocked_list() {
     assert!(!BLOCKED_SUBCOMMANDS.contains(&"checkout"));
     assert!(SUDO_GATED_SUBCOMMANDS.contains(&"checkout"));
 }
+
+#[test]
+fn sudo_gated_stash_drop() {
+    let mut state = empty_state("stash");
+    state.has_stash_drop = true;
+    let argv_os = argv(&["git", "stash", "drop"]);
+    let sudo = crate::is_sudo();
+    let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
+    if sudo {
+        assert!(result.is_ok(), "root should be allowed: {:?}", result);
+    } else {
+        assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    }
+}
+
+#[test]
+fn sudo_gated_stash_clear() {
+    let mut state = empty_state("stash");
+    state.has_stash_clear = true;
+    let argv_os = argv(&["git", "stash", "clear"]);
+    let sudo = crate::is_sudo();
+    let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
+    if sudo {
+        assert!(result.is_ok(), "root should be allowed: {:?}", result);
+    } else {
+        assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    }
+}

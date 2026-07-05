@@ -85,7 +85,7 @@ pub fn check_blocked(
         });
     }
 
-    if subcommand == "stash" && (state.has_stash_drop || state.has_stash_clear) {
+    if subcommand == "stash" && (state.has_stash_drop || state.has_stash_clear) && !sudo {
         let what = if state.has_stash_drop {
             "drop"
         } else {
@@ -214,6 +214,7 @@ pub fn check_blocked(
     }
 
     if subcommand == "merge"
+        && !sudo
         && is_protected_branch(git_path, cwd)
         && !state.has_ff_only
         && !state.has_merge_abort

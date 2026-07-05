@@ -82,7 +82,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 6. Subcommand-Specific Blocks
 
-- **REQ-GGUARD-050**: `stash` subcommand: block when any argument is `drop` or `clear`.
+- **REQ-GGUARD-050**: `stash` subcommand: block when any argument is `drop` or `clear` (non-root only; sudo-gated for root).
 - **REQ-GGUARD-051**: `branch` subcommand: block when any argument is `-D` (force delete). The `-d` (safe delete) shall be allowed.
 - **REQ-GGUARD-052**: `push` subcommand: block when `--force`, `-f`, or `--force-with-lease` is present.
 - **REQ-GGUARD-053**: `push` subcommand: block when the process is **not in the foreground process group** of its controlling terminal. Detection: read `/proc/self/stat`, compare field 5 (pgrp) with field 8 (tpgid). If `tpgid > 0` and `pgrp != tpggid`, block. If `/proc/self/stat` is unreadable, emit a warning to stderr but allow the push (degraded operation).
@@ -93,7 +93,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 - **REQ-GGUARD-060**: A branch is **protected** if its name is `main` or `master`.
 - **REQ-GGUARD-061**: `pull` on a protected branch: block unless `--ff-only`, `--rebase`, `--rebase=true`, `--rebase=interactive`, or `--rebase=merges` is present.
-- **REQ-GGUARD-062**: `merge` on a protected branch: block unless `--ff-only` or `--abort` is present.
+- **REQ-GGUARD-062**: `merge` on a protected branch: block unless `--ff-only` or `--abort` is present (non-root only; sudo-gated for root).
 - **REQ-GGUARD-063**: Protected branch checks shall only apply when the current branch (from `rev-parse --abbrev-ref HEAD`) matches a protected name. Detached HEAD and no-repo contexts shall skip these checks.
 
 ### 8. Environment Variable Sanitisation
