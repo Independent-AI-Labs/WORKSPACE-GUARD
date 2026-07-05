@@ -92,8 +92,20 @@ fn raise_child_dac_override_does_not_panic() {
 #[cfg(feature = "capability-mode")]
 #[test]
 fn raise_ambient_caps_returns_error_without_file_caps() {
+    // When running inside the guard's child process (e.g., pre-push hook
+    // triggered cargo test), git.original inherits CAP_DAC_OVERRIDE in
+    // Ambient, which propagates to all descendants including this test
+    // binary. In that context raise_ambient_caps succeeds. When running
+    // as a standalone process (no ambient caps), it fails.
+    let has_ambient = caps::read(None, caps::CapSet::Ambient)
+        .map(|set| set.contains(&caps::Capability::CAP_DAC_OVERRIDE))
+        .unwrap_or(false);
     let result = raise_ambient_caps();
-    assert!(result.is_err());
+    if has_ambient {
+        assert!(result.is_ok(), "should succeed with ambient caps");
+    } else {
+        assert!(result.is_err(), "should fail without file caps");
+    }
 }
 
 #[test]
