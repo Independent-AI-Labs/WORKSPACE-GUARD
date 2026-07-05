@@ -14,6 +14,7 @@ fn empty_state(subcommand: &str) -> ArgState {
         safe_pull_flag: false,
         has_rebase_safe_flag: false,
         has_ff_only: false,
+        has_merge_abort: false,
         has_cached: false,
         has_delete_flag: false,
         dangerous_config_keys: Vec::new(),

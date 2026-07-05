@@ -213,10 +213,14 @@ pub fn check_blocked(
         });
     }
 
-    if subcommand == "merge" && is_protected_branch(git_path, cwd) && !state.has_ff_only {
+    if subcommand == "merge"
+        && is_protected_branch(git_path, cwd)
+        && !state.has_ff_only
+        && !state.has_merge_abort
+    {
         return Err(GuardError::Blocked {
             reason: "git merge on protected branch without --ff-only".into(),
-            hint: "Use 'git merge --ff-only' to avoid creating merge commits".into(),
+            hint: "Use 'git merge --ff-only' to avoid creating merge commits, or 'git merge --abort' to cancel an in-progress merge".into(),
         });
     }
 

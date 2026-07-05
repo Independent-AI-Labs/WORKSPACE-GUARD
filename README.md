@@ -124,7 +124,7 @@ Real git runs with user's uid/gid, sanitised env, no extra caps
 | `git commit --amend` | Blocks history rewriting |
 | `git revert` (unpushed target) | Blocks reverting un-pushed work |
 | `git pull` (protected branch, no `--ff-only`/`--rebase`) | Blocks merge-commit pulls |
-| `git merge` (protected branch, no `--ff-only`) | Blocks merge-commit merges |
+| `git merge` (protected branch, no `--ff-only`/`--abort`) | Blocks merge-commit merges; `--abort` cancels an in-progress merge |
 | Background `git push` (pgrp != tpgid from /proc/self/stat) | Blocks CI/non-TTY pushes |
 | `SKIP=` env var present | Blocks pre-commit hook bypass |
 | `PRE_COMMIT_ALLOW_NO_CONFIG=1` env var | Blocks pre-commit config bypass |
@@ -452,8 +452,8 @@ already root) and `gitdir::lock()` is a no-op (the module is `#[cfg(feature =
 cargo build                                              # Debug (capability-mode)
 cargo build --no-default-features --features root-only   # Debug (root-only)
 cargo build --release                                    # Release (opt-level=z, LTO, abort-on-panic, stripped)
-cargo test                                               # Cap mode: 84 unit + 3 integration tests
-cargo test --no-default-features --features root-only    # Root-only: 78 unit + 3 integration tests
+cargo test                                               # Cap mode: 86 unit + 3 integration tests
+cargo test --no-default-features --features root-only    # Root-only: 80 unit + 3 integration tests
 cargo fmt --all -- --check                               # Format check
 cargo clippy --workspace --all-targets -- -D warnings    # Strict lint
 make test                                                # Full workspace test suite (cargo test + integration)

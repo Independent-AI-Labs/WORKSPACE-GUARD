@@ -15,6 +15,7 @@ pub struct ArgState {
     pub safe_pull_flag: bool,
     pub has_rebase_safe_flag: bool,
     pub has_ff_only: bool,
+    pub has_merge_abort: bool,
     pub has_cached: bool,
     pub has_delete_flag: bool,
     pub dangerous_config_keys: Vec<String>,
@@ -74,6 +75,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         safe_pull_flag: false,
         has_rebase_safe_flag: false,
         has_ff_only: false,
+        has_merge_abort: false,
         has_cached: false,
         has_delete_flag: false,
         dangerous_config_keys: Vec::new(),
@@ -337,6 +339,9 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                     }
                     if s == "--ff-only" {
                         state.has_ff_only = true;
+                    }
+                    if s == "--abort" {
+                        state.has_merge_abort = true;
                     }
                 }
             }

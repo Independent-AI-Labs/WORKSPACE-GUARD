@@ -91,7 +91,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 - **REQ-GGUARD-060**: A branch is **protected** if its name is `main` or `master`.
 - **REQ-GGUARD-061**: `pull` on a protected branch: block unless `--ff-only`, `--rebase`, `--rebase=true`, `--rebase=interactive`, or `--rebase=merges` is present.
-- **REQ-GGUARD-062**: `merge` on a protected branch: block unless `--ff-only` is present.
+- **REQ-GGUARD-062**: `merge` on a protected branch: block unless `--ff-only` or `--abort` is present.
 - **REQ-GGUARD-063**: Protected branch checks shall only apply when the current branch (from `rev-parse --abbrev-ref HEAD`) matches a protected name. Detached HEAD and no-repo contexts shall skip these checks.
 
 ### 8. Environment Variable Sanitisation

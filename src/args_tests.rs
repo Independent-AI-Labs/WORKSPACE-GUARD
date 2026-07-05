@@ -307,6 +307,20 @@ fn parse_args_safe_pull_ff_only() {
 }
 
 #[test]
+fn parse_args_merge_abort() {
+    let args = bytes(&["git", "merge", "--abort"]);
+    let state = parse_args(&args).unwrap();
+    assert!(state.has_merge_abort);
+}
+
+#[test]
+fn parse_args_merge_abort_after_dash_is_pathspec() {
+    let args = bytes(&["git", "merge", "--", "--abort"]);
+    let state = parse_args(&args).unwrap();
+    assert!(!state.has_merge_abort);
+}
+
+#[test]
 fn parse_args_safe_pull_rebase() {
     let args = bytes(&["git", "pull", "--rebase"]);
     let state = parse_args(&args).unwrap();
