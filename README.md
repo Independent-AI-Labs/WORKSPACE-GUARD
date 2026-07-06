@@ -1,16 +1,14 @@
 # Compiled Privilege Enforcement for Git
 
 A Rust binary that replaces `/usr/bin/git` to enforce immutable, unbypassable
-policies on destructive and history-rewriting operations. Uses **file
-capabilities** (`CAP_SETPCAP` + `CAP_DAC_OVERRIDE` + `CAP_CHOWN` + `CAP_FOWNER`
-+ `CAP_FSETID`): more granular than SUID, correctly handles `NO_NEW_PRIVS`
-contexts, and keeps privilege analysis straightforward. The extra caps beyond
-`DAC_OVERRIDE` exist for two purposes: (1) claiming the **entire** `.git/`
-directory tree of every repository the guard touches as `root:root` (see
-[`.git` Ownership Lock](#git-ownership-lock)), and (2) `CAP_SETPCAP` allows
-the forked child to raise `CAP_DAC_OVERRIDE` into its Ambient set so that
-`git.original` can write to root-owned `.git/` files during the authorized
-subcommand only.
+policies on destructive and history-rewriting operations. It runs with a minimal
+set of Linux **file capabilities**: granular, safe under `NO_NEW_PRIVS`, and
+simple to audit. Those capabilities serve two purposes: (1) the guard takes
+ownership of every `.git/` directory it touches as `root:root`, so untrusted
+users can read and traverse but never write to `.git/` internals (see [`.git`
+Ownership Lock](#git-ownership-lock)); and (2) for each authorized command, it
+loans the real git just enough privilege to write those files. That
+privilege dies with the process when it exits.
 
 For environments where file capabilities are unavailable (PRoot, containers
 running as root, user namespaces), a **root-only mode** provides a soft barrier
@@ -309,8 +307,8 @@ sudo make install-hooks
 ```
 
 The WORKSPACE-CI `generate-hooks` flow is invoked through the guard (it runs
-`git` internally) and inherits the caps via the SUID-equivalent file-capability
-binary, so the hooks it writes are owned `root:root` with the exec bit set.
+`git` internally) and inherits the guard's file capabilities, so the hooks it
+writes are owned `root:root` with the exec bit set.
 
 User-invoked hook changes (e.g. `core.hooksPath` from the user's shell) are
 blocked at two layers: the guard's `-c` config key filter (see Dangerous Config
