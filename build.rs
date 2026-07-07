@@ -62,6 +62,8 @@ struct LockedPathsConfig {
     #[serde(default = "default_version")]
     _version: u32,
     recursive_tree_paths: Vec<String>,
+    #[serde(default)]
+    recursive_tree_glob_patterns: Vec<String>,
     individual_file_paths: std::collections::HashMap<String, u32>,
     glob_patterns: std::collections::HashMap<String, u32>,
 }
@@ -198,6 +200,11 @@ fn main() {
         &mut code,
         "LOCKED_RECURSIVE_TREE_PATHS",
         &locked.recursive_tree_paths,
+    );
+    emit_str_list(
+        &mut code,
+        "LOCKED_RECURSIVE_TREE_GLOB_PATTERNS",
+        &locked.recursive_tree_glob_patterns,
     );
     let mut individual: Vec<(&str, u32)> = locked
         .individual_file_paths

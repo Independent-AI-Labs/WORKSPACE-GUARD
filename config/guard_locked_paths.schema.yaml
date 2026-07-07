@@ -15,6 +15,11 @@ fields:
     required: true
     description: "Paths (relative to repo root) whose entire directory tree is locked recursively. Directories → 0o755, regular files → 0o644, hook files under hooks/ → 0o755."
 
+  - path: recursive_tree_glob_patterns
+    type: list<string>
+    required: true
+    description: "Directory-name glob patterns. Every directory in the repo tree whose name matches the glob is recursively locked. Dirs → 0o755, files → 0o644."
+
   - path: individual_file_paths
     type: map<string,integer>
     required: true

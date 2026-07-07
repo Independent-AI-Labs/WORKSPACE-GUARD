@@ -228,11 +228,12 @@ does NOT apply the lock (`src/gitdir.rs` is gated by
 ### 11.7.1 Config-Driven Locked Paths
 
 All locked paths are defined in `config/guard_locked_paths.yaml` -- NOT
-hardcoded in Rust. The YAML declares three categories:
+hardcoded in Rust. The YAML declares four categories:
 
 | Category | Description | Examples |
 |----------|-------------|---------|
 | `recursive_tree_paths` | Entire directory trees locked recursively. Dirs → 0o755, files → 0o644, hooks → 0o755 | `.git` |
+| `recursive_tree_glob_patterns` | Directory-name glob patterns; every matching directory in the repo tree is recursively locked (dirs → 0o755, files → 0o644) | `.boot*` |
 | `individual_file_paths` | Individual files locked with an explicit octal mode | `.gitmodules` (0o644) |
 | `glob_patterns` | Filename-only globs; every matching file in the repo tree is locked with the given mode | `*_exceptions.yaml` (0o644) |
 
@@ -244,7 +245,7 @@ subprojects or vendor directories are caught. Supported glob forms: `*suffix`,
 To add or remove a locked path, edit `config/guard_locked_paths.yaml` and
 rebuild -- no Rust code changes needed.
 
-Best-effort: if a file cannot be read or stat'd, the error is silently ignored
+Best-effort: if a file cannot be read or stat'd, the error is logged and skipped
 and does not block the git invocation.
 
 The installer must `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep' /usr/bin/git`

@@ -165,6 +165,113 @@ fn glob_files_deeply_nested() {
     assert!(deep_file.exists());
 }
 
+// --- lock_glob_trees tests ---
+
+#[test]
+fn glob_trees_no_crash_on_nonexistent() {
+    lock_glob_trees(Path::new("/nonexistent-path-1234"), ".boot*");
+    lock_glob_trees(tempfile::tempdir().unwrap().path(), ".boot*");
+}
+
+#[test]
+fn glob_trees_finds_boot_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let boot_dir = root.join(".boot");
+    fs::create_dir_all(&boot_dir).unwrap();
+    fs::write(boot_dir.join("vmlinuz"), b"x").unwrap();
+
+    let bootloader_dir = root.join(".bootloader");
+    fs::create_dir_all(&bootloader_dir).unwrap();
+    fs::write(bootloader_dir.join("stage1.bin"), b"x").unwrap();
+
+    let other = root.join("other");
+    fs::create_dir_all(&other).unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(boot_dir.join("vmlinuz").exists());
+    assert!(bootloader_dir.join("stage1.bin").exists());
+    assert!(other.exists());
+}
+
+#[test]
+fn glob_trees_finds_nested_boot_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let nested = root.join("vendor").join(".boot-artifacts");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("kernel.img"), b"x").unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(nested.join("kernel.img").exists());
+}
+
+#[test]
+fn glob_trees_skips_dotgit() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let git_dir = root.join(".git");
+    fs::create_dir_all(&git_dir).unwrap();
+    fs::write(git_dir.join("config"), b"[core]").unwrap();
+
+    let boot_dir = root.join(".boot");
+    fs::create_dir_all(&boot_dir).unwrap();
+    fs::write(boot_dir.join("initrd"), b"x").unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(boot_dir.join("initrd").exists());
+    assert!(git_dir.join("config").exists());
+}
+
+#[test]
+fn glob_trees_does_not_lock_plain_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let normal = root.join("src");
+    fs::create_dir_all(&normal).unwrap();
+    fs::write(normal.join("main.rs"), b"fn main() {}").unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(normal.join("main.rs").exists());
+}
+
+#[test]
+fn glob_trees_handles_symlink_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let real = root.join("real_boot");
+    fs::create_dir_all(&real).unwrap();
+    fs::write(real.join("file"), b"x").unwrap();
+
+    let link = root.join(".boot-link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(real.join("file").exists());
+    assert!(link.exists());
+}
+
+#[test]
+fn glob_trees_handles_broken_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let link = root.join(".boot-broken");
+    std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
+
+    lock_glob_trees(root, ".boot*");
+}
+
 // --- glob_match tests ---
 
 #[test]
@@ -216,4 +323,177 @@ fn glob_match_wildcard_only() {
 fn glob_match_empty_pattern() {
     assert!(glob_match("", ""));
     assert!(!glob_match("", "x"));
+}
+
+// --- file_lock_mode tests ---
+
+#[test]
+fn file_lock_mode_preserves_user_exec() {
+    assert_eq!(file_lock_mode(0o744), 0o744);
+}
+
+#[test]
+fn file_lock_mode_preserves_group_exec() {
+    assert_eq!(file_lock_mode(0o654), 0o654);
+}
+
+#[test]
+fn file_lock_mode_preserves_other_exec() {
+    assert_eq!(file_lock_mode(0o647), 0o645);
+}
+
+#[test]
+fn file_lock_mode_preserves_all_exec() {
+    assert_eq!(file_lock_mode(0o755), 0o755);
+}
+
+#[test]
+fn file_lock_mode_strips_write_bits_from_group_other() {
+    let mode = file_lock_mode(0o777);
+    assert_eq!(mode & 0o022, 0);
+    assert_eq!(mode & 0o111, 0o111);
+    assert_eq!(mode & 0o644, 0o644);
+}
+
+#[test]
+fn file_lock_mode_no_exec_stays_644() {
+    assert_eq!(file_lock_mode(0o644), 0o644);
+    assert_eq!(file_lock_mode(0o600), 0o644);
+}
+
+#[test]
+fn file_lock_mode_zero_mode_becomes_644() {
+    assert_eq!(file_lock_mode(0o000), 0o644);
+}
+
+#[test]
+fn file_lock_mode_preserves_only_exec_ignores_setuid_setgid_sticky() {
+    let mode = file_lock_mode(0o4755);
+    assert_eq!(mode, 0o755);
+    let mode = file_lock_mode(0o2755);
+    assert_eq!(mode, 0o755);
+    let mode = file_lock_mode(0o1755);
+    assert_eq!(mode, 0o755);
+}
+
+#[test]
+fn file_lock_mode_user_exec_only() {
+    assert_eq!(file_lock_mode(0o700), 0o744);
+}
+
+#[test]
+fn file_lock_mode_group_exec_only() {
+    assert_eq!(file_lock_mode(0o070), 0o654);
+}
+
+#[test]
+fn file_lock_mode_other_exec_only() {
+    assert_eq!(file_lock_mode(0o007), 0o645);
+}
+
+// --- lock_glob_trees exec-bit structure tests ---
+
+#[test]
+fn glob_trees_does_not_crash_on_large_dir_hierarchy() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    for i in 0..10 {
+        let sub = root.join(format!("depth{}", i));
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("file.txt"), b"x").unwrap();
+    }
+
+    lock_glob_trees(root, ".boot*");
+}
+
+#[test]
+fn glob_trees_multiple_matching_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let b1 = root.join(".boot-one");
+    fs::create_dir_all(&b1).unwrap();
+    fs::write(b1.join("a.bin"), b"x").unwrap();
+
+    let b2 = root.join(".boot-two");
+    fs::create_dir_all(&b2).unwrap();
+    fs::write(b2.join("b.bin"), b"x").unwrap();
+
+    let nested = root.join("sub").join(".boot-three");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("c.bin"), b"x").unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(b1.join("a.bin").exists());
+    assert!(b2.join("b.bin").exists());
+    assert!(nested.join("c.bin").exists());
+}
+
+#[test]
+fn glob_trees_does_not_match_non_dot_boot_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let normal = root.join("boot");
+    fs::create_dir_all(&normal).unwrap();
+    fs::write(normal.join("x.txt"), b"x").unwrap();
+
+    let partial = root.join("myboot-extra");
+    fs::create_dir_all(&partial).unwrap();
+    fs::write(partial.join("y.txt"), b"x").unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    assert!(normal.join("x.txt").exists());
+    assert!(partial.join("y.txt").exists());
+}
+
+#[test]
+fn glob_trees_handles_empty_root() {
+    let dir = tempfile::tempdir().unwrap();
+    lock_glob_trees(dir.path(), ".boot*");
+}
+
+#[test]
+fn glob_trees_handles_root_is_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("not_a_dir");
+    fs::write(&f, b"x").unwrap();
+    lock_glob_trees(&f, ".boot*");
+}
+
+#[test]
+fn glob_trees_exec_bits_preserved_on_binary_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let boot_dir = root.join(".boot-test");
+    fs::create_dir_all(&boot_dir).unwrap();
+    fs::write(boot_dir.join("node"), b"x").unwrap();
+    fs::write(boot_dir.join("script.sh"), b"#!/bin/sh\necho hi\n").unwrap();
+
+    std::process::Command::new("chmod")
+        .args(["+x", &boot_dir.join("node").to_string_lossy()])
+        .output()
+        .unwrap();
+    std::process::Command::new("chmod")
+        .args(["+x", &boot_dir.join("script.sh").to_string_lossy()])
+        .output()
+        .unwrap();
+
+    lock_glob_trees(root, ".boot*");
+
+    let node_mode = fs::symlink_metadata(boot_dir.join("node"))
+        .unwrap()
+        .st_mode()
+        & 0o111;
+    let script_mode = fs::symlink_metadata(boot_dir.join("script.sh"))
+        .unwrap()
+        .st_mode()
+        & 0o111;
+
+    assert!(node_mode != 0, "node lost all execute bits");
+    assert!(script_mode != 0, "script.sh lost all execute bits");
 }

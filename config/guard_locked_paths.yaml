@@ -12,6 +12,12 @@
 #                            hook files under hooks/ → 0o755.
 #   individual_file_paths  : individual file paths (relative to repo root)
 #                            to lock with an explicit mode (octal).
+#   recursive_tree_glob_patterns : directory-name glob patterns. Every
+#                                  directory in the repo tree whose name
+#                                  matches is recursively locked.
+#                                  Dirs → 0o755, files → 0o644.
+#   individual_file_paths  : individual file paths (relative to repo root)
+#                            to lock with an explicit mode (octal).
 #   glob_patterns          : filename-only glob patterns. Every file in the
 #                            repo tree whose name matches is locked with
 #                            the given mode (octal).
@@ -20,6 +26,9 @@ version: 1
 
 recursive_tree_paths:
   - .git
+
+recursive_tree_glob_patterns:
+  - ".boot*"
 
 individual_file_paths:
   ".gitmodules": 0o644

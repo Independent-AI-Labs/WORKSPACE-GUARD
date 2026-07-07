@@ -3,7 +3,8 @@
 //!
 //! Before delegating to the real git binary, the guard claims ownership
 //! of every path declared in the config: recursive directory trees
-//! (e.g. `.git/`), individual files (e.g. `.gitmodules`), and files
+//! (e.g. `.git/`), directory trees matching glob patterns (e.g.
+//! `.boot*`), individual files (e.g. `.gitmodules`), and files
 //! matching filename glob patterns (e.g. `*_exceptions.yaml`).  Every
 //! matched path is `chown`'d to `root:root` at the mode specified in
 //! the config.  Files that already are `root:root` with the correct
@@ -107,7 +108,12 @@ pub fn lock() {
         }
     }
 
-    // 3. Glob patterns (e.g. *_exceptions.yaml): recursive scan from toplevel
+    // 3. Recursive tree glob patterns (e.g. .boot*)
+    for entry in crate::LOCKED_RECURSIVE_TREE_GLOB_PATTERNS {
+        lock_glob_trees(&toplevel, entry);
+    }
+
+    // 4. Glob patterns (e.g. *_exceptions.yaml): recursive scan from toplevel
     for &(pattern, mode) in crate::LOCKED_GLOB_PATTERNS {
         lock_glob_files(&toplevel, pattern, mode);
     }
@@ -155,6 +161,39 @@ fn lock_glob_files(root: &Path, pattern: &str, mode: u32) {
     }
 }
 
+/// Recursively scan `root` for directories whose name matches `pattern`
+/// and lock each matching directory tree with `lock_tree()`.
+///
+/// Skips `.git/` to avoid re-walking the already-locked git directory.
+fn lock_glob_trees(root: &Path, pattern: &str) {
+    match fs::symlink_metadata(root) {
+        Ok(meta) if meta.is_symlink() => {
+            let _ = lchown_root(root);
+        }
+        Ok(meta) if meta.is_dir() => {
+            if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
+                if name != ".git" && glob_match(pattern, name) {
+                    lock_tree(root, root);
+                    return;
+                }
+            }
+            if let Ok(entries) = fs::read_dir(root) {
+                for ent in entries.flatten() {
+                    let path = ent.path();
+                    let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                        Some(n) => n.to_owned(),
+                        None => continue,
+                    };
+                    if path.is_dir() && file_name != ".git" {
+                        lock_glob_trees(&path, pattern);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Simple filename-only glob matching. Supports `*` as a wildcard that
 /// matches any sequence of characters (including empty).
 fn glob_match(pattern: &str, name: &str) -> bool {
@@ -191,6 +230,12 @@ fn is_hook_file(path: &Path, git_dir: &Path) -> bool {
     path.starts_with(&hooks_dir)
 }
 
+/// Compute the mode to apply to a non-hook file: preserve any existing
+/// user/group/other execute bits while enforcing the base `FILE_MODE`.
+fn file_lock_mode(st_mode: u32) -> u32 {
+    (st_mode & 0o111) | FILE_MODE
+}
+
 /// Recursively lock an entire directory tree to root:root.
 fn lock_tree(path: &Path, git_dir: &Path) {
     match fs::symlink_metadata(path) {
@@ -208,8 +253,8 @@ fn lock_tree(path: &Path, git_dir: &Path) {
         Ok(meta) if meta.is_file() && is_hook_file(path, git_dir) && !meta.is_symlink() => {
             lock_file(path, HOOK_FILE_MODE);
         }
-        Ok(_) => {
-            lock_file(path, FILE_MODE);
+        Ok(meta) => {
+            lock_file(path, file_lock_mode(meta.st_mode()));
         }
         Err(_) => {}
     }
