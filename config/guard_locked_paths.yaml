@@ -1,0 +1,28 @@
+# workspace-guard locked path policy.
+#
+# Single source of truth for which files and directory trees the guard
+# locks to root:root in capability mode.  Compiled into the guard binary
+# at build time via build.rs.
+#
+# Schema:
+#   version                : schema version (currently 1).
+#   recursive_tree_paths   : paths (relative to repo root) whose entire
+#                            directory tree is locked recursively.
+#                            Dirs → 0o755, files → 0o644,
+#                            hook files under hooks/ → 0o755.
+#   individual_file_paths  : individual file paths (relative to repo root)
+#                            to lock with an explicit mode (octal).
+#   glob_patterns          : filename-only glob patterns. Every file in the
+#                            repo tree whose name matches is locked with
+#                            the given mode (octal).
+
+version: 1
+
+recursive_tree_paths:
+  - .git
+
+individual_file_paths:
+  ".gitmodules": 0o644
+
+glob_patterns:
+  "*_exceptions.yaml": 0o644

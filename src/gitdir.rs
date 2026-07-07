@@ -1,44 +1,9 @@
-//! Capability-mode `.git` ownership lock.
-//!
-//! Before delegating to the real git binary, the guard claims ownership
-//! of the ENTIRE `.git/` directory tree and the repo-root `.gitmodules`.
-//! Every file and directory inside `.git/` is `chown`'d to `root:root`
-//! and given a mode that allows all users to READ/TRAVERSE but only root
-//! to WRITE. Hook files under `.git/hooks/` are kept at 0o755 (executable)
-//! so git actually invokes them (non-executable hooks are skipped by git
-//! by git, which would bypass all enforcement.
-//!
-//! This closes the local RCE vector surfaced by the CVE history of
-//! `.git/config` injection (`core.fsmonitor`, `core.hooksPath`,
-//! `include.path`), `.git/hooks/` trojaning (CVE-2025-48384), and attacks
-//! on `.git/index`, `.git/HEAD`, `.git/refs/`, `.git/objects/`,
-//! `.git/logs/`, etc. Once locked, the user cannot directly write to
-//! ANY part of `.git/`. They can still operate the repository normally
-//! because the guard grants `CAP_DAC_OVERRIDE` to `git.original` via
-//! the Ambient capability set for the duration of the authorized
-//! subcommand only.
-//!
-//! The lock runs TWICE per invocation:
-//!   1. Before the policy engine: closes the window where a planted
-//!      `.git/config` payload could fire during policy-check sub-calls.
-//!   2. After `git.original` exits: reclaims any files that git.original
-//!      created or modified (which will be owned by the real user's uid)
-//!      back to `root:root`. This closes the "backdoor" window where the
-//!      user could write to agent-owned .git/ files between git operations.
-//!
-//! The guard's own `rev-parse` resolution uses a hardened environment
-//! (`GIT_CONFIG_NOSYSTEM`, `core.fsmonitor=`, `core.hooksPath=`, etc.)
-//! so the resolution call itself cannot be weaponised by a payload
-//! already planted in `.git/config`.
-//!
-//! This module is compiled only in capability mode: in root-only mode
-//! the user IS root, so a `.git` ownership lock would just impede them
-//! and they can chown it back trivially (the soft-barrier threat model
-//! already accepts root bypasses (see docs/ROOT-ONLY-MODE.md).
-//!
-//! The lock is idempotent: if a path is already `root:root` with the
-//! target mode, no syscall is issued, so the per-invocation overhead
-//! after the first lock is a metadata stat only.
+//! Capability-mode ownership lock for paths declared in
+//! `config/guard_locked_paths.yaml`: recursive trees (`.git/`),
+//! individual files (`.gitmodules`), and glob patterns (`*_exceptions.yaml`).
+//! Every matched path is `chown`'d to `root:root`.  The lock runs twice
+//! per invocation (pre-policy and post-git.original), is idempotent, and
+//! best-effort.  All locked paths are defined in the YAML, not hardcoded.
 
 #![cfg(feature = "capability-mode")]
 
@@ -67,20 +32,111 @@ pub fn lock() {
         Some(p) => p,
         None => return,
     };
-
-    lock_tree(&git_dir, &git_dir);
-
     let toplevel = match git_dir.parent() {
         Some(p) => p.to_path_buf(),
         None => return,
     };
-    let modules = toplevel.join(".gitmodules");
-    if modules.exists() && !modules.is_symlink() {
-        lock_file(&modules, FILE_MODE);
+
+    // 1. Recursive tree paths (e.g. .git/)
+    for entry in crate::LOCKED_RECURSIVE_TREE_PATHS {
+        if *entry == ".git" {
+            // .git is resolved via rev-parse (handles submodules, .git files)
+            lock_tree(&git_dir, &git_dir);
+        } else {
+            let path = toplevel.join(entry);
+            if path.exists() {
+                lock_tree(&path, &path);
+            }
+        }
+    }
+
+    // 2. Individual files (e.g. .gitmodules)
+    for &(file_path, mode) in crate::LOCKED_INDIVIDUAL_FILE_PATHS {
+        let path = toplevel.join(file_path);
+        if path.exists() && !path.is_symlink() {
+            lock_file(&path, mode);
+        }
+    }
+
+    // 3. Glob patterns (e.g. *_exceptions.yaml): recursive scan from toplevel
+    for &(pattern, mode) in crate::LOCKED_GLOB_PATTERNS {
+        lock_glob_files(&toplevel, pattern, mode);
     }
 }
 
-/// Check if `file` is inside the `-hooks` subdirectory of `git_dir`.
+/// Recursively scan `root` for files whose name matches `pattern` and
+/// lock each with `mode`.
+///
+/// Supported glob forms:
+///   - `*suffix`       → match files ending with `suffix`
+///   - `prefix*`       → match files starting with `prefix`
+///   - `*middle*`      → match files containing `middle`
+///   - `exact` (no *)  → match files with exactly that name
+///
+/// Skips `.git/` to avoid re-walking the already-locked git directory.
+fn lock_glob_files(root: &Path, pattern: &str, mode: u32) {
+    match fs::symlink_metadata(root) {
+        Ok(meta) if meta.is_symlink() => {
+            let _ = lchown_root(root);
+        }
+        Ok(meta) if meta.is_dir() => {
+            if let Ok(entries) = fs::read_dir(root) {
+                for ent in entries.flatten() {
+                    let path = ent.path();
+                    let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                        Some(n) => n.to_owned(),
+                        None => continue,
+                    };
+                    if path.is_dir() && file_name != ".git" {
+                        lock_glob_files(&path, pattern, mode);
+                    } else if path.is_file() && glob_match(pattern, &file_name) {
+                        lock_file(&path, mode);
+                    }
+                }
+            }
+        }
+        Ok(meta) if meta.is_file() => {
+            if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
+                if glob_match(pattern, name) {
+                    lock_file(root, mode);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Simple filename-only glob matching. Supports `*` as a wildcard that
+/// matches any sequence of characters (including empty).
+fn glob_match(pattern: &str, name: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == name;
+    }
+    let segments: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0usize;
+    for (i, seg) in segments.iter().enumerate() {
+        if seg.is_empty() {
+            continue;
+        }
+        match name[pos..].find(seg) {
+            Some(idx) => pos += idx + seg.len(),
+            None => return false,
+        }
+        if i == 0 && !name.starts_with(seg) {
+            return false;
+        }
+    }
+    let last = segments.last().unwrap_or(&"");
+    if !pattern.ends_with('*') && !last.is_empty() && !name.ends_with(last) {
+        return false;
+    }
+    true
+}
+
+/// Check if `file` is inside the `hooks` subdirectory of `git_dir`.
 fn is_hook_file(path: &Path, git_dir: &Path) -> bool {
     let hooks_dir = git_dir.join("hooks");
     path.starts_with(&hooks_dir)
@@ -237,6 +293,10 @@ pub fn hardened_git_env() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +346,151 @@ mod tests {
         assert!(!is_hook_file(&PathBuf::from("/repo/.git/config"), &git_dir));
         assert!(!is_hook_file(&PathBuf::from("/repo/.git/HEAD"), &git_dir));
         assert!(!is_hook_file(&PathBuf::from("/repo/.git/index"), &git_dir));
+    }
+
+    // --- lock_glob_files tests ---
+
+    #[test]
+    fn glob_files_does_not_panic_on_nonexistent_path() {
+        let p = PathBuf::from("/tmp/this-path-does-not-exist-1234567890");
+        lock_glob_files(&p, "*_exceptions.yaml", 0o644);
+    }
+
+    #[test]
+    fn glob_files_does_not_panic_on_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        lock_glob_files(dir.path(), "*_exceptions.yaml", 0o644);
+    }
+
+    #[test]
+    fn glob_files_finds_nested_exceptions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("quality_exceptions.yaml"), b"x").unwrap();
+        fs::write(root.join("other.txt"), b"x").unwrap();
+
+        let config_dir = root.join("config");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("guard_x_exceptions.yaml"), b"x").unwrap();
+        fs::write(config_dir.join("normal.yaml"), b"x").unwrap();
+
+        let sub = root.join("vendor").join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("deep_exceptions.yaml"), b"x").unwrap();
+
+        lock_glob_files(root, "*_exceptions.yaml", 0o644);
+
+        // Every file we created must still exist after the scan
+        assert!(root.join("quality_exceptions.yaml").exists());
+        assert!(root.join("other.txt").exists());
+        assert!(config_dir.join("guard_x_exceptions.yaml").exists());
+        assert!(config_dir.join("normal.yaml").exists());
+        assert!(sub.join("deep_exceptions.yaml").exists());
+    }
+
+    #[test]
+    fn glob_files_skips_dotgit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let git_dir = root.join(".git");
+        fs::create_dir_all(&git_dir).unwrap();
+        fs::write(git_dir.join("config"), b"[core]").unwrap();
+        fs::write(git_dir.join("pre_exceptions.yaml"), b"x").unwrap();
+        let exc = root.join("quality_exceptions.yaml");
+        fs::write(&exc, b"x").unwrap();
+
+        lock_glob_files(root, "*_exceptions.yaml", 0o644);
+        assert!(exc.exists());
+    }
+
+    #[test]
+    fn glob_files_handles_symlink_exceptions_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let real_file = root.join("actual.txt");
+        fs::write(&real_file, b"hello").unwrap();
+        let link = root.join("link_exceptions.yaml");
+        std::os::unix::fs::symlink(&real_file, &link).unwrap();
+
+        // Should not panic (symlinks are lchown'd, not followed)
+        lock_glob_files(root, "*_exceptions.yaml", 0o644);
+
+        assert!(real_file.exists());
+        assert!(link.exists());
+    }
+
+    #[test]
+    fn glob_files_handles_broken_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let link = root.join("broken_exceptions.yaml");
+        std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
+
+        // Should not panic on broken symlink
+        lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    }
+
+    #[test]
+    fn glob_files_multiple_patterns_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("foo_exceptions.yaml"), b"x").unwrap();
+        fs::write(root.join("bar_exceptions.yaml"), b"x").unwrap();
+        fs::write(root.join("other.txt"), b"x").unwrap();
+
+        lock_glob_files(root, "*_exceptions.yaml", 0o644);
+
+        assert!(root.join("foo_exceptions.yaml").exists());
+        assert!(root.join("bar_exceptions.yaml").exists());
+        assert!(root.join("other.txt").exists());
+    }
+
+    #[test]
+    fn glob_files_deeply_nested() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let mut cur = root.to_path_buf();
+        for i in 0..32 {
+            cur = cur.join(format!("depth{}", i));
+            fs::create_dir_all(&cur).unwrap();
+        }
+        let deep_file = cur.join("deep_exceptions.yaml");
+        fs::write(&deep_file, b"x").unwrap();
+
+        lock_glob_files(root, "*_exceptions.yaml", 0o644);
+        assert!(deep_file.exists());
+    }
+
+    // --- glob_match tests ---
+
+    #[test]
+    fn glob_match_various_forms() {
+        // exact
+        assert!(glob_match("foo.yaml", "foo.yaml"));
+        assert!(!glob_match("foo.yaml", "bar.yaml"));
+        // suffix wildcard
+        assert!(glob_match("*_exceptions.yaml", "foo_exceptions.yaml"));
+        assert!(!glob_match("*_exceptions.yaml", "exceptions.yaml"));
+        // prefix wildcard
+        assert!(glob_match("guard_*", "guard_paths.yaml"));
+        assert!(!glob_match("guard_*", "myguard_foo"));
+        // middle wildcard
+        assert!(glob_match("a*c", "abc"));
+        assert!(!glob_match("a*c", "ab"));
+        // multiple wildcards
+        assert!(glob_match("a*b*c", "aXbYc"));
+        assert!(!glob_match("a*b*c", "aXbY"));
+        // wildcard only
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("*", ""));
+        // empty
+        assert!(glob_match("", ""));
+        assert!(!glob_match("", "x"));
     }
 }

@@ -12,3 +12,5 @@ safe_exceptions:
   - guard_resource_limits.schema.yaml
   - guard_paths.yaml
   - guard_paths.schema.yaml
+  - guard_locked_paths.yaml
+  - guard_locked_paths.schema.yaml

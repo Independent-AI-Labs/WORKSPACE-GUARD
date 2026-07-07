@@ -1,0 +1,26 @@
+# Schema for guard_locked_paths.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+config: guard_locked_paths
+description: "Locked path policy: which files and directory trees the guard locks to root:root in capability mode."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: recursive_tree_paths
+    type: list<string>
+    required: true
+    description: "Paths (relative to repo root) whose entire directory tree is locked recursively. Directories → 0o755, regular files → 0o644, hook files under hooks/ → 0o755."
+
+  - path: individual_file_paths
+    type: map<string,integer>
+    required: true
+    description: "Individual file paths (relative to repo root) to lock with an explicit octal mode. Key = relative path, value = octal mode (e.g. 0o644)."
+
+  - path: glob_patterns
+    type: map<string,integer>
+    required: true
+    description: "Filename-only glob patterns. Every file in the repo tree whose name matches the pattern is locked with the given octal mode. Key = glob pattern, value = octal mode (e.g. 0o644)."

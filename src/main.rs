@@ -153,10 +153,11 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     if let Some(ref sub) = state.subcommand {
         block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
 
-        // Capability-mode .git ownership lock: claim the security-sensitive
-        // paths (.git/config, .git/hooks/*, repo-root .gitmodules) as
-        // root:root before any further git.original subprocess can fire a
-        // payload planted inside them. Best-effort; never blocks a pass.
+        // Capability-mode ownership lock: claim all paths declared in
+        // config/guard_locked_paths.yaml (e.g. .git/, .gitmodules,
+        // *_exceptions.yaml) as root:root before any further git.original
+        // subprocess can fire a payload planted inside them.
+        // Best-effort; never blocks a pass.
         // Root-only builds are no-ops (user is already root).
         #[cfg(feature = "capability-mode")]
         gitdir::lock();

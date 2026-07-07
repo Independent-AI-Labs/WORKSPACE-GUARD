@@ -48,7 +48,7 @@ exceptions:
     paths: ['src/main.rs', 'src/exec.rs', 'src/exec_tests.rs', 'src/log.rs', 'src/gitdir.rs']
 
   - pattern: ' -- '
-    paths: ['.pre-commit-config.yaml', 'Makefile', 'README.md', 'docs/specifications/SPEC-GIT-GUARD.md', 'config/banned_words_exceptions.yaml']
+    paths: ['.pre-commit-config.yaml', 'Makefile', 'README.md', 'docs/specifications/SPEC-GIT-GUARD.md', 'docs/specifications/SPEC-GIT-GUARD-HARDENING.md', 'config/banned_words_exceptions.yaml']
 
   - pattern: '\bpython3?\b'
     paths: ['.pre-commit-config.yaml', 'config/banned_words_exceptions.yaml']
