@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# find stub: replaces `find / -xdev -perm -4000 ...` for suid discovery
+# tests so the live host surface does not leak into deterministic
+# baselines. Emits the contents of $GUARD_FIND_FIXTURE (a file path,
+# one path per line) when set; otherwise emits nothing. Any find
+# arguments are ignored. Always exits 0 (mirrors discover_suid_live
+# which returns 0 even on the partial-result path).
+if [ -n "${GUARD_FIND_FIXTURE:-}" ] && [ -r "$GUARD_FIND_FIXTURE" ]; then
+    cat "$GUARD_FIND_FIXTURE"
+fi
+exit 0

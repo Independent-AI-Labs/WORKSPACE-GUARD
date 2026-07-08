@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# dpkg-divert stub: mimics the three subcommands install/uninstall-
+# lock-runtime rely on. State persists to $GUARD_DIVERT_DB (one path
+# per line); absent entries behave as undiverted.
+#   dpkg-divert --list <path>            -> stdout line iff diverted
+#   dpkg-divert --add --rename --divert <p>.distrib <path>  -> record
+#   dpkg-divert --remove --rename <path> -> unrecord
+db="${GUARD_DIVERT_DB:-}"
+nulldev="${DEVNULL:-/dev/null}"
+case "$1" in
+    --list)
+        path="$2"
+        if [ -n "$db" ] && [ -f "$db" ] && grep -qxF -- "$path" "$db" 2>"$nulldev"; then
+            printf 'local diversion of %s to %s.distrib\n' "$path" "$path"
+        fi
+        ;;
+    --add)
+        # args: --add --rename --divert <p>.distrib <path>
+        path="${!#}"
+        if [ -n "$db" ]; then
+            mkdir -p "$(dirname "$db")"
+            if ! grep -qxF -- "$path" "$db" 2>"$nulldev"; then
+                printf '%s\n' "$path" >> "$db"
+            fi
+        fi
+        ;;
+    --remove)
+        path="${!#}"
+        if [ -n "$db" ] && [ -f "$db" ]; then
+            tmp="$(mktemp)"
+            grep -vxF -- "$path" "$db" > "$tmp" 2>"$nulldev" || rc=$?
+            mv "$tmp" "$db"
+        fi
+        ;;
+    *)
+        echo "dpkg-divert stub: unrecognized args: $*" >&2
+        exit 2
+        ;;
+esac
+exit 0

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# chattr stub: records `chattr +i`/`chattr -i` invocations to
+# $GUARD_STUB_LOG (one line per call) so install/uninstall tests can
+# assert the immutable flag was toggled for the right <path>.real.
+# Exits 0 by default. Set GUARD_CHATTR_FAIL=1 to simulate a host
+# whose filesystem rejects immutability (install-lock-runtime should
+# then exit 3).
+log="${GUARD_STUB_LOG:-}"
+if [ -n "$log" ]; then
+    printf 'chattr %s\n' "$*" >> "$log"
+fi
+if [ "${GUARD_CHATTR_FAIL:-0}" = "1" ]; then
+    echo "chattr: Operation not supported (stub)" >&2
+    exit 1
+fi
+exit 0

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# curl stub: no-op success. The sync-gtfobins/regen-gitleaksignore
+# tests pre-stage fixture files into a fake repo's docs/references/
+# (or target scan dir) and rely on this stub leaving those files in
+# place rather than truncating the -o target. Reads no env.
+exit 0

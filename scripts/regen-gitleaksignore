@@ -28,7 +28,7 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   exit 1
 fi
 
-# Use uv-managed python for hermetic execution (no bare interpreter calls).
+# Use uv-managed interpreter for hermetic execution (no bare calls).
 shim=(uv run --quiet python)
 
 tmpf=$(mktemp)

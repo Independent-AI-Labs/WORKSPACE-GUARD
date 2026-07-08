@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# getcap stub: fakes `getcap -r /` output for capability discovery
+# tests. Emits the contents of $GUARD_GETCAP_FIXTURE (a file path;
+# getcap-shaped lines) when set; otherwise emits nothing and exits 0.
+# Mirrors discover_caps_live which truncates out_file and returns 0
+# when getcap yields nothing.
+if [ -n "${GUARD_GETCAP_FIXTURE:-}" ] && [ -r "$GUARD_GETCAP_FIXTURE" ]; then
+    cat "$GUARD_GETCAP_FIXTURE"
+fi
+exit 0

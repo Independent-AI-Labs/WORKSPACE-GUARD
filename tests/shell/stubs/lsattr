@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# lsattr stub: reports the immutability state of a path to satisfy
+# install-lock-runtime's idempotency probe. When GUARD_LSATTR_IMMUTABLE
+# lists path globs (newline-separated), paths matching one of those
+# globs are reported with the immutable 'i' flag set; all others as
+# clear (----). Output shape: "<flags> <path>".
+# Usage: lsattr -d <path>
+path="${2:-}"
+if [ -z "$path" ]; then echo "lsattr stub: missing path" >&2; exit 1; fi
+flags="-------------"
+while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    case "$path" in
+        $pat) flags="-i-----------"; break ;;
+    esac
+done <<EOF
+${GUARD_LSATTR_IMMUTABLE:-}
+EOF
+printf '%s %s\n' "$flags" "$path"
+exit 0

@@ -169,3 +169,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 
     exec::execve_real_git(argv_os, Some(&state))
 }
+
+#[cfg(test)]
+#[path = "config_consistency_tests.rs"]
+mod config_consistency;

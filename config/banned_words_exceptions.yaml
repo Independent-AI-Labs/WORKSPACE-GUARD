@@ -48,7 +48,13 @@ exceptions:
     paths: ['src/main.rs', 'src/exec.rs', 'src/exec_tests.rs', 'src/log.rs', 'src/gitdir.rs']
 
   - pattern: ' -- '
-    paths: ['.pre-commit-config.yaml', 'Makefile', 'README.md', 'docs/specifications/SPEC-GIT-GUARD.md', 'docs/specifications/SPEC-GIT-GUARD-HARDENING.md', 'config/banned_words_exceptions.yaml']
+    paths: ['.pre-commit-config.yaml', 'Makefile', 'README.md', 'docs/specifications/SPEC-GIT-GUARD.md', 'docs/specifications/SPEC-GIT-GUARD-HARDENING.md', 'config/banned_words_exceptions.yaml', 'tests/shell/lib/harness.bash', 'tests/shell/stubs/dpkg-divert']
+    # 7. grep end-of-options separator in tests/shell/. The ` -- ` token
+    #    is mandatory grep syntax (end-of-flags) when the search pattern
+    #    or file path could begin with a hyphen; there is no portable
+    #    replacement. Two extensionless bash scripts and one .bash bats
+    #    helper fall outside the universal `\.sh$` exception even though
+    #    they are real shell sources, so they are enumerated here.
 
   - pattern: '\bpython3?\b'
     paths: ['.pre-commit-config.yaml', 'config/banned_words_exceptions.yaml']

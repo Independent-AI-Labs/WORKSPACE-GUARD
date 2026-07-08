@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# id stub: fakes the uid-0 preflight used by install-lock-runtime and
+# uninstall-lock-runtime so root-only code paths run as a non-root
+# bats user. `id -u` prints "0"; any other args print the literal
+# "root" (sufficient for the scripts which only call `id -u`).
+if [ "${1:-}" = "-u" ]; then
+    echo 0
+else
+    echo root
+fi
+exit 0
