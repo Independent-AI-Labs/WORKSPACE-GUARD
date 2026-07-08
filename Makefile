@@ -125,6 +125,12 @@ test: ## Run cargo test (all feature combinations)
 	cargo test --workspace
 	cargo test --no-default-features --features root-only
 
+.PHONY: check-push
+check-push: ## Pre-push quality gate: fmt + clippy + check (both feature combos) + tests (both feature combos).
+	@$(MAKE) lint
+	@$(MAKE) check
+	@$(MAKE) test
+
 .PHONY: build
 build: ## Build release binary (default + root-only)
 	cargo build --release
