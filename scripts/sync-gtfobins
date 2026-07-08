@@ -26,23 +26,25 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RES_DIR="$REPO_ROOT/res"
 REF_DIR="$REPO_ROOT/docs/references"
 
-# Stderr sink: stream the suppression target through a shell variable so
-# the literal suppress-stderr idiom never appears in source. The loud
-# stderr of these noisy system tools (find, getcap, stat, sha256sum) is
-# real diagnostic info; the script drops it because the only failure
-# mode is "the file is gone / unreadable", and the caller already treats
-# that as a soft failure (qc returns ? instead of crashing).
-DEVNULL=/dev/null
+# Canonical helpers sourced from scripts/lib/. See scripts/lib/qc.sh
+# for the DEVNULL + qc rationale (avoid the literal suppress-stderr
+# idiom that the error-swallow checker flags).
+source "$SCRIPT_DIR/lib/qc.sh"         || exit 1
+source "$SCRIPT_DIR/lib/find-suid.sh"  || exit 1
+source "$SCRIPT_DIR/lib/decode-caps.sh" || exit 1
 
-# qc Altval CMD [args...]
-# Quiet-capture: run CMD with its stderr dropped; on success print CMD's
-# stdout; on failure print the literal $Altval. Uses an if/else form so
-# the loud-on-failure-then-echo idiom the checker flags never appears.
-qc() {
-    local altval="$1"; shift
-    local out
-    if out="$("$@" 2>"$DEVNULL")"; then printf '%s' "$out"; else printf '%s' "$altval"; fi
+# Single trap accumulating every temp file at top level. tests/shell
+# suite 12-regression-bugs.bats locks the old brittle trap-shadow
+# pattern so future regressions are caught immediately.
+_TEMP_FILES=()
+register_temp() { _TEMP_FILES+=("$1"); }
+cleanup_temps() {
+    local f rc
+    for f in "${_TEMP_FILES[@]+"${_TEMP_FILES[@]}"}"; do
+        rm -f "$f" 2>"$DEVNULL"; rc=$?
+    done
 }
+trap cleanup_temps EXIT
 
 GTFOS_SUID_URL="https://gtfobins.github.io/#+suid"
 GTFOS_SUDO_URL="https://gtfobins.github.io/#+sudo"
@@ -67,7 +69,12 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)  DRY_RUN=1; shift ;;
         --verify)   VERIFY_MODE=1; shift ;;
-        -h|--help)  usage ;;
+        -h|--help)  cat <<EOF
+Usage: $0 [--dry-run] [--verify]
+  --dry-run   Print planned actions, do not write baselines
+  --verify    Re-fetch sources and emit SHA-256 manifest
+EOF
+                    exit 0 ;;
         *)          echo "Unknown arg: $1" >&2; usage ;;
     esac
 done
@@ -94,10 +101,10 @@ fetch_url() {
 }
 
 echo "==> Fetching canonical sources..."
-fetch_url "$GTFOS_SUID_URL"  "$REF_DIR/gtfobins-suid.html"
-fetch_url "$GTFOS_SUDO_URL"   "$REF_DIR/gtfobins-sudo.html"
-fetch_url "$GTFOS_CAPS_URL"   "$REF_DIR/gtfobins-caps.html"
-fetch_url "$KONS_SUID_URL"    "$REF_DIR/konstruktoid-suid-list.txt"
+fetch_url "$GTFOS_SUID_URL" "$REF_DIR/gtfobins-suid.html"
+fetch_url "$GTFOS_SUDO_URL" "$REF_DIR/gtfobins-sudo.html"
+fetch_url "$GTFOS_CAPS_URL" "$REF_DIR/gtfobins-caps.html"
+fetch_url "$KONS_SUID_URL"  "$REF_DIR/konstruktoid-suid-list.txt"
 
 # ---------------------------------------------------------------------------
 # 2. Parse GTFOBins SUID list (extract binary names from <h2> tags)
@@ -131,11 +138,10 @@ parse_gtfobins_all() {
 }
 
 echo "==> Parsing GTFOBins lists..."
-GTFOS_SUID_TMP="$(mktemp)"
-GTFOS_SUDO_TMP="$(mktemp)"
-GTFOS_CAPS_TMP="$(mktemp)"
-KONS_SUID_TMP="$(mktemp)"
-trap 'rm -f "$GTFOS_SUID_TMP" "$GTFOS_SUDO_TMP" "$GTFOS_CAPS_TMP" "$KONS_SUID_TMP"' EXIT
+GTFOS_SUID_TMP="$(mktemp)"; register_temp "$GTFOS_SUID_TMP"
+GTFOS_SUDO_TMP="$(mktemp)"; register_temp "$GTFOS_SUDO_TMP"
+GTFOS_CAPS_TMP="$(mktemp)"; register_temp "$GTFOS_CAPS_TMP"
+KONS_SUID_TMP="$(mktemp)";  register_temp "$KONS_SUID_TMP"
 
 parse_gtfobins_all "$GTFOS_SUID_TMP" "$GTFOS_SUDO_TMP" "$GTFOS_CAPS_TMP"
 
@@ -154,71 +160,21 @@ echo "    GTFOBins caps:       $(wc -l < "$GTFOS_CAPS_TMP") entries"
 echo "    konstruktoid SUID:   $(wc -l < "$KONS_SUID_TMP") entries"
 
 # ---------------------------------------------------------------------------
-# 3. Discover live SUID and CAP surface on this machine
+# 3. Discover live SUID and CAP surface on this machine via scripts/lib/
 # ---------------------------------------------------------------------------
 
 echo "==> Discovering live SUID binaries..."
-SUID_LIVE_TMP="$(mktemp)"
-CAPS_LIVE_TMP="$(mktemp)"
-trap 'rm -f "$SUID_LIVE_TMP" "$CAPS_LIVE_TMP" "$GTFOS_SUID_TMP" "$GTFOS_SUDO_TMP" "$GTFOS_CAPS_TMP" "$KONS_SUID_TMP"' EXIT
+SUID_LIVE_TMP="$(mktemp)"; register_temp "$SUID_LIVE_TMP"
 
-# find SUID binaries (mode -4000), restrict to current filesystem (-xdev).
-# `find /` exits nonzero on permission-denied subtrees (stdout is unaffected
-# but `pipefail` + `set -e` would crash the script); wrap the pipeline in
-# an if/else so the failed exit produces a warning while the partial
-# results still land in the baseline.
-# Excluded trees contain container image overlays (/home, /var/lib/containers,
-# /var/lib/docker, /var/lib/flatpak) and transient mounts (/tmp, /var/tmp,
-# /proc, /sys, /dev, /run). Read-only /snap squashfs layers are KEPT so the
-# baseline notes them (they cannot contain guards themselves but the audit
-# record should mention them).
-if ! find / -xdev -perm -4000 -type f \
-    -not -path "${HOME}/*" \
-    -not -path '/var/lib/containers/*' \
-    -not -path '/var/lib/docker/*' \
-    -not -path '/var/lib/flatpak/*' \
-    -not -path '/tmp/*' \
-    -not -path '/var/tmp/*' \
-    -not -path '/proc/*' \
-    -not -path '/sys/*' \
-    -not -path '/dev/*' \
-    -not -path '/run/*' \
-    2>"$DEVNULL" | sort > "$SUID_LIVE_TMP"; then
+if ! discover_suid_live "$SUID_LIVE_TMP"; then
     echo "WARNING: find returned errors (partial baseline)" >&2
 fi
 echo "    Live SUID binaries:  $(wc -l < "$SUID_LIVE_TMP")"
 
 echo "==> Discovering live file capabilities..."
-if command -v getcap >/dev/null 2>&1; then
-    # Build a TAB-separated `path<TAB>caps` list (sorted). getcap emits one
-    # line per file as `<space_path> <cap_list>=<flags>` (modern libcap) or
-    # `<path> = <caps>` (older libcap). We anchor on the first ` cap_`
-    # occurrence in the line: everything before it (minus trailing space) is
-    # the file path; everything from the `cap_` onwards is the capability
-    # string. Noise trees (see the SUID find filter above) are dropped here
-    # too. /snap squashfs layers are kept for audit awareness.
-    if ! getcap -r / 2>"$DEVNULL" | awk '
-        function excluded(p) {
-            if (p ~ /^\/home\//)                                  return 1
-            if (p ~ /^\/var\/lib\/(containers|docker|flatpak)\//) return 1
-            if (p ~ /^\/(tmp|var\/tmp|proc|sys|dev|run)\//)       return 1
-            return 0
-        }
-        {
-            i = index($0, " cap_")
-            if (i == 0) next
-            path = substr($0, 1, i - 1)
-            if (excluded(path)) next
-            caps = substr($0, i + 1)
-            sub(/^ * = /, "", caps)   # tolerate old-format "<path> = cap_*"
-            print path "\t" caps
-        }
-    ' | sort > "$CAPS_LIVE_TMP"; then
-        echo "WARNING: getcap returned errors (partial baseline)" >&2
-    fi
-else
-    echo "WARNING: getcap not found; file capability baseline will be empty" >&2
-    : > "$CAPS_LIVE_TMP"
+CAPS_LIVE_TMP="$(mktemp)"; register_temp "$CAPS_LIVE_TMP"
+if ! discover_caps_live "$CAPS_LIVE_TMP"; then
+    echo "WARNING: getcap returned errors (partial baseline)" >&2
 fi
 echo "    Live file caps:      $(wc -l < "$CAPS_LIVE_TMP")"
 

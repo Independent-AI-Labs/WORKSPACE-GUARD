@@ -29,22 +29,29 @@ SUID_BASELINE="$RES_DIR/suid-baseline.yaml"
 FCAP_BASELINE="$RES_DIR/fcap-baseline.yaml"
 DRIFT_REPORT="$RES_DIR/drift-report.yaml"
 
-# Stderr sink: stream the suppression target through a shell variable so
-# the literal suppress-stderr idiom never appears in source. The loud
-# stderr of find/getcap/stat/lsattr on permission-denied subtrees is
-# real diagnostic info; the script drops it because the only failure
-# mode is "the file is gone", which the checker already treats as a
-# soft signal (qc returns ? instead of crashing).
-DEVNULL=/dev/null
+# Canonical helpers sourced from scripts/lib/. See scripts/lib/qc.sh
+# for the DEVNULL + qc rationale (avoid the literal suppress-stderr
+# idiom that the error-swallow checker flags).
+source "$SCRIPT_DIR/lib/qc.sh"         || exit 1
+source "$SCRIPT_DIR/lib/find-suid.sh"  || exit 1
+source "$SCRIPT_DIR/lib/decode-caps.sh" || exit 1
 
-# qc Altval CMD [args...]: quiet-capture. Uses an if/else form so the
-# loud-on-failure-then-echo idiom the error-swallow checker flags
-# never appears.
-qc() {
-    local altval="$1"; shift
-    local out
-    if out="$("$@" 2>"$DEVNULL")"; then printf '%s' "$out"; else printf '%s' "$altval"; fi
+# Single trap at top level: cleanup accumulates every temp file as it
+# is created. Replacing the trap per-step was a brittle pattern that
+# leaked temps on mid-script abort. Tests/shell/12-regression-bugs.bats
+# pins the old buggy behavior so any future regression is caught.
+_TEMP_FILES=()
+register_temp() {
+    _TEMP_FILES+=("$1")
 }
+cleanup_temps() {
+    local f rc
+    for f in "${_TEMP_FILES[@]+"${_TEMP_FILES[@]}"}"; do
+        rm -f "$f" 2>"$DEVNULL"
+        rc=$?
+    done
+}
+trap cleanup_temps EXIT
 
 QUIET=0
 while [[ $# -gt 0 ]]; do
@@ -80,9 +87,8 @@ fi
 #    suid-baseline.yaml rows look like:   - path: "/usr/bin/sudo"
 #    fcap-baseline.yaml rows look like:   - path: "/usr/bin/git"
 # ---------------------------------------------------------------------------
-known_suid_tmp="$(mktemp)"
-known_fcap_tmp="$(mktemp)"
-trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp"' EXIT
+known_suid_tmp="$(mktemp)"; register_temp "$known_suid_tmp"
+known_fcap_tmp="$(mktemp)"; register_temp "$known_fcap_tmp"
 
 awk '/^  - path:/ {
     v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); if (v) print v
@@ -93,46 +99,16 @@ awk '/^  - path:/ {
 }' "$FCAP_BASELINE" | sort -u > "$known_fcap_tmp"
 
 # ---------------------------------------------------------------------------
-# 3. Discover live SUID + CAP surface. Exclusion filter mirrors sync-gtfobins.
+# 3. Discover live SUID + CAP surface via scripts/lib/ (shared filter).
 # ---------------------------------------------------------------------------
-live_suid_tmp="$(mktemp)"
-live_fcap_tmp="$(mktemp)"
+live_suid_tmp="$(mktemp)"; register_temp "$live_suid_tmp"
+live_fcap_tmp="$(mktemp)"; register_temp "$live_fcap_tmp"
 
-if ! find / -xdev -perm -4000 -type f \
-    -not -path "${HOME}/*" \
-    -not -path '/var/lib/containers/*' \
-    -not -path '/var/lib/docker/*' \
-    -not -path '/var/lib/flatpak/*' \
-    -not -path '/tmp/*' \
-    -not -path '/var/tmp/*' \
-    -not -path '/proc/*' \
-    -not -path '/sys/*' \
-    -not -path '/dev/*' \
-    -not -path '/run/*' \
-    2>"$DEVNULL" | sort -u > "$live_suid_tmp"; then
+if ! discover_suid_live "$live_suid_tmp"; then
     echo "WARNING: find returned errors (partial live SUID set)" >&2
 fi
-
-if command -v getcap >/dev/null 2>&1; then
-    if ! getcap -r / 2>"$DEVNULL" | awk '
-        function excluded(p) {
-            if (p ~ /^\/home\//)                                  return 1
-            if (p ~ /^\/var\/lib\/(containers|docker|flatpak)\//) return 1
-            if (p ~ /^\/(tmp|var\/tmp|proc|sys|dev|run)\//)       return 1
-            return 0
-        }
-        {
-            i=index($0," cap_")
-            if (i==0) next
-            path=substr($0,1,i-1)
-            if (excluded(path)) next
-            caps=substr($0,i+1)
-            sub(/^ * = /,"",caps)
-            print path "\t" caps
-        }
-    ' | sort -u > "$live_fcap_tmp"; then
-        echo "WARNING: getcap returned errors (partial live CAP set)" >&2
-    fi
+if ! discover_caps_live "$live_fcap_tmp"; then
+    echo "WARNING: getcap returned errors (partial live CAP set)" >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -176,11 +152,10 @@ gtfobins_for_path() {
 } >> "$DRIFT_REPORT"
 
 # --- 4a. new SUID (live but not in baseline) ---
-new_suids_tmp="$(mktemp -t suid-drift-new.XXXXXX)"
-rm_suids_tmp="$(mktemp -t suid-drift-rm.XXXXXX)"
+new_suids_tmp="$(mktemp -t suid-drift-new.XXXXXX)"; register_temp "$new_suids_tmp"
+rm_suids_tmp="$(mktemp -t suid-drift-rm.XXXXXX)";   register_temp "$rm_suids_tmp"
 comm -13 "$known_suid_tmp" "$live_suid_tmp" > "$new_suids_tmp"
 comm -23 "$known_suid_tmp" "$live_suid_tmp" > "$rm_suids_tmp"
-trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp" "$new_suids_tmp" "$rm_suids_tmp" "$known_fcap_raw" "$live_fcap_raw"' EXIT
 
 while IFS= read -r path; do
     [[ -z "$path" ]] && continue
@@ -207,9 +182,8 @@ while IFS= read -r path; do
 done < "$rm_suids_tmp"
 
 # --- 4c. file capability drift (new / removed / changed) ---
-known_fcap_raw="$(mktemp -t suid-drift-fc-known.XXXXXX)"
-live_fcap_raw="$(mktemp -t suid-drift-fc-live.XXXXXX)"
-trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp" "$new_suids_tmp" "$rm_suids_tmp" "$known_fcap_raw" "$live_fcap_raw"' EXIT
+known_fcap_raw="$(mktemp -t suid-drift-fc-known.XXXXXX)"; register_temp "$known_fcap_raw"
+live_fcap_raw="$(mktemp -t suid-drift-fc-live.XXXXXX)";   register_temp "$live_fcap_raw"
 # Re-emit baseline caps in the same TAB-separated format the live scan uses.
 awk '/^  - path:/ {p=$0; sub(/^.*path: *"/,"",p); sub(/".*$/,"",p)}
      /^    caps:/ {c=$0; sub(/^.*caps: *"/,"",c); sub(/".*$/,"",c); if (p && c) print p "\t" c}' \
@@ -217,9 +191,9 @@ awk '/^  - path:/ {p=$0; sub(/^.*path: *"/,"",p); sub(/".*$/,"",p)}
 sort -u "$live_fcap_tmp" > "$live_fcap_raw"
 
 # Compute the three drift classes explicitly by joining on the path key.
-new_caps_tmp="$(mktemp -t suid-drift-fc-new.XXXXXX)"
-rm_caps_tmp="$(mktemp -t suid-drift-fc-rm.XXXXXX)"
-ch_caps_tmp="$(mktemp -t suid-drift-fc-ch.XXXXXX)"
+new_caps_tmp="$(mktemp -t suid-drift-fc-new.XXXXXX)"; register_temp "$new_caps_tmp"
+rm_caps_tmp="$(mktemp -t suid-drift-fc-rm.XXXXXX)";   register_temp "$rm_caps_tmp"
+ch_caps_tmp="$(mktemp -t suid-drift-fc-ch.XXXXXX)";   register_temp "$ch_caps_tmp"
 
 while IFS=$'\t' read -r path caps; do
     [[ -z "$path" ]] && continue
@@ -238,8 +212,6 @@ while IFS=$'\t' read -r path caps; do
         printf '%s\t%s\n' "$path" "$caps" >> "$rm_caps_tmp"
     fi
 done < "$known_fcap_raw"
-
-trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp" "$new_suids_tmp" "$rm_suids_tmp" "$known_fcap_raw" "$live_fcap_raw" "$new_caps_tmp" "$rm_caps_tmp" "$ch_caps_tmp"' EXIT
 
 while IFS=$'\t' read -r path caps; do
     [[ -z "$path" ]] && continue
