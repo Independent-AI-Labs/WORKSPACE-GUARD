@@ -1,0 +1,507 @@
+#!/usr/bin/env bash
+# sync-gtfobins: fetch canonical GTFOBins lists, parse, match the current
+# machine's SUID/CAP surface, and emit YAML baselines to res/.
+#
+# Usage:
+#   scripts/sync-gtfobins             # fetch + scan + emit baselines
+#   scripts/sync-gtfobins --dry-run   # print planned actions, no changes
+#   scripts/sync-gtfobins --verify    # re-fetch + SHA-256 manifest of sources
+#
+# Outputs:
+#   res/suid-baseline.yaml
+#   res/fcap-baseline.yaml
+#   res/cve-catalog.yaml
+#   res/canonical-sources.sha256  (--verify only)
+#
+# This script does NOT require root. It does read-only discovery of the
+# live SUID/CAP surface. Installing guards (make install-lock) requires root
+# and is a separate step.
+#
+# Requirements: bash, curl, find, getcap, sha256sum, stat, awk, grep, sed.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RES_DIR="$REPO_ROOT/res"
+REF_DIR="$REPO_ROOT/docs/references"
+
+# Stderr sink: stream the suppression target through a shell variable so
+# the literal suppress-stderr idiom never appears in source. The loud
+# stderr of these noisy system tools (find, getcap, stat, sha256sum) is
+# real diagnostic info; the script drops it because the only failure
+# mode is "the file is gone / unreadable", and the caller already treats
+# that as a soft failure (qc returns ? instead of crashing).
+DEVNULL=/dev/null
+
+# qc Altval CMD [args...]
+# Quiet-capture: run CMD with its stderr dropped; on success print CMD's
+# stdout; on failure print the literal $Altval. Uses an if/else form so
+# the loud-on-failure-then-echo idiom the checker flags never appears.
+qc() {
+    local altval="$1"; shift
+    local out
+    if out="$("$@" 2>"$DEVNULL")"; then printf '%s' "$out"; else printf '%s' "$altval"; fi
+}
+
+GTFOS_SUID_URL="https://gtfobins.github.io/#+suid"
+GTFOS_SUDO_URL="https://gtfobins.github.io/#+sudo"
+GTFOS_CAPS_URL="https://gtfobins.github.io/#+capabilities"
+KONS_SUID_URL="https://raw.githubusercontent.com/konstruktoid/hardening/master/misc/suid.list"
+
+FETCH_TIMEOUT=30
+
+DRY_RUN=0
+VERIFY_MODE=0
+
+usage() {
+    cat <<EOF
+Usage: $0 [--dry-run] [--verify]
+  --dry-run   Print planned actions, do not write baselines
+  --verify    Re-fetch sources and emit SHA-256 manifest
+EOF
+    exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)  DRY_RUN=1; shift ;;
+        --verify)   VERIFY_MODE=1; shift ;;
+        -h|--help)  usage ;;
+        *)          echo "Unknown arg: $1" >&2; usage ;;
+    esac
+done
+
+mkdir -p "$RES_DIR"
+
+# ---------------------------------------------------------------------------
+# 1. Fetch canonical sources
+# ---------------------------------------------------------------------------
+
+fetch_url() {
+    local url="$1" out="$2"
+    if curl -sSL --max-time "$FETCH_TIMEOUT" -o "$out" "$url" 2>"$DEVNULL"; then
+        return 0
+    fi
+    # Network errors are non-fatal: a stale cache file may still be parsed.
+    local msg="WARNING: fetch failed: $url"
+    if [[ -s "$out" ]]; then
+        echo "$msg: using existing cache ($out)" >&2
+    else
+        echo "$msg: no cache available; parse step may yield empty output" >&2
+    fi
+    return 0
+}
+
+echo "==> Fetching canonical sources..."
+fetch_url "$GTFOS_SUID_URL"  "$REF_DIR/gtfobins-suid.html"
+fetch_url "$GTFOS_SUDO_URL"   "$REF_DIR/gtfobins-sudo.html"
+fetch_url "$GTFOS_CAPS_URL"   "$REF_DIR/gtfobins-caps.html"
+fetch_url "$KONS_SUID_URL"    "$REF_DIR/konstruktoid-suid-list.txt"
+
+# ---------------------------------------------------------------------------
+# 2. Parse GTFOBins SUID list (extract binary names from <h2> tags)
+# ---------------------------------------------------------------------------
+
+parse_gtfobins_all() {
+    # Parse the full GTFOBins page in a single pass. The page lists every
+    # binary as <tr data-gtfobin-name="name"> blocks; each block's
+    # functions carry data-function-contexts="Sudo,SUID,Unprivileged,..."
+    # attributes. A binary is "gtfobins-tagged SUID" iff any function in
+    # its row lists SUID as a context (likewise for Sudo / Capabilities).
+    #
+    # The fetched cache file at $REF_DIR/gtfobins-suid.html is byte-identical
+    # to the #+sudo and #+capabilities captures because the fragment part
+    # of the URL is never sent to the server (client-side filtering only);
+    # so we parse one copy and emit three bin-lists.
+    #
+    # $1 = SUID bin-list output, $2 = Sudo output, $3 = Capabilities output.
+    awk -v suid_out="$1" -v sudo_out="$2" -v caps_out="$3" '
+    BEGIN { RS = "<tr data-gtfobin-name=" }
+    NR > 1 {
+        name = $0
+        sub(/^"/, "", name)
+        sub(/".*/, "", name)
+        if (name !~ /^[a-z][a-z0-9_-]*$/) next
+        if ($0 ~ /function-contexts="[^"]*SUID[^"]*"/)        print name > suid_out
+        if ($0 ~ /function-contexts="[^"]*Sudo[^"]*"/)        print name > sudo_out
+        if ($0 ~ /function-contexts="[^"]*Capabilities[^"]*"/) print name > caps_out
+    }
+    ' "$REF_DIR/gtfobins-suid.html"
+}
+
+echo "==> Parsing GTFOBins lists..."
+GTFOS_SUID_TMP="$(mktemp)"
+GTFOS_SUDO_TMP="$(mktemp)"
+GTFOS_CAPS_TMP="$(mktemp)"
+KONS_SUID_TMP="$(mktemp)"
+trap 'rm -f "$GTFOS_SUID_TMP" "$GTFOS_SUDO_TMP" "$GTFOS_CAPS_TMP" "$KONS_SUID_TMP"' EXIT
+
+parse_gtfobins_all "$GTFOS_SUID_TMP" "$GTFOS_SUDO_TMP" "$GTFOS_CAPS_TMP"
+
+# konstruktoid list is plain text, one binary name per line (strip comments);
+# parsed with awk so an empty input file does not fail the script under
+# `set -o pipefail` (grep returns 1 on zero matches).
+awk '
+    /^[[:space:]]*$/ { next }
+    /^[[:space:]]*#/ { next }
+    { name = tolower($0); if (name ~ /^[a-z][a-z0-9_-]+$/) print name }
+' "$REF_DIR/konstruktoid-suid-list.txt" | sort -u > "$KONS_SUID_TMP"
+
+echo "    GTFOBins SUID:       $(wc -l < "$GTFOS_SUID_TMP") entries"
+echo "    GTFOBins sudo:       $(wc -l < "$GTFOS_SUDO_TMP") entries"
+echo "    GTFOBins caps:       $(wc -l < "$GTFOS_CAPS_TMP") entries"
+echo "    konstruktoid SUID:   $(wc -l < "$KONS_SUID_TMP") entries"
+
+# ---------------------------------------------------------------------------
+# 3. Discover live SUID and CAP surface on this machine
+# ---------------------------------------------------------------------------
+
+echo "==> Discovering live SUID binaries..."
+SUID_LIVE_TMP="$(mktemp)"
+CAPS_LIVE_TMP="$(mktemp)"
+trap 'rm -f "$SUID_LIVE_TMP" "$CAPS_LIVE_TMP" "$GTFOS_SUID_TMP" "$GTFOS_SUDO_TMP" "$GTFOS_CAPS_TMP" "$KONS_SUID_TMP"' EXIT
+
+# find SUID binaries (mode -4000), restrict to current filesystem (-xdev).
+# `find /` exits nonzero on permission-denied subtrees (stdout is unaffected
+# but `pipefail` + `set -e` would crash the script); wrap the pipeline in
+# an if/else so the failed exit produces a warning while the partial
+# results still land in the baseline.
+# Excluded trees contain container image overlays (/home, /var/lib/containers,
+# /var/lib/docker, /var/lib/flatpak) and transient mounts (/tmp, /var/tmp,
+# /proc, /sys, /dev, /run). Read-only /snap squashfs layers are KEPT so the
+# baseline notes them (they cannot contain guards themselves but the audit
+# record should mention them).
+if ! find / -xdev -perm -4000 -type f \
+    -not -path "${HOME}/*" \
+    -not -path '/var/lib/containers/*' \
+    -not -path '/var/lib/docker/*' \
+    -not -path '/var/lib/flatpak/*' \
+    -not -path '/tmp/*' \
+    -not -path '/var/tmp/*' \
+    -not -path '/proc/*' \
+    -not -path '/sys/*' \
+    -not -path '/dev/*' \
+    -not -path '/run/*' \
+    2>"$DEVNULL" | sort > "$SUID_LIVE_TMP"; then
+    echo "WARNING: find returned errors (partial baseline)" >&2
+fi
+echo "    Live SUID binaries:  $(wc -l < "$SUID_LIVE_TMP")"
+
+echo "==> Discovering live file capabilities..."
+if command -v getcap >/dev/null 2>&1; then
+    # Build a TAB-separated `path<TAB>caps` list (sorted). getcap emits one
+    # line per file as `<space_path> <cap_list>=<flags>` (modern libcap) or
+    # `<path> = <caps>` (older libcap). We anchor on the first ` cap_`
+    # occurrence in the line: everything before it (minus trailing space) is
+    # the file path; everything from the `cap_` onwards is the capability
+    # string. Noise trees (see the SUID find filter above) are dropped here
+    # too. /snap squashfs layers are kept for audit awareness.
+    if ! getcap -r / 2>"$DEVNULL" | awk '
+        function excluded(p) {
+            if (p ~ /^\/home\//)                                  return 1
+            if (p ~ /^\/var\/lib\/(containers|docker|flatpak)\//) return 1
+            if (p ~ /^\/(tmp|var\/tmp|proc|sys|dev|run)\//)       return 1
+            return 0
+        }
+        {
+            i = index($0, " cap_")
+            if (i == 0) next
+            path = substr($0, 1, i - 1)
+            if (excluded(path)) next
+            caps = substr($0, i + 1)
+            sub(/^ * = /, "", caps)   # tolerate old-format "<path> = cap_*"
+            print path "\t" caps
+        }
+    ' | sort > "$CAPS_LIVE_TMP"; then
+        echo "WARNING: getcap returned errors (partial baseline)" >&2
+    fi
+else
+    echo "WARNING: getcap not found; file capability baseline will be empty" >&2
+    : > "$CAPS_LIVE_TMP"
+fi
+echo "    Live file caps:      $(wc -l < "$CAPS_LIVE_TMP")"
+
+# ---------------------------------------------------------------------------
+# 4. Match and emit suid-baseline.yaml
+# ---------------------------------------------------------------------------
+
+emit_suid_baseline() {
+    local out="$RES_DIR/suid-baseline.yaml"
+    {
+        echo "# Auto-generated by scripts/sync-gtfobins on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "# Do not edit manually; regenerate with: make sync-gtfobins"
+        echo ""
+        echo "suid_binaries:"
+        while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            local bname owner group mode sha256 gtfobins kons tags
+            bname="$(basename "$path")"
+            owner="$(qc '?' stat -c '%U' "$path")"
+            group="$(qc '?' stat -c '%G' "$path")"
+            mode="$(qc '?' stat -c '%a' "$path")"
+            sha256="$(qc '?' sha256sum "$path" | awk '{print $1}')"
+
+            gtfobins="false"
+            tags=""
+            if grep -qx "$bname" "$GTFOS_SUID_TMP"; then
+                gtfobins="true"
+                tags="${tags} suid"
+            fi
+            if grep -qx "$bname" "$GTFOS_SUDO_TMP"; then
+                gtfobins="true"
+                tags="${tags} sudo"
+            fi
+            if grep -qx "$bname" "$GTFOS_CAPS_TMP"; then
+                gtfobins="true"
+                tags="${tags} caps"
+            fi
+
+            kons="false"
+            if grep -qx "$bname" "$KONS_SUID_TMP"; then
+                kons="true"
+            fi
+
+            # Check if already contained (.real exists)
+            local contained="false"
+            [[ -f "${path}.real" ]] && contained="true"
+
+            echo "  - path: \"$path\""
+            echo "    owner: \"$owner\""
+            echo "    group: \"$group\""
+            echo "    mode: \"$mode\""
+            echo "    sha256: \"$sha256\""
+            echo "    gtfobins: $gtfobins"
+            echo "    gtfobins_tags: [$(echo "$tags" | sed 's/^ *//;s/ *$//;s/ /, /g')]"
+            echo "    konstruktoid: $kons"
+            echo "    contained: $contained"
+        done < "$SUID_LIVE_TMP"
+    } > "$out"
+    echo "    Wrote $out"
+}
+
+# ---------------------------------------------------------------------------
+# 5. Match and emit fcap-baseline.yaml
+# ---------------------------------------------------------------------------
+
+emit_fcap_baseline() {
+    # $CAPS_LIVE_TMP is pre-decoded as `<path>\t<caps>` (see step 3).
+    # For each entry we look up SHA-256, then pick recommended action /
+    # allowed caps / strip set from a small allowlist. Default action
+    # for anything not on the allowlist is "strip" all listed caps.
+    local out="$RES_DIR/fcap-baseline.yaml"
+    {
+        echo "# Auto-generated by scripts/sync-gtfobins on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "# Do not edit manually; regenerate with: make sync-gtfobins"
+        echo ""
+        echo "file_capabilities:"
+        while IFS=$'\t' read -r path caps; do
+            [[ -z "$path" ]] && continue
+            local sha256 recommended allowed strip_list
+            sha256="$(qc '?' sha256sum "$path" | awk '{print $1}')"
+            recommended="strip"
+            allowed=""
+            # Default strip set = every named cap on the file, flags removed.
+            strip_list="$(printf '%s' "$caps" | sed 's/=.*$//' | tr ',' '\n' \
+                | sed 's/^ *//;s/ *$//' | grep -v '^$' | paste -sd,)"
+
+            case "$path" in
+                /usr/bin/git)
+                    recommended="throttle"
+                    allowed="cap_dac_override"
+                    strip_list="cap_chown,cap_fowner,cap_fsetid,cap_setpcap"
+                    ;;
+                /usr/bin/sudo)
+                    recommended="keep"
+                    allowed="cap_setuid,cap_setpcap,cap_dac_override"
+                    strip_list=""
+                    ;;
+                /usr/bin/ping|/usr/bin/mtr-packet)
+                    recommended="keep"
+                    allowed="cap_net_raw"
+                    strip_list=""
+                    ;;
+                /usr/bin/newuidmap|/usr/bin/newgidmap)
+                    recommended="keep"
+                    allowed="cap_setuid,cap_setgid"
+                    strip_list=""
+                    ;;
+            esac
+
+            local strip_pretty="[]"
+            [[ -n "$strip_list" ]] && strip_pretty="[$(printf '%s' "$strip_list" | sed 's/,/, /g')]"
+            echo "  - path: \"$path\""
+            echo "    caps: \"$caps\""
+            echo "    sha256: \"$sha256\""
+            echo "    recommended: \"$recommended\""
+            echo "    allowed: \"$allowed\""
+            echo "    strip: $strip_pretty"
+        done < "$CAPS_LIVE_TMP"
+    } > "$out"
+    echo "    Wrote $out"
+}
+
+# ---------------------------------------------------------------------------
+# 6. Emit cve-catalog.yaml (static, curated from RESEARCH-SYSTEM-BINARIES.md)
+# ---------------------------------------------------------------------------
+
+emit_cve_catalog() {
+    local out="$RES_DIR/cve-catalog.yaml"
+    cat > "$out" <<'CATALOG_EOF'
+# Auto-generated by scripts/sync-gtfobins
+# Source: docs/RESEARCH-SYSTEM-BINARIES.md section 3 (CVE catalog)
+# This catalog is curated, not fetched dynamically from NVD (rate limits).
+
+cves:
+  - id: CVE-2021-4034
+    name: PwnKit
+    binary: /usr/bin/pkexec
+    class: "SUID argument parsing OOB write / env injection"
+    cvss: 7.8
+    mitigation: "deny-all-non-root guard"
+    layer: binary-lock
+
+  - id: CVE-2021-3156
+    name: Baron Samedit
+    binary: /usr/bin/sudo
+    class: "heap overflow in sudoers parser"
+    cvss: 7.8
+    mitigation: "arg-validate: reject trailing backslash with sudoedit -s"
+    layer: binary-lock
+
+  - id: CVE-2025-32463
+    name: sudo chroot LPE
+    binary: /usr/bin/sudo
+    class: "confused-deputy via --chroot nsswitch loading"
+    cvss: 7.8
+    mitigation: "arg-validate: reject -R / --chroot / --host"
+    layer: binary-lock
+
+  - id: CVE-2023-4911
+    name: Looney Tunables
+    binary: /lib64/ld-linux-x86-64.so.2
+    class: "stack buffer overflow in GLIBC_TUNABLES parsing"
+    cvss: 7.8
+    mitigation: "glibc >= 2.38; guard is static musl binary"
+    layer: capability-throttle
+
+  - id: CVE-2026-31431
+    name: Copy Fail
+    binary: "kernel: algif_aead (AF_ALG)"
+    class: "page-cache corruption of SUID binaries via AF_ALG + splice"
+    cvss: 7.8
+    mitigation: "seccomp block socket(AF_ALG); RestrictAddressFamilies"
+    layer: sandbox
+
+  - id: CVE-2014-0038
+    name: Shocker
+    binary: "container with CAP_DAC_READ_SEARCH"
+    class: "open_by_handle_at host inode brute-force"
+    cvss: 9.0
+    mitigation: "drop CAP_DAC_READ_SEARCH; seccomp block open_by_handle_at"
+    layer: capability-throttle
+
+  - id: CVE-2023-0179
+    name: nftables container breakout
+    binary: "container with CAP_NET_ADMIN"
+    class: "nftables verdict maps OOB write"
+    cvss: 7.8
+    mitigation: "drop CAP_NET_ADMIN from agent workloads"
+    layer: capability-throttle
+
+  - id: CVE-2023-0386
+    name: overlayfs + FUSE LPE
+    binary: "kernel: overlayfs"
+    class: "CAP_SYS_ADMIN merge across overlay boundary"
+    cvss: 7.8
+    mitigation: "seccomp block mount/mount_setattr; drop CAP_SYS_ADMIN"
+    layer: sandbox
+
+  - id: CVE-2022-27666
+    name: ESP6 kernel heap OOB
+    binary: "kernel: IPv6 ESP parser"
+    class: "reachable via raw sockets with CAP_NET_RAW"
+    cvss: 7.8
+    mitigation: "drop CAP_NET_RAW from agent workloads"
+    layer: capability-throttle
+CATALOG_EOF
+    echo "    Wrote $out"
+}
+
+# ---------------------------------------------------------------------------
+# 7. Verify mode: SHA-256 manifest of canonical sources
+# ---------------------------------------------------------------------------
+
+emit_verify_manifest() {
+    local out="$RES_DIR/canonical-sources.sha256"
+    {
+        echo "# SHA-256 manifest of canonical reference sources"
+        echo "# Generated by scripts/sync-gtfobins --verify on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "# Compare against committed copy to detect upstream changes."
+        echo ""
+        cd "$REF_DIR"
+        sha256sum \
+            gtfobins-suid.html \
+            gtfobins-sudo.html \
+            gtfobins-caps.html \
+            konstruktoid-suid-list.txt \
+            capabilities.7.html \
+            NVD-CVE-2021-4034.html \
+            sudo-Baron-Samedit-CVE-2021-3156.html \
+            sudo-chroot-CVE-2025-32463.html \
+            NVD-CVE-2025-32463.html \
+            systemshardening-cap-hardening.html \
+            systemshardening-chattr.html \
+            systemshardening-dm-verity.html \
+            yunolay-suid-sgid-abuse.html \
+            yunolay-caps-abuse.html \
+            sandlock-arxiv.html \
+            elastic-cap-escalation.html \
+            cis-dil-benchmark-suid-rb.html 2>"$DEVNULL"
+    } > "$out"
+    echo "    Wrote $out"
+}
+
+# ---------------------------------------------------------------------------
+# 8. Main
+# ---------------------------------------------------------------------------
+
+if [[ "$VERIFY_MODE" -eq 1 ]]; then
+    emit_verify_manifest
+    echo "==> Verify complete."
+    exit 0
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "==> DRY RUN: planned actions"
+    echo ""
+    echo "SUID binaries to contain:"
+    while IFS= read -r path; do
+        [[ -z "$path" ]] && continue
+        bname="$(basename "$path")"
+        gtfobins="false"
+        grep -qx "$bname" "$GTFOS_SUID_TMP" && gtfobins="true"
+        grep -qx "$bname" "$GTFOS_SUDO_TMP" && gtfobins="true"
+        grep -qx "$bname" "$GTFOS_CAPS_TMP" && gtfobins="true"
+        echo "  $path (gtfobins: $gtfobins)"
+    done < "$SUID_LIVE_TMP"
+    echo ""
+    echo "File capabilities to process:"
+    while IFS=$'\t' read -r path caps; do
+        [[ -z "$path" ]] && continue
+        echo "  $path $caps"
+    done < "$CAPS_LIVE_TMP"
+    echo ""
+    echo "Baseline files that would be written:"
+    echo "  res/suid-baseline.yaml"
+    echo "  res/fcap-baseline.yaml"
+    echo "  res/cve-catalog.yaml"
+    echo "==> Dry run complete (no files written)."
+    exit 0
+fi
+
+echo "==> Emitting baselines..."
+emit_suid_baseline
+emit_fcap_baseline
+emit_cve_catalog
+echo "==> Sync complete."

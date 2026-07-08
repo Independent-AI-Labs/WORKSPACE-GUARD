@@ -1,4 +1,5 @@
 safe_exceptions:
+  - .gitleaks.toml
   - config.toml
   - guard_config_keys.yaml
   - guard_config_keys.schema.yaml

@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux</title>
+  <meta name="description" content="dm-verity gives you a read-only root that fails to mount if a single block is tampered with. dm-integrity adds runtime checksumming. Together: immutable, evidence-bearing systems.">
+
+  <link rel="canonical" href="https://www.systemshardening.com/articles/linux/dm-verity/">
+  <meta name="robots" content="index, follow">
+
+  
+
+  
+  
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux">
+  <meta property="og:description" content="dm-verity gives you a read-only root that fails to mount if a single block is tampered with. dm-integrity adds runtime checksumming. Together: immutable, evidence-bearing systems.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://www.systemshardening.com/articles/linux/dm-verity/">
+  <meta property="og:site_name" content="systemshardening.com">
+  <meta property="og:locale" content="en">
+  <meta property="og:image" content="https://www.systemshardening.com/static/og-default.svg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux">
+  <meta name="twitter:description" content="dm-verity gives you a read-only root that fails to mount if a single block is tampered with. dm-integrity adds runtime checksumming. Together: immutable, evidence-bearing systems.">
+  <meta name="twitter:image" content="https://www.systemshardening.com/static/og-default.svg">
+
+  <!-- Security headers via meta (supplemented by server headers) -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+  <script>
+    (function() {
+      var saved = localStorage.getItem('theme');
+      if (saved) {
+        document.documentElement.dataset.theme = saved;
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="alternate" type="application/atom+xml" title="systemshardening.com" href="/feed.xml">
+  <link rel="sitemap" type="application/xml" href="/sitemap.xml">
+
+  <!-- Cloudflare Web Analytics -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "3f619ce5dc9e43e78bfc63bcab3fb4dc"}'></script>
+  <!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+  <div class="site-header-wrap">
+  <header class="site-header">
+    <div class="header-top">
+      <a href="/" class="site-logo">systemshardening<span class="logo-dot">.</span>com</a>
+      <button class="theme-toggle" aria-label="Toggle dark mode">&#9790;</button>
+    </div>
+    <nav class="site-nav">
+      <a href="/">Home</a>
+      <a href="/articles/" aria-current="page">Articles</a>
+      <a href="/about/">About</a>
+      <a href="/principles/">Principles</a>
+    </nav>
+  </header>
+</div>
+
+
+  <main>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.systemshardening.com/"},
+    {"@type": "ListItem", "position": 2, "name": "Articles", "item": "https://www.systemshardening.com/articles/"},
+    {"@type": "ListItem", "position": 3, "name": "Linux / OS Hardening", "item": "https://www.systemshardening.com/articles/linux/"},
+    {"@type": "ListItem", "position": 4, "name": "dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux"}
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux",
+  "datePublished": "2026-04-29T00:00:00.000Z",
+  "dateModified": "2026-04-29T00:00:00.000Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Systems Hardening",
+    "url": "https://www.systemshardening.com"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "systemshardening.com"
+  },
+  "description": "dm-verity gives you a read-only root that fails to mount if a single block is tampered with. dm-integrity adds runtime checksumming. Together: immutable, evidence-bearing systems.",
+  "mainEntityOfPage": "https://www.systemshardening.com/articles/linux/dm-verity/",
+  "proficiencyLevel": "advanced",
+  "timeRequired": "PT14M"
+}
+</script>
+<article class="article">
+  <header class="article-header">
+    <div class="article-meta">
+      <span class="article-category" data-cat="linux">Linux / OS Hardening</span>
+      
+        <span class="article-difficulty">advanced</span>
+      
+      
+        <span class="article-reading-time">14 min read</span>
+      
+    </div>
+    <h1>dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux</h1>
+    
+      <time datetime="Wed Apr 29 2026 00:00:00 GMT+0000 (Coordinated Universal Time)">29 April 2026</time>
+    
+    
+      <div class="article-tags">
+        
+          <span class="tag">dm-verity</span>
+        
+          <span class="tag">dm-integrity</span>
+        
+          <span class="tag">linux</span>
+        
+          <span class="tag">immutable</span>
+        
+          <span class="tag">boot-integrity</span>
+        
+      </div>
+    
+    <div class="article-listen">
+      <button id="tts-btn" class="tts-btn" aria-label="Listen to article">
+        <span class="tts-icon" aria-hidden="true">▶</span>
+        <span class="tts-label">Listen</span>
+      </button>
+    </div>
+  </header>
+
+  
+
+  <div class="article-content">
+    <h1>dm-verity and dm-integrity: Tamper-Evident Block-Level Roots for Production Linux</h1>
+<h2 id="problem" tabindex="-1"><a class="header-anchor" href="#problem">Problem</a></h2>
+<p>Filesystem-level integrity (auditd, AIDE, Tripwire) is too late. A check that runs after boot has already let a malicious binary execute; a check that runs hourly has minutes-to-hours of attacker dwell time. The right boundary for system-image integrity is the kernel’s block layer — every read of a block is verified before the bytes reach userspace.</p>
+<p><code>dm-verity</code> provides this: a Merkle-tree-backed verification layer that sits between the block device and the filesystem. Each block read is verified against a hash; any mismatch causes I/O to fail. The Merkle root is signed at image-build time with a known key.</p>
+<p><code>dm-integrity</code> is the writable counterpart: per-block checksums for read-write filesystems, detecting bit-rot or physical tampering on disk. Combined with dm-crypt, dm-integrity provides authenticated encryption (AEAD) at the block level.</p>
+<p>By 2026, immutable Linux distributions have made these mainstream:</p>
+<ul>
+<li><strong>Fedora CoreOS / Flatcar / Talos</strong> ship with dm-verity-protected root partitions. Boot fails if root is tampered with.</li>
+<li><strong>Bottlerocket</strong> (AWS) and <strong>Container OS</strong> (GCP) use dm-verity for the system partition.</li>
+<li><strong>ChromeOS</strong> has used dm-verity for the rootfs for over a decade.</li>
+<li><strong>Android</strong> uses dm-verity for <code>system</code> and <code>vendor</code> partitions; dm-integrity for <code>userdata</code> (encrypted).</li>
+</ul>
+<p>Yet the typical Ubuntu / RHEL production server still has a writable, unsigned root. A compromised process with root privileges modifies any system binary; the next reboot uses the modified binary. dm-verity is the structural defense.</p>
+<p>The specific gaps in a default Linux server image:</p>
+<ul>
+<li>Root filesystem is read-write; binaries can be replaced at runtime.</li>
+<li>No cryptographic measurement of the running system; integrity-checking tools (auditd, AIDE) operate on userspace files after boot.</li>
+<li>File integrity monitoring (FIM) catches changes after the fact, not during write.</li>
+<li>Persistent rootkits survive reboot because root is mutable.</li>
+<li>Read-only <code>chattr +i</code> is bypassed by anyone with <code>CAP_LINUX_IMMUTABLE</code>.</li>
+</ul>
+<p>This article covers building dm-verity-protected root images, signing and verifying the Merkle root, deploying dm-integrity for writable partitions, the systemd integration via <code>systemd-veritysetup</code>, and the operational changes (where state goes when the root is read-only).</p>
+<p><strong>Target systems:</strong> Linux kernel 5.4+ (dm-verity <code>forward_error_correction</code> in 5.10+, dm-integrity AEAD in 5.16+); Fedora CoreOS, Talos Linux, Bottlerocket, custom immutable distros built on Buildroot or systemd-mkosi.</p>
+<h2 id="threat-model" tabindex="-1"><a class="header-anchor" href="#threat-model">Threat Model</a></h2>
+<ul>
+<li><strong>Adversary 1 — Persistent rootkit:</strong> an attacker with root modifies system binaries (<code>sshd</code>, <code>systemd</code>, <code>bash</code>) to install backdoors that survive reboot.</li>
+<li><strong>Adversary 2 — Disk-level tampering:</strong> physical access to the disk; attacker modifies file contents while the host is offline.</li>
+<li><strong>Adversary 3 — Supply-chain image tampering:</strong> the system image is replaced in transit between the build server and the deploy target.</li>
+<li><strong>Adversary 4 — Bit-rot:</strong> silent data corruption from disk degradation, cosmic rays, controller bugs. Not adversarial but indistinguishable from tampering.</li>
+<li><strong>Access level:</strong> Adversary 1 has root on the running system. Adversary 2 has physical disk access. Adversary 3 has man-in-the-middle on the image-distribution path. Adversary 4 has none.</li>
+<li><strong>Objective:</strong> Persistent foothold via modified system binaries; undetectable data corruption.</li>
+<li><strong>Blast radius:</strong> Without dm-verity, a single root compromise persists indefinitely. With dm-verity, the next reboot fails to mount root if any block has been modified — the rootkit can’t survive a reboot, and persistence is forced into writable state directories which are clearly demarcated.</li>
+</ul>
+<h2 id="configuration" tabindex="-1"><a class="header-anchor" href="#configuration">Configuration</a></h2>
+<h3 id="step-1%3A-build-a-verity-protected-image" tabindex="-1"><a class="header-anchor" href="#step-1%3A-build-a-verity-protected-image">Step 1: Build a Verity-Protected Image</a></h3>
+<p>Build the root filesystem, generate the Merkle hash tree, and sign the root hash.</p>
+<pre><code class="language-bash"># Build the root filesystem (any standard tool: debootstrap, mkosi, buildroot).
+mkdir -p /tmp/rootfs
+debootstrap stable /tmp/rootfs http://deb.debian.org/debian/
+
+# Convert to a fixed-size ext4 image, immutable.
+truncate -s 2G /tmp/root.img
+mkfs.ext4 -F /tmp/root.img
+mount -o loop /tmp/root.img /mnt
+cp -a /tmp/rootfs/* /mnt/
+umount /mnt
+
+# Generate the verity hash tree.
+veritysetup format /tmp/root.img /tmp/root.verity &gt; /tmp/verity.info
+# Outputs:
+#   UUID: ...
+#   Hash type: 1
+#   Data blocks: 524288
+#   Data block size: 4096
+#   Hash block size: 4096
+#   Hash algorithm: sha256
+#   Salt: a8...
+#   Root hash: 4f7c2e3d... (this is the key value)
+</code></pre>
+<p>The root hash is a 32-byte SHA-256 of the entire Merkle tree’s root. Any modification to any data block changes a leaf hash; that propagates up and changes the root hash.</p>
+<p>Sign the root hash:</p>
+<pre><code class="language-bash"># Sign with the build-server's signing key.
+ROOT_HASH=$(grep &quot;Root hash&quot; /tmp/verity.info | awk '{print $3}')
+echo -n &quot;$ROOT_HASH&quot; | openssl dgst -sha256 -sign /etc/build-keys/verity.key \
+  -out /tmp/root-hash.sig
+</code></pre>
+<p>Distribute three artifacts: <code>root.img</code> (data), <code>root.verity</code> (Merkle tree), <code>root-hash.sig</code> (signature over the root hash).</p>
+<h3 id="step-2%3A-boot-with-verity-activated" tabindex="-1"><a class="header-anchor" href="#step-2%3A-boot-with-verity-activated">Step 2: Boot With Verity Activated</a></h3>
+<p>The bootloader passes the root hash to the kernel, which sets up the dm-verity device before mounting root.</p>
+<pre><code class="language-bash"># /boot/loader/entries/00-verity.conf (systemd-boot example).
+title   Production OS (verity)
+linux   /vmlinuz
+initrd  /initrd.img
+options root=/dev/mapper/root-verity \
+        verity.usrhash=4f7c2e3d... \
+        verity.usr=PARTLABEL=root \
+        verity.usrhashpart=PARTLABEL=verity \
+        ro
+</code></pre>
+<p><code>systemd-veritysetup-generator</code> reads the kernel command-line, sets up the dm-verity device, and mounts it as the root.</p>
+<p>For GRUB:</p>
+<pre><code>GRUB_CMDLINE_LINUX=&quot;systemd.verity_root_data=PARTUUID=... systemd.verity_root_hash=PARTUUID=... verity.usrhash=4f7c2e3d... ro&quot;
+</code></pre>
+<p>The <code>ro</code> flag is critical: dm-verity supports read-only mounts only.</p>
+<p>Verify at runtime:</p>
+<pre><code class="language-bash"># Confirm dm-verity is active on root.
+sudo dmsetup table root-verity
+# 0 524288 verity 1 /dev/sda3 /dev/sda4 4096 4096 524288 1 sha256
+#   4f7c2e3d... a8b9c0d1...
+
+# Read /proc/mounts.
+mount | grep &quot; on / &quot;
+# /dev/mapper/root-verity on / type ext4 (ro,relatime)
+
+# Tampering with root after boot fails the read.
+# (Cannot easily simulate without taking the system down; see Step 4 verification.)
+</code></pre>
+<h3 id="step-3%3A-writable-state-with-dm-integrity-%2B-dm-crypt" tabindex="-1"><a class="header-anchor" href="#step-3%3A-writable-state-with-dm-integrity-%2B-dm-crypt">Step 3: Writable State With dm-integrity + dm-crypt</a></h3>
+<p>A read-only root needs writable space for logs, application state, configuration. Mount these on dm-integrity-protected partitions:</p>
+<pre><code class="language-bash"># Format with integrity (HMAC + AES-GCM for authenticated encryption).
+sudo cryptsetup luksFormat --type luks2 \
+  --integrity hmac-sha256 \
+  --cipher aes-xts-plain64 \
+  --key-size 512 \
+  /dev/sda5
+
+sudo cryptsetup open /dev/sda5 var-state \
+  --key-file /etc/keys/var-state.key
+
+# Format ext4 on the protected device.
+sudo mkfs.ext4 /dev/mapper/var-state
+sudo mount /dev/mapper/var-state /var/state
+</code></pre>
+<p>The kernel verifies HMAC on every read; tampering returns <code>EILSEQ</code> to userspace. Combined with the immutable root, the system has clear separation: read-only verified system, write-enabled but tamper-evident state.</p>
+<p>Update <code>/etc/fstab</code> to mount writable partitions on boot. Application data (<code>/var/lib/&lt;app&gt;</code>) goes to dm-integrity volumes; session state, caches, sockets go to tmpfs.</p>
+<h3 id="step-4%3A-failure-behavior-on-tampering" tabindex="-1"><a class="header-anchor" href="#step-4%3A-failure-behavior-on-tampering">Step 4: Failure Behavior on Tampering</a></h3>
+<p>A simulated tamper (in a test environment) on a verity-protected device causes:</p>
+<pre><code class="language-bash"># DON'T do this on production. Test environment only.
+sudo dd if=/dev/zero of=/dev/sda3 bs=4096 count=1 seek=100 conv=notrunc
+
+# On next read of the affected block:
+cat /verified-file
+# I/O error.
+
+# dmesg shows:
+# [12345.678] device-mapper: verity: 8:3: data block 100 is corrupted
+</code></pre>
+<p>The kernel returns I/O error; userspace cannot read the modified block. Production: the kernel-panic-on-corruption mode (<code>error_behavior=panic</code>) is one of three configurable behaviors; choose based on workload sensitivity.</p>
+<h3 id="step-5%3A-update-flow" tabindex="-1"><a class="header-anchor" href="#step-5%3A-update-flow">Step 5: Update Flow</a></h3>
+<p>dm-verity-protected systems require a build-then-deploy update flow, not in-place package upgrades. The pattern:</p>
+<pre><code>[Build new image with new packages]
+  -&gt; [Generate new Merkle root + sign]
+  -&gt; [Distribute new root.img, verity, signature]
+  -&gt; [Bootloader updates entries to point at new image]
+  -&gt; [Reboot to apply]
+  -&gt; [Old image kept for one boot cycle for rollback]
+</code></pre>
+<p>Tools: <code>systemd-sysupdate</code> (handles the dual-image swap), Bottlerocket’s update operator, Talos’s machine-config CRD, Flatcar’s update_engine.</p>
+<pre><code class="language-yaml"># systemd-sysupdate transfer config.
+[Source]
+Type=url-file
+Path=https://updates.example.com/talos-%v.raw.xz
+MatchPattern=talos_@v.raw.xz
+
+[Target]
+Type=partition
+Path=auto
+MatchPattern=talos_%v
+PartitionType=root-x86-64-verity
+ReadOnly=1
+</code></pre>
+<p>Sysupdate downloads, verifies the signature, writes to the inactive partition, swaps the boot reference, and reboots. Two-image roll-forward / roll-back is automatic.</p>
+<h3 id="step-6%3A-audit-and-telemetry" tabindex="-1"><a class="header-anchor" href="#step-6%3A-audit-and-telemetry">Step 6: Audit and Telemetry</a></h3>
+<p>Track integrity events:</p>
+<pre><code>verity_io_error_total{partition}             counter
+verity_corruption_detected_total{block_num}  counter
+integrity_decryption_failure_total           counter
+integrity_data_block_failures_total          counter
+boot_verity_root_hash_mismatch_total          counter
+</code></pre>
+<p>For ongoing monitoring:</p>
+<pre><code class="language-bash"># Read kernel ringbuffer for verity / integrity messages.
+journalctl -k | grep -iE &quot;dm-verity|dm-integrity|verity:&quot;
+</code></pre>
+<p>Alert on any verity error — they should be zero in normal operation. Even a single error indicates either tampering or hardware failure; both warrant immediate investigation.</p>
+<h3 id="step-7%3A-image-provenance" tabindex="-1"><a class="header-anchor" href="#step-7%3A-image-provenance">Step 7: Image Provenance</a></h3>
+<p>Sign images with cosign / SLSA provenance, the same as container images. Tie the Merkle root hash to a build attestation:</p>
+<pre><code class="language-bash">cosign attest --yes --predicate provenance.json --type slsaprovenance \
+  --certificate-identity 'https://github.com/myorg/build-images/.github/workflows/build.yml@refs/heads/main' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/myorg/talos-image:v1.7.0
+</code></pre>
+<p>The deployment pipeline verifies the cosign signature, the SLSA provenance, AND the dm-verity Merkle root. Three independent gates.</p>
+<h2 id="expected-behaviour" tabindex="-1"><a class="header-anchor" href="#expected-behaviour">Expected Behaviour</a></h2>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Standard mutable root</th>
+<th>dm-verity-protected root</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Modify <code>/usr/bin/sshd</code> after boot</td>
+<td>Succeeds; persists across reboot</td>
+<td>I/O error to write attempt; root is <code>ro</code></td>
+</tr>
+<tr>
+<td>Disk-level tamper while offline</td>
+<td>Modification persists</td>
+<td>Boot fails: <code>verity root hash mismatch</code></td>
+</tr>
+<tr>
+<td>Bit-rot in system files</td>
+<td>Silent corruption</td>
+<td>Read fails; OS reports the block</td>
+</tr>
+<tr>
+<td>Update flow</td>
+<td><code>apt upgrade</code> in place</td>
+<td>New signed image; reboot to apply</td>
+</tr>
+<tr>
+<td>Persistent rootkit</td>
+<td>Survives reboot</td>
+<td>Cannot survive — read-only root forces persistence to known-writable directories which are themselves dm-integrity-protected</td>
+</tr>
+</tbody>
+</table>
+<p>Verify the integrity story:</p>
+<pre><code class="language-bash"># Confirm root is read-only.
+mount | grep &quot; on / &quot;
+# /dev/mapper/root-verity on / type ext4 (ro,relatime)
+
+# Confirm dm-verity is active.
+sudo dmsetup table | grep verity
+# root-verity: 0 524288 verity ...
+
+# Try to write — should fail.
+sudo touch /etc/test-rw
+# touch: cannot touch '/etc/test-rw': Read-only file system
+</code></pre>
+<h2 id="trade-offs" tabindex="-1"><a class="header-anchor" href="#trade-offs">Trade-offs</a></h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Benefit</th>
+<th>Cost</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read-only root</td>
+<td>Defeats persistent rootkits</td>
+<td>In-place package upgrades not possible</td>
+<td>Use immutable update flow (sysupdate); design state to live on writable partitions explicitly.</td>
+</tr>
+<tr>
+<td>Merkle-tree storage</td>
+<td>Tamper detection</td>
+<td>~1% storage overhead for the hash tree</td>
+<td>Negligible; hash partition can be on the same disk.</td>
+</tr>
+<tr>
+<td>dm-integrity for state</td>
+<td>Authenticated encryption per block</td>
+<td>~5-15% performance overhead vs raw block device</td>
+<td>Acceptable for application state; not for high-throughput scratch space (use tmpfs).</td>
+</tr>
+<tr>
+<td>Per-image signing</td>
+<td>Provenance from build to boot</td>
+<td>Build pipeline complexity</td>
+<td>Standard now; cosign integrates well.</td>
+</tr>
+<tr>
+<td>Update reboot required</td>
+<td>Atomicity guaranteed</td>
+<td>Higher MTTR for security patches</td>
+<td>Use systemd-sysupdate’s dual-partition flow; reboot-required time bounded to one reboot.</td>
+</tr>
+<tr>
+<td>Rollback to previous image</td>
+<td>Recovery from bad updates</td>
+<td>Two partitions of disk space</td>
+<td>Accepted cost; the previous image is one update cycle away.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="failure-modes" tabindex="-1"><a class="header-anchor" href="#failure-modes">Failure Modes</a></h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Symptom</th>
+<th>Detection</th>
+<th>Recovery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Verity root hash mismatch on boot</td>
+<td>Boot fails with verity error</td>
+<td>Console output: “data block N is corrupted”</td>
+<td>Investigate the disk for failure or tampering; re-flash the image. The system fails closed — exactly the desired behavior.</td>
+</tr>
+<tr>
+<td>Application expects writable /etc</td>
+<td>App fails with permission errors</td>
+<td>Application logs show write failures to /etc paths</td>
+<td>Move config to a writable overlay (using systemd’s <code>ConfigurationDirectory</code> or symlinks to /var/state/<app>/conf).</td>
+</tr>
+<tr>
+<td>dm-integrity corruption</td>
+<td>Reads fail on the protected partition</td>
+<td>dmesg: integrity checksum failure</td>
+<td>Disk is degrading or has been tampered with; replace and restore from backup.</td>
+</tr>
+<tr>
+<td>Out-of-date kernel command line</td>
+<td>Kernel can’t find verity-data partition</td>
+<td>systemd-veritysetup-generator fails</td>
+<td>Verify kernel cmdline; for systemd-boot, regenerate via <code>bootctl install</code>; for GRUB, regenerate via <code>update-grub</code>.</td>
+</tr>
+<tr>
+<td>Hash partition lost / corrupted</td>
+<td>Cannot mount root</td>
+<td>Boot loops or panics</td>
+<td>Use the alternate (rollback) image; investigate. The hash partition is small and could be backed up separately.</td>
+</tr>
+<tr>
+<td>Update signature mismatch</td>
+<td>Sysupdate refuses to apply</td>
+<td>systemd-sysupdate logs show signature error</td>
+<td>Verify the signing key matches; trust roots may have been rotated. Investigate update server compromise.</td>
+</tr>
+<tr>
+<td>Forgot writable mount for state</td>
+<td>Application data lost across reboot</td>
+<td>App restart shows empty state</td>
+<td>Configure <code>/etc/fstab</code> to mount writable partition on boot before any service that needs state.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="related-articles" tabindex="-1"><a class="header-anchor" href="#related-articles">Related Articles</a></h2>
+<ul>
+<li><a href="/articles/linux/grub-boot-hardening/">GRUB Boot Hardening for Production Linux Systems</a></li>
+<li><a href="/articles/linux/kernel-lockdown/">Kernel Lockdown Mode</a></li>
+<li><a href="/articles/linux/sysctl-kernel-hardening/">Hardening the Linux Kernel Attack Surface with sysctl</a></li>
+<li><a href="/articles/linux/auditd-deep-dive/">Linux Audit Framework Deep Dive</a></li>
+<li><a href="/articles/linux/fido2-ssh/">FIDO2 SSH with sk-* Keys</a></li>
+</ul>
+
+  </div>
+
+  <script src="/static/tts.js"></script>
+  <footer class="article-footer">
+    
+      <p class="article-updated">Last updated: 29 April 2026</p>
+    
+    <nav class="article-nav">
+      <a href="/articles/">All articles</a>
+      <a href="/articles/linux/">More in Linux / OS Hardening</a>
+    </nav>
+  </footer>
+</article>
+
+  </main>
+
+  <div class="site-footer-wrap">
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-tagline">
+        <p>Hardening real systems in production, for engineers who actually run them.</p>
+        <p class="footer-built">Built for humans and AI agents.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/articles/">Articles</a>
+        <a href="/about/">About</a>
+        <a href="/principles/">Principles</a>
+        <a href="/feed.xml">RSS Feed</a>
+      </div>
+      <p class="footer-copy">&copy; systemshardening.com 2026</p>
+    </div>
+  </footer>
+</div>
+
+
+  <script>
+    (function() {
+      var btn = document.querySelector('.theme-toggle');
+      if (!btn) return;
+      var current = document.documentElement.dataset.theme;
+      btn.textContent = current === 'dark' ? '\u2600' : '\u263E';
+      btn.addEventListener('click', function() {
+        var isDark = document.documentElement.dataset.theme === 'dark';
+        var next = isDark ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('theme', next);
+        btn.textContent = next === 'dark' ? '\u2600' : '\u263E';
+      });
+    })();
+  </script>
+</body>
+</html>

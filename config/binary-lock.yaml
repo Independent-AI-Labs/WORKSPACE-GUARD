@@ -1,0 +1,101 @@
+# Binary Lock (SUID/CAP contain-via-guard) policy.
+#
+# Compiled into each per-binary Rust guard at build time
+# (see docs/specifications/SPEC-BINARY-LOCK.md section 3).
+# A guard may NOT read this file at runtime; the policy is baked in
+# by the build system to match the git-guard security model.
+#
+# Policy types (SPEC-BINARY-LOCK.md section 3.1):
+#   deny-non-root       Non-root: exit 2; root: execve .real
+#   deny-all-non-root   Non-root: exit 2 (no exceptions); root: execve .real
+#   arg-validate        Non-root: check subcommand allowlist; allow or exit 2;
+#                       root: execve .real
+#   pass-through        No checks; execve .real
+#
+# This file is the single source of truth for per-binary policy.
+# Changing it and running `make install-lock` regenerates the guards.
+
+binaries:
+  /usr/bin/sudo:
+    policy: arg-validate
+    allow_subcommands:
+      - sudo
+      - sudoedit
+    reject_patterns:
+      - { pattern: '\\$', flags: [sudoedit, -s], reason: "Baron Samedit CVE-2021-3156" }
+      - { flag: -R, reason: "chroot LPE CVE-2025-32463" }
+      - { flag: --chroot, reason: "chroot LPE CVE-2025-32463" }
+      - { flag: --host, reason: "host confusion CVE-2025-32462" }
+    env_sanitise:
+      - LD_PRELOAD
+      - LD_LIBRARY_PATH
+      - GCONV_PATH
+      - GLIBC_TUNABLES
+      - SUDO_ASKPASS
+
+  /usr/bin/passwd:
+    policy: arg-validate
+    allow_subcommands:
+      - passwd          # change own password (no args)
+    allow_args:
+      - own_username    # passwd <own-username>
+    reject_patterns:
+      - { flag: -S, reason: "status query requires root" }
+    env_sanitise:
+      - LD_PRELOAD
+      - LD_LIBRARY_PATH
+
+  /usr/bin/pkexec:
+    policy: deny-all-non-root
+    env_sanitise:
+      - GCONV_PATH
+      - LD_PRELOAD
+      - LD_LIBRARY_PATH
+
+  /usr/bin/su:
+    policy: deny-non-root
+    env_sanitise:
+      - LD_PRELOAD
+      - LD_LIBRARY_PATH
+
+  /usr/bin/mount:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/umount:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/gpasswd:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/chsh:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/chfn:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/newgrp:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/newuidmap:
+    policy: arg-validate
+    allow_subcommands:
+      - newuidmap
+    validate: subordinate_uid_range
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/newgidmap:
+    policy: arg-validate
+    allow_subcommands:
+      - newgidmap
+    validate: subordinate_gid_range
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  /usr/bin/fusermount3:
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]

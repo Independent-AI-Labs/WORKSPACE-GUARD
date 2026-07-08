@@ -55,3 +55,15 @@ exceptions:
 
   - pattern: '\bsilent'
     paths: ['.pre-commit-config.yaml', 'config/banned_words_exceptions.yaml']
+
+  # 6. Cached canonical reference sources under docs/references/. These
+  #    files are verbatim copies of external pages (GTFOBins, NVD, sudo.ws,
+  #    systemshardening.com, yunolay.com, arXiv, Elastic, CIS) fetched by
+  #    scripts/sync-gtfobins. We do not control their prose, which contains
+  #    AI-slop tokens, em-dashes, "/home/" paths, and corporate waffle that
+  #    the author wrote. Modifying them would falsify the provenance chain
+  #    (the docs cite these files as verbatim quotes). The wildcard `.*`
+  #    exempts every file under docs/references/ from ALL banned patterns;
+  #    the regex anchors to the directory so no other file is covered.
+  - pattern: '.*'
+    paths: ['^docs/references/']

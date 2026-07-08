@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Linux Capability Hardening: Dropping Privileges from Daemons and Services</title>
+  <meta name="description" content="Ambient capabilities, CapDrop in systemd units, auditing capability use with auditd and bpftrace. Least-privilege for services that run as root by legacy necessity.">
+
+  <link rel="canonical" href="https://www.systemshardening.com/articles/linux/linux-capability-hardening/">
+  <meta name="robots" content="index, follow">
+
+  
+
+  
+  
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Linux Capability Hardening: Dropping Privileges from Daemons and Services">
+  <meta property="og:description" content="Ambient capabilities, CapDrop in systemd units, auditing capability use with auditd and bpftrace. Least-privilege for services that run as root by legacy necessity.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://www.systemshardening.com/articles/linux/linux-capability-hardening/">
+  <meta property="og:site_name" content="systemshardening.com">
+  <meta property="og:locale" content="en">
+  <meta property="og:image" content="https://www.systemshardening.com/static/og-default.svg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Linux Capability Hardening: Dropping Privileges from Daemons and Services">
+  <meta name="twitter:description" content="Ambient capabilities, CapDrop in systemd units, auditing capability use with auditd and bpftrace. Least-privilege for services that run as root by legacy necessity.">
+  <meta name="twitter:image" content="https://www.systemshardening.com/static/og-default.svg">
+
+  <!-- Security headers via meta (supplemented by server headers) -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+  <script>
+    (function() {
+      var saved = localStorage.getItem('theme');
+      if (saved) {
+        document.documentElement.dataset.theme = saved;
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="alternate" type="application/atom+xml" title="systemshardening.com" href="/feed.xml">
+  <link rel="sitemap" type="application/xml" href="/sitemap.xml">
+
+  <!-- Cloudflare Web Analytics -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "3f619ce5dc9e43e78bfc63bcab3fb4dc"}'></script>
+  <!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+  <div class="site-header-wrap">
+  <header class="site-header">
+    <div class="header-top">
+      <a href="/" class="site-logo">systemshardening<span class="logo-dot">.</span>com</a>
+      <button class="theme-toggle" aria-label="Toggle dark mode">&#9790;</button>
+    </div>
+    <nav class="site-nav">
+      <a href="/">Home</a>
+      <a href="/articles/" aria-current="page">Articles</a>
+      <a href="/about/">About</a>
+      <a href="/principles/">Principles</a>
+    </nav>
+  </header>
+</div>
+
+
+  <main>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.systemshardening.com/"},
+    {"@type": "ListItem", "position": 2, "name": "Articles", "item": "https://www.systemshardening.com/articles/"},
+    {"@type": "ListItem", "position": 3, "name": "Linux / OS Hardening", "item": "https://www.systemshardening.com/articles/linux/"},
+    {"@type": "ListItem", "position": 4, "name": "Linux Capability Hardening: Dropping Privileges from Daemons and Services"}
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Linux Capability Hardening: Dropping Privileges from Daemons and Services",
+  "datePublished": "2026-04-29T00:00:00.000Z",
+  "dateModified": "2026-04-29T00:00:00.000Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Systems Hardening",
+    "url": "https://www.systemshardening.com"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "systemshardening.com"
+  },
+  "description": "Ambient capabilities, CapDrop in systemd units, auditing capability use with auditd and bpftrace. Least-privilege for services that run as root by legacy necessity.",
+  "mainEntityOfPage": "https://www.systemshardening.com/articles/linux/linux-capability-hardening/",
+  "proficiencyLevel": "intermediate",
+  "timeRequired": "PT14M"
+}
+</script>
+<article class="article">
+  <header class="article-header">
+    <div class="article-meta">
+      <span class="article-category" data-cat="linux">Linux / OS Hardening</span>
+      
+        <span class="article-difficulty">intermediate</span>
+      
+      
+        <span class="article-reading-time">14 min read</span>
+      
+    </div>
+    <h1>Linux Capability Hardening: Dropping Privileges from Daemons and Services</h1>
+    
+      <time datetime="Wed Apr 29 2026 00:00:00 GMT+0000 (Coordinated Universal Time)">29 April 2026</time>
+    
+    
+      <div class="article-tags">
+        
+          <span class="tag">capabilities</span>
+        
+          <span class="tag">linux</span>
+        
+          <span class="tag">systemd</span>
+        
+          <span class="tag">privilege</span>
+        
+          <span class="tag">hardening</span>
+        
+      </div>
+    
+    <div class="article-listen">
+      <button id="tts-btn" class="tts-btn" aria-label="Listen to article">
+        <span class="tts-icon" aria-hidden="true">▶</span>
+        <span class="tts-label">Listen</span>
+      </button>
+    </div>
+  </header>
+
+  
+
+  <div class="article-content">
+    <h1>Linux Capability Hardening: Dropping Privileges from Daemons and Services</h1>
+<h2 id="problem" tabindex="-1"><a class="header-anchor" href="#problem">Problem</a></h2>
+<p>Historically, root was binary: you either had all privileges or none. Linux capabilities split root into 38 discrete permissions — <code>CAP_NET_BIND_SERVICE</code>, <code>CAP_SYS_PTRACE</code>, <code>CAP_KILL</code>, and 35 others — so a process can hold exactly the subset it needs.</p>
+<p>In practice, most services still run with the full root capability set. The pattern: a daemon was written to run as root (because it needed to bind port 80, or write to <code>/proc</code>), nobody ever removed the extra capabilities it wasn’t using, and it now holds <code>CAP_SYS_ADMIN</code>, <code>CAP_NET_RAW</code>, <code>CAP_DAC_OVERRIDE</code>, and 20 others it will never call. If that daemon is compromised, the attacker inherits all of them.</p>
+<p>The specific failure modes in unmanaged deployments:</p>
+<ul>
+<li>Services in systemd units with no <code>CapabilityBoundingSet=</code> directive, running with a bounding set of all capabilities.</li>
+<li>Container workloads inheriting the Docker / containerd default set (which includes <code>CAP_NET_RAW</code>, <code>CAP_CHOWN</code>, <code>CAP_SETUID</code>, <code>CAP_SETGID</code>, <code>CAP_SYS_CHROOT</code>, and others rarely needed by application code).</li>
+<li>Binaries with file capabilities (<code>setcap</code>) that are world-readable and executable — any local user can exec them.</li>
+<li>No audit trail of capability use; a compromised service escalating via <code>CAP_SYS_ADMIN</code> would go undetected.</li>
+<li>Ambient capabilities misunderstood: non-root child processes can inherit capabilities without a setuid binary, but this is rarely scoped correctly.</li>
+</ul>
+<p>The hardening goal is the capability analog of least-privilege: enumerate exactly which capabilities each service requires, drop everything else at the bounding set level, and alert when capabilities outside the expected set are exercised.</p>
+<p><strong>Target systems:</strong> Linux kernel 5.8+ (ambient capabilities stable); systemd 230+ (full <code>CapabilityBoundingSet=</code>, <code>AmbientCapabilities=</code>, <code>SecureBits=</code> support); containerd 1.7+ and Docker 24+.</p>
+<h2 id="threat-model" tabindex="-1"><a class="header-anchor" href="#threat-model">Threat Model</a></h2>
+<ul>
+<li><strong>Adversary 1 — RCE in an over-privileged daemon:</strong> A web application server runs as root with all capabilities. An attacker achieves RCE via a web vulnerability. With <code>CAP_NET_RAW</code> they can sniff traffic; with <code>CAP_SYS_PTRACE</code> they can attach to any process; with <code>CAP_SYS_ADMIN</code> they can mount filesystems and escape namespaces.</li>
+<li><strong>Adversary 2 — File capability abuse:</strong> A binary has <code>CAP_NET_BIND_SERVICE</code> set via <code>setcap</code>. An attacker who achieves local code execution can exec that binary, inherit the capability, and bind a listener on a privileged port to intercept traffic.</li>
+<li><strong>Adversary 3 — Ambient capability escalation:</strong> An application grants ambient capabilities to child processes during a privileged operation. A compromised child process retains those capabilities across exec boundaries unexpectedly.</li>
+<li><strong>Adversary 4 — Container breakout via <code>CAP_SYS_ADMIN</code>:</strong> A container workload retains <code>CAP_SYS_ADMIN</code>. The attacker mounts the host filesystem, writes a cron job, escapes.</li>
+<li><strong>Access level:</strong> Adversary 1 requires application-level RCE. Adversaries 2 and 3 require local shell access. Adversary 4 has container-level execution.</li>
+<li><strong>Objective:</strong> Escalate from application/container scope to host or other-user scope.</li>
+<li><strong>Blast radius:</strong> With a full capability set, an RCE is nearly equivalent to an unrestricted root shell. With a minimal capability set, RCE is contained to what the service legitimately does — typically no privilege escalation path remains.</li>
+</ul>
+<h2 id="configuration" tabindex="-1"><a class="header-anchor" href="#configuration">Configuration</a></h2>
+<h3 id="step-1%3A-audit-current-capability-sets" tabindex="-1"><a class="header-anchor" href="#step-1%3A-audit-current-capability-sets">Step 1: Audit Current Capability Sets</a></h3>
+<p>Before dropping anything, establish what each service actually holds and uses.</p>
+<pre><code class="language-bash"># List capabilities for a running process by PID.
+grep -E '^Cap' /proc/$(pgrep nginx)/status
+
+# Decode hex capability masks.
+capsh --decode=00000000a80425fb
+
+# List all processes with non-empty capability sets.
+ps -eo pid,comm,cap_eff --no-headers | awk '$3 != &quot;0000000000000000&quot;'
+
+# Find binaries with file capabilities set.
+find / -xdev -not -path '/proc/*' -not -path '/sys/*' \
+  -executable -type f 2&gt;/dev/null \
+  | xargs -P4 getcap 2&gt;/dev/null
+</code></pre>
+<p>The five capability sets per-process:</p>
+<table>
+<thead>
+<tr>
+<th>Set</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CapInh</code></td>
+<td>Inheritable — can pass across exec if file also has it</td>
+</tr>
+<tr>
+<td><code>CapPrm</code></td>
+<td>Permitted — upper bound of effective</td>
+</tr>
+<tr>
+<td><code>CapEff</code></td>
+<td>Effective — what the kernel checks</td>
+</tr>
+<tr>
+<td><code>CapBnd</code></td>
+<td>Bounding — hard ceiling; cannot be added back once dropped</td>
+</tr>
+<tr>
+<td><code>CapAmb</code></td>
+<td>Ambient — inherited by unprivileged children</td>
+</tr>
+</tbody>
+</table>
+<p>The goal: drive <code>CapBnd</code> to the minimum, <code>CapEff</code> to only what’s in active use, <code>CapAmb</code> to zero unless explicitly needed.</p>
+<h3 id="step-2%3A-identify-required-capabilities" tabindex="-1"><a class="header-anchor" href="#step-2%3A-identify-required-capabilities">Step 2: Identify Required Capabilities</a></h3>
+<p>For each service, determine the minimum required set. Common patterns:</p>
+<table>
+<thead>
+<tr>
+<th>Service type</th>
+<th>Typically needed</th>
+<th>Can drop</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Web server (nginx, Apache)</td>
+<td><code>CAP_NET_BIND_SERVICE</code> (if binding &lt;1024), <code>CAP_SETUID</code>, <code>CAP_SETGID</code> (for worker process drop)</td>
+<td>Everything else</td>
+</tr>
+<tr>
+<td>Container runtime</td>
+<td><code>CAP_SETUID</code>, <code>CAP_SETGID</code>, <code>CAP_MKNOD</code>, <code>CAP_SYS_CHROOT</code>, <code>CAP_CHOWN</code>, <code>CAP_FSETID</code>, <code>CAP_FOWNER</code>, <code>CAP_SETFCAP</code>, <code>CAP_NET_BIND_SERVICE</code></td>
+<td><code>CAP_SYS_ADMIN</code>, <code>CAP_NET_RAW</code>, <code>CAP_SYS_PTRACE</code></td>
+</tr>
+<tr>
+<td>Database (PostgreSQL)</td>
+<td><code>CAP_NET_BIND_SERVICE</code> if port &lt;1024; usually none (runs on 5432)</td>
+<td>All, especially <code>CAP_SYS_ADMIN</code></td>
+</tr>
+<tr>
+<td>DNS resolver (unbound)</td>
+<td><code>CAP_NET_BIND_SERVICE</code> (port 53)</td>
+<td>Everything else</td>
+</tr>
+<tr>
+<td>Network packet capture</td>
+<td><code>CAP_NET_RAW</code>, <code>CAP_NET_ADMIN</code></td>
+<td>All others</td>
+</tr>
+<tr>
+<td>Custom app listening &gt;1024</td>
+<td>None</td>
+<td>All</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>strace</code> to confirm at runtime:</p>
+<pre><code class="language-bash">strace -e trace=process,network -f -p $(pgrep nginx) 2&gt;&amp;1 | grep -E 'capset|prctl.*CAP'
+</code></pre>
+<p>Or audit via kernel with <code>auditd</code>:</p>
+<pre><code class="language-bash">auditctl -a always,exit -F arch=b64 -S capset -k cap_changes
+ausearch -k cap_changes --start today | aureport --summary
+</code></pre>
+<h3 id="step-3%3A-harden-systemd-service-units" tabindex="-1"><a class="header-anchor" href="#step-3%3A-harden-systemd-service-units">Step 3: Harden systemd Service Units</a></h3>
+<p>systemd exposes capability controls natively. Add to the <code>[Service]</code> section:</p>
+<pre><code class="language-ini">[Service]
+# Drop the bounding set to exactly what the service needs.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
+
+# Prevent acquiring new capabilities via setuid/setcap exec within the service.
+NoNewPrivileges=yes
+
+# If the service runs as a non-root user but needs specific capabilities,
+# grant them as ambient capabilities (kernel 4.3+).
+User=www-data
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Secure bits: keep caps locked to this unit; prevent inheritance to children.
+# SECBIT_NOROOT | SECBIT_NOROOT_LOCKED | SECBIT_NO_SETUID_FIXUP | SECBIT_NO_SETUID_FIXUP_LOCKED
+SecureBits=keep-caps-locked no-setuid-fixup-locked noroot noroot-locked
+</code></pre>
+<p>A minimal hardened nginx unit looks like:</p>
+<pre><code class="language-ini">[Unit]
+Description=nginx HTTP server
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/run/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t
+ExecStart=/usr/sbin/nginx
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
+
+# Capability hardening.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_CHOWN
+NoNewPrivileges=yes
+
+# Additional systemd sandboxing (complements capability drops).
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/nginx /var/run /var/cache/nginx
+
+[Install]
+WantedBy=multi-user.target
+</code></pre>
+<p>Reload and verify:</p>
+<pre><code class="language-bash">systemctl daemon-reload
+systemctl restart nginx
+# Confirm the effective caps.
+grep CapEff /proc/$(pgrep -f 'nginx: master')/status | xargs capsh --decode=
+</code></pre>
+<h3 id="step-4%3A-drop-capabilities-in-container-workloads" tabindex="-1"><a class="header-anchor" href="#step-4%3A-drop-capabilities-in-container-workloads">Step 4: Drop Capabilities in Container Workloads</a></h3>
+<p>Docker / containerd accept per-container capability configuration.</p>
+<p><strong>Docker run:</strong></p>
+<pre><code class="language-bash"># Drop all capabilities then add only what's needed.
+docker run --cap-drop ALL \
+           --cap-add NET_BIND_SERVICE \
+           --security-opt no-new-privileges:true \
+           nginx:alpine
+</code></pre>
+<p><strong>Kubernetes Pod spec:</strong></p>
+<pre><code class="language-yaml">apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+    - name: nginx
+      image: nginx:alpine
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+          add:
+            - NET_BIND_SERVICE
+</code></pre>
+<p><strong>Enforce via Kyverno policy:</strong></p>
+<pre><code class="language-yaml">apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-drop-all-capabilities
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: drop-all-caps
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: &quot;Containers must drop ALL capabilities.&quot;
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop:
+                      - ALL
+</code></pre>
+<h3 id="step-5%3A-remove-or-scope-file-capabilities" tabindex="-1"><a class="header-anchor" href="#step-5%3A-remove-or-scope-file-capabilities">Step 5: Remove or Scope File Capabilities</a></h3>
+<p>File capabilities persist on the binary across all invocations. Audit and minimize:</p>
+<pre><code class="language-bash"># Remove all file capabilities from a binary that no longer needs them.
+setcap -r /usr/bin/ping
+
+# Add only what's needed (ping needs CAP_NET_RAW for ICMP).
+setcap cap_net_raw+ep /usr/bin/ping
+
+# Verify.
+getcap /usr/bin/ping
+# Output: /usr/bin/ping = cap_net_raw+ep
+</code></pre>
+<p>For system binaries, prefer running as a dedicated low-privilege user with ambient caps in systemd rather than file caps. File caps are sticky to the binary on disk — anyone who can exec the file gains the capability.</p>
+<p>Restrict file capability binaries from being world-executable where not needed:</p>
+<pre><code class="language-bash"># Change ping to only be executable by the 'netadmin' group.
+chgrp netadmin /usr/bin/ping
+chmod 750 /usr/bin/ping
+</code></pre>
+<h3 id="step-6%3A-audit-capability-use-with-bpftrace" tabindex="-1"><a class="header-anchor" href="#step-6%3A-audit-capability-use-with-bpftrace">Step 6: Audit Capability Use with bpftrace</a></h3>
+<p>To confirm which capabilities a service actually calls (not just holds), trace <code>cap_capable</code> kernel calls:</p>
+<pre><code class="language-bash"># Trace all capability checks by process name.
+bpftrace -e '
+  kprobe:cap_capable {
+    printf(&quot;%s(%d) cap=%d ret=%d\n&quot;, comm, pid, arg2, retval);
+  }
+' | grep nginx
+</code></pre>
+<p>Or use the pre-built BCC tool:</p>
+<pre><code class="language-bash"># capsnoop: print every capability check in real time.
+/usr/share/bcc/tools/capable -K
+</code></pre>
+<p>This reveals which capabilities the process actually queries at runtime (not just what it holds). Common findings:</p>
+<ul>
+<li>nginx queries <code>CAP_NET_BIND_SERVICE</code> once at startup when binding port 80; never queries it again.</li>
+<li>PostgreSQL checks <code>CAP_SYS_NICE</code> during startup on some distributions even if it doesn’t need it; can be dropped after verification.</li>
+<li>Java applications often check <code>CAP_SYS_ADMIN</code> during JVM startup; usually succeeds without it.</li>
+</ul>
+<h3 id="step-7%3A-audit-capability-changes-with-auditd" tabindex="-1"><a class="header-anchor" href="#step-7%3A-audit-capability-changes-with-auditd">Step 7: Audit Capability Changes with auditd</a></h3>
+<p>Detect runtime capability escalation attempts:</p>
+<pre><code class="language-bash"># /etc/audit/rules.d/capabilities.rules
+-a always,exit -F arch=b64 -S capset -k capability_change
+-a always,exit -F arch=b64 -S prctl -F a0=0x16 -k set_secbits
+-w /proc/sys/kernel/cap_last_cap -p w -k cap_boundary_change
+</code></pre>
+<p>Alert pattern: a service’s process calling <code>capset</code> to expand its own capability set is an indicator of exploit activity. Legitimate services set capabilities once (at start, via systemd) and never call <code>capset</code> again.</p>
+<h3 id="step-8%3A-verify-with-capsh" tabindex="-1"><a class="header-anchor" href="#step-8%3A-verify-with-capsh">Step 8: Verify with capsh</a></h3>
+<p>After hardening, confirm the resulting process has the expected capability set:</p>
+<pre><code class="language-bash"># Show capabilities of current shell.
+capsh --print
+
+# Show capabilities for a specific process.
+PID=$(pgrep -f 'nginx: master')
+for cap in CapInh CapPrm CapEff CapBnd CapAmb; do
+  val=$(grep &quot;^$cap:&quot; /proc/$PID/status | awk '{print $2}')
+  echo &quot;$cap: $(capsh --decode=$val)&quot;
+done
+</code></pre>
+<p>Expected output for a hardened nginx master:</p>
+<pre><code>CapInh: =
+CapPrm: cap_chown,cap_setgid,cap_setuid,cap_net_bind_service
+CapEff: cap_chown,cap_setgid,cap_setuid,cap_net_bind_service
+CapBnd: cap_chown,cap_setgid,cap_setuid,cap_net_bind_service
+CapAmb: =
+</code></pre>
+<p>Nothing outside the four declared capabilities appears in the bounding set.</p>
+<h2 id="expected-behaviour" tabindex="-1"><a class="header-anchor" href="#expected-behaviour">Expected Behaviour</a></h2>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Before hardening</th>
+<th>After hardening</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CapBnd</code> for nginx master</td>
+<td>All 38 capabilities</td>
+<td><code>cap_net_bind_service</code>, <code>cap_setuid</code>, <code>cap_setgid</code>, <code>cap_chown</code> only</td>
+</tr>
+<tr>
+<td>RCE blast radius</td>
+<td>Full root capability set available</td>
+<td>Limited to the 4 declared capabilities</td>
+</tr>
+<tr>
+<td><code>CAP_SYS_ADMIN</code> available to nginx</td>
+<td>Yes</td>
+<td>No — not in bounding set</td>
+</tr>
+<tr>
+<td><code>CAP_NET_RAW</code> available to nginx</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>capset</code> syscall at runtime</td>
+<td>Allowed</td>
+<td>Blocked by <code>NoNewPrivileges=yes</code></td>
+</tr>
+<tr>
+<td>Container default cap set</td>
+<td>~14 Docker-default capabilities</td>
+<td>0 or 1 (explicit add-back only)</td>
+</tr>
+</tbody>
+</table>
+<p>Verify the bounding set shrank:</p>
+<pre><code class="language-bash">grep CapBnd /proc/$(pgrep -f 'nginx: master')/status
+# Before: CapBnd: 000001ffffffffff   (all caps)
+# After:  CapBnd: 00000000000020e0   (net_bind_service + setuid + setgid + chown)
+</code></pre>
+<h2 id="trade-offs" tabindex="-1"><a class="header-anchor" href="#trade-offs">Trade-offs</a></h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Benefit</th>
+<th>Cost</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reduced bounding set</td>
+<td>Eliminates post-exploit escalation paths via dropped caps</td>
+<td>Some services fail to start if a required cap was not identified</td>
+<td>Test with <code>strace</code> and <code>bpftrace</code> before production; gradually tighten.</td>
+</tr>
+<tr>
+<td><code>NoNewPrivileges=yes</code></td>
+<td>Prevents setuid/setcap binaries from escalating within the service</td>
+<td>Breaks services that intentionally exec setuid children (e.g., <code>su</code>, <code>sudo</code> in init scripts)</td>
+<td>Redesign those init scripts; use dedicated systemd units per privilege level.</td>
+</tr>
+<tr>
+<td>File cap removal from ping/traceroute</td>
+<td>Reduces local escalation surface</td>
+<td>Breaks tools for non-root users</td>
+<td>Wrap in a <code>ping</code>-capable group with ambient caps in a wrapper unit.</td>
+</tr>
+<tr>
+<td>Ambient capabilities</td>
+<td>Non-root process can have caps without setuid binary</td>
+<td>Ambient caps persist across exec; a child that execs a setuid binary may unexpectedly combine them</td>
+<td>Pair with <code>SecureBits=noroot</code> to prevent cap re-inheritance via setuid.</td>
+</tr>
+<tr>
+<td>Kyverno enforcement in k8s</td>
+<td>Prevents misconfigured pods from launching</td>
+<td>Breaks workloads that haven’t been updated</td>
+<td>Audit mode first (<code>audit</code> vs <code>enforce</code>); roll out per namespace.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="failure-modes" tabindex="-1"><a class="header-anchor" href="#failure-modes">Failure Modes</a></h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Symptom</th>
+<th>Detection</th>
+<th>Recovery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Required cap not in bounding set</td>
+<td>Service fails at startup with <code>EPERM</code> on a syscall</td>
+<td><code>journalctl -u &lt;service&gt;</code> shows permission denied; <code>strace</code> at restart shows which syscall</td>
+<td>Add the cap to <code>CapabilityBoundingSet=</code>; reload.</td>
+</tr>
+<tr>
+<td><code>NoNewPrivileges</code> breaks init script</td>
+<td>Init script calls <code>sudo</code> or another setuid binary; fails silently or with permission error</td>
+<td>Service fails post-start exec; check <code>ExecStartPost</code> logs</td>
+<td>Replace setuid calls in init scripts with explicit systemd unit ordering or systemd-run.</td>
+</tr>
+<tr>
+<td>Ambient cap leaks to untrusted child</td>
+<td>Child process has unexpected capabilities</td>
+<td><code>bpftrace cap_capable</code> shows child calling cap checks that should be absent</td>
+<td>Audit ambient cap grants; add <code>SecureBits=noroot-locked</code> to the parent unit.</td>
+</tr>
+<tr>
+<td>Pod fails Kyverno admission</td>
+<td>Pod cannot schedule; admission webhook rejects</td>
+<td>Kubernetes event: <code>Policy drop-all-caps: validation failed</code></td>
+<td>Add <code>capabilities.drop: [ALL]</code> and explicit <code>add</code> to the pod spec.</td>
+</tr>
+<tr>
+<td>File cap on writable binary</td>
+<td>Attacker writes malicious binary at file-cap-path and gains caps</td>
+<td>Periodic `find / -xdev -executable</td>
+<td>xargs getcap` scan finds unexpected entries</td>
+</tr>
+<tr>
+<td>bpftrace shows cap never used</td>
+<td>A capability in the set is never queried at runtime</td>
+<td>Trace shows no calls to <code>cap_capable</code> for a specific cap</td>
+<td>Remove it from the bounding set; it’s dead weight.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="related-articles" tabindex="-1"><a class="header-anchor" href="#related-articles">Related Articles</a></h2>
+<ul>
+<li><a href="/articles/linux/selinux/">SELinux Policy for Production Services</a></li>
+<li><a href="/articles/linux/apparmor/">AppArmor Profile Development and Enforcement</a></li>
+<li><a href="/articles/linux/landlock-lsm/">Landlock LSM: Filesystem Sandboxing in Linux</a></li>
+<li><a href="/articles/linux/systemd-unit-hardening/">systemd Unit Hardening</a></li>
+<li><a href="/articles/kubernetes/seccomp-profiles/">Pod Security Context and Seccomp Profiles</a></li>
+</ul>
+
+  </div>
+
+  <script src="/static/tts.js"></script>
+  <footer class="article-footer">
+    
+      <p class="article-updated">Last updated: 29 April 2026</p>
+    
+    <nav class="article-nav">
+      <a href="/articles/">All articles</a>
+      <a href="/articles/linux/">More in Linux / OS Hardening</a>
+    </nav>
+  </footer>
+</article>
+
+  </main>
+
+  <div class="site-footer-wrap">
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-tagline">
+        <p>Hardening real systems in production, for engineers who actually run them.</p>
+        <p class="footer-built">Built for humans and AI agents.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/articles/">Articles</a>
+        <a href="/about/">About</a>
+        <a href="/principles/">Principles</a>
+        <a href="/feed.xml">RSS Feed</a>
+      </div>
+      <p class="footer-copy">&copy; systemshardening.com 2026</p>
+    </div>
+  </footer>
+</div>
+
+
+  <script>
+    (function() {
+      var btn = document.querySelector('.theme-toggle');
+      if (!btn) return;
+      var current = document.documentElement.dataset.theme;
+      btn.textContent = current === 'dark' ? '\u2600' : '\u263E';
+      btn.addEventListener('click', function() {
+        var isDark = document.documentElement.dataset.theme === 'dark';
+        var next = isDark ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('theme', next);
+        btn.textContent = next === 'dark' ? '\u2600' : '\u263E';
+      });
+    })();
+  </script>
+</body>
+</html>

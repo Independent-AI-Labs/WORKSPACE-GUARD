@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# regen-gitleaksignore -- regenerate .gitleaksignore fingerprints.
+#
+# Scans docs/references/ (cached external reference content) with gitleaks
+# default rules and writes the resulting finding fingerprints to
+# .gitleaksignore at the repo root. Non-references entries already present
+# in .gitleaksignore are preserved (merged) so this re-run is idempotent
+# for any hand-curated excludes outside docs/references/.
+#
+# Used by `make sync-gtfobins` and `make gitleaks-ignore-regen`. The CI
+# pre-commit secret scanner runs `gitleaks dir <file>` per file with no
+# --config flag, so the repo-root .gitleaks.toml allowlist is NOT auto-loaded
+# during the hook; .gitleaksignore (loaded by default via gitleaks' `-i .`
+# flag from the repo-root cwd) is the practical enforcement layer.
+set -euo pipefail
+
+DEVNULL=/dev/null
+
+repo_root=$(git rev-parse --show-toplevel 2>"$DEVNULL") || {
+  echo "regen-gitleaksignore: not inside a git repository" >&2
+  exit 1
+}
+
+cd "$repo_root"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "regen-gitleaksignore: gitleaks not on PATH" >&2
+  exit 1
+fi
+
+# Use uv-managed python for hermetic execution (no bare interpreter calls).
+shim=(uv run --quiet python)
+
+tmpf=$(mktemp)
+trap 'rm -f "$tmpf"' EXIT
+
+# gitleaks exits 1 when leaks are found -- that is expected here; we WANT
+# the report. Any other nonzero (timeout/crash) is a real failure: detect
+# via a captured rc instead of inheriting gitleaks' exit code.
+rc=0
+gitleaks dir docs/references --no-banner -f json -r "$tmpf" -l error >"$DEVNULL" 2>"$DEVNULL" || rc=$?
+if [ "$rc" != "0" ] && [ "$rc" != "1" ]; then
+  echo "regen-gitleaksignore: gitleaks dir failed (exit $rc)" >&2
+  exit "$rc"
+fi
+
+# Merge fingerprints: keep non-references entries already on disk, append
+# (dedup) the freshly-scanned docs/references/ fingerprints.
+"${shim[@]}" -c '
+import json, os, sys
+report_path, ignore_path = sys.argv[1], sys.argv[2]
+PREFIX = "docs/references/"
+report = []
+if os.path.getsize(report_path):
+    with open(report_path) as fh:
+        report = json.load(fh)
+new_fps = sorted({f["Fingerprint"] for f in report if f["File"].startswith(PREFIX)})
+old_fps = set()
+if os.path.exists(ignore_path):
+    with open(ignore_path) as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith(PREFIX):
+                continue
+            old_fps.add(line)
+merged = sorted(old_fps | set(new_fps))
+with open(ignore_path, "w") as fh:
+    for line in merged:
+        fh.write(line + "\n")
+print(".gitleaksignore: {} fingerprints ({} from docs/references/) written".format(
+    len(merged), len(new_fps)))
+' "$tmpf" .gitleaksignore

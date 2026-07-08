@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise</title>
+  <meta name="description" content="chattr +i sets a filesystem-level immutable flag that blocks writes, deletes, renames, and hard links — even for root. Learn how to protect /etc/passwd, SSH config, and log files, automate attribute enforcement at boot, and integrate with auditd and IMA/EVM.">
+
+  <link rel="canonical" href="https://www.systemshardening.com/articles/linux/linux-file-immutability-chattr/">
+  <meta name="robots" content="index, follow">
+
+  
+
+  
+  
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise">
+  <meta property="og:description" content="chattr +i sets a filesystem-level immutable flag that blocks writes, deletes, renames, and hard links — even for root. Learn how to protect /etc/passwd, SSH config, and log files, automate attribute enforcement at boot, and integrate with auditd and IMA/EVM.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://www.systemshardening.com/articles/linux/linux-file-immutability-chattr/">
+  <meta property="og:site_name" content="systemshardening.com">
+  <meta property="og:locale" content="en">
+  <meta property="og:image" content="https://www.systemshardening.com/static/og-default.svg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise">
+  <meta name="twitter:description" content="chattr +i sets a filesystem-level immutable flag that blocks writes, deletes, renames, and hard links — even for root. Learn how to protect /etc/passwd, SSH config, and log files, automate attribute enforcement at boot, and integrate with auditd and IMA/EVM.">
+  <meta name="twitter:image" content="https://www.systemshardening.com/static/og-default.svg">
+
+  <!-- Security headers via meta (supplemented by server headers) -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+  <script>
+    (function() {
+      var saved = localStorage.getItem('theme');
+      if (saved) {
+        document.documentElement.dataset.theme = saved;
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="alternate" type="application/atom+xml" title="systemshardening.com" href="/feed.xml">
+  <link rel="sitemap" type="application/xml" href="/sitemap.xml">
+
+  <!-- Cloudflare Web Analytics -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "3f619ce5dc9e43e78bfc63bcab3fb4dc"}'></script>
+  <!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+  <div class="site-header-wrap">
+  <header class="site-header">
+    <div class="header-top">
+      <a href="/" class="site-logo">systemshardening<span class="logo-dot">.</span>com</a>
+      <button class="theme-toggle" aria-label="Toggle dark mode">&#9790;</button>
+    </div>
+    <nav class="site-nav">
+      <a href="/">Home</a>
+      <a href="/articles/" aria-current="page">Articles</a>
+      <a href="/about/">About</a>
+      <a href="/principles/">Principles</a>
+    </nav>
+  </header>
+</div>
+
+
+  <main>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.systemshardening.com/"},
+    {"@type": "ListItem", "position": 2, "name": "Articles", "item": "https://www.systemshardening.com/articles/"},
+    {"@type": "ListItem", "position": 3, "name": "Linux / OS Hardening", "item": "https://www.systemshardening.com/articles/linux/"},
+    {"@type": "ListItem", "position": 4, "name": "Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise"}
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise",
+  "datePublished": "2026-05-07T00:00:00.000Z",
+  "dateModified": "2026-05-07T00:00:00.000Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Systems Hardening",
+    "url": "https://www.systemshardening.com"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "systemshardening.com"
+  },
+  "description": "chattr +i sets a filesystem-level immutable flag that blocks writes, deletes, renames, and hard links — even for root. Learn how to protect /etc/passwd, SSH config, and log files, automate attribute enforcement at boot, and integrate with auditd and IMA/EVM.",
+  "mainEntityOfPage": "https://www.systemshardening.com/articles/linux/linux-file-immutability-chattr/",
+  "proficiencyLevel": "Intermediate",
+  "timeRequired": "PT11M"
+}
+</script>
+<article class="article">
+  <header class="article-header">
+    <div class="article-meta">
+      <span class="article-category" data-cat="linux">Linux / OS Hardening</span>
+      
+        <span class="article-difficulty">Intermediate</span>
+      
+      
+        <span class="article-reading-time">11 min read</span>
+      
+    </div>
+    <h1>Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise</h1>
+    
+      <time datetime="Thu May 07 2026 00:00:00 GMT+0000 (Coordinated Universal Time)">7 May 2026</time>
+    
+    
+      <div class="article-tags">
+        
+          <span class="tag">chattr</span>
+        
+          <span class="tag">file-immutability</span>
+        
+          <span class="tag">extended-attributes</span>
+        
+          <span class="tag">tamper-prevention</span>
+        
+          <span class="tag">intrusion-detection</span>
+        
+      </div>
+    
+    <div class="article-listen">
+      <button id="tts-btn" class="tts-btn" aria-label="Listen to article">
+        <span class="tts-icon" aria-hidden="true">▶</span>
+        <span class="tts-label">Listen</span>
+      </button>
+    </div>
+  </header>
+
+  
+
+  <div class="article-content">
+    <h1>Linux File Immutability with chattr: Protecting Critical System Files Against Root Compromise</h1>
+<h2 id="the-problem" tabindex="-1"><a class="header-anchor" href="#the-problem">The Problem</a></h2>
+<p>Unix permission bits protect files from unprivileged users. Root bypasses all of them. A compromised process running as root — through a kernel exploit, a SUID binary bug, or a misconfigured sudo rule — can modify <code>/etc/passwd</code> to add a backdoor account, overwrite <code>/etc/sudoers</code> to grant unrestricted access, or replace the SSH <code>authorized_keys</code> for every user on the system. File permissions are not a defense against a root shell.</p>
+<p>The <code>chattr</code> immutable flag operates below Unix permissions. It is enforced by the filesystem driver, not by the VFS permission layer, and requires a separate kernel capability (<code>CAP_LINUX_IMMUTABLE</code>) to clear. An attacker with a root shell does not automatically have <code>CAP_LINUX_IMMUTABLE</code> in a properly confined environment. Even in an unconfined root shell, the immutable flag forces the attacker to make a noisy, auditable call to <code>chattr -i</code> before modifying any protected file — buying detection time and leaving evidence.</p>
+<p>This is not a complete defense against a determined attacker with unrestricted kernel access. It is a layer: one that is trivially configured, has near-zero performance overhead, and meaningfully raises the cost of stealthy persistence on a compromised system.</p>
+<p><strong>Target systems:</strong> Any Linux with ext2/ext3/ext4, XFS (partial), btrfs (partial). The <code>e2fsprogs</code> package provides <code>chattr</code> and <code>lsattr</code>. The immutable flag is well-established; the kernel interface has been stable since Linux 2.0.</p>
+<h2 id="threat-model" tabindex="-1"><a class="header-anchor" href="#threat-model">Threat Model</a></h2>
+<ul>
+<li><strong>Adversary 1 — Root shell via application exploit:</strong> A web application, database, or container breakout grants an attacker a root process. They attempt to modify <code>/etc/passwd</code>, <code>/etc/shadow</code>, or <code>/etc/cron.d/</code> to establish persistence.</li>
+<li><strong>Adversary 2 — Privileged lateral movement:</strong> An attacker already has root on one host and is modifying SSH configs or cron jobs to pivot to additional hosts or maintain access after the initial foothold is patched.</li>
+<li><strong>Adversary 3 — Insider threat:</strong> A privileged operator with root access makes unauthorized changes to authentication configuration outside of change management.</li>
+<li><strong>Access level:</strong> Full root on the running system. No physical access to the disk, no ability to reboot and modify kernel boot parameters (assumed enforced by GRUB password and UEFI Secure Boot — see <a href="/articles/linux/grub-boot-hardening/">GRUB Boot Hardening</a> and <a href="/articles/linux/linux-uefi-secure-boot-db/">UEFI Secure Boot</a>).</li>
+<li><strong>Objective:</strong> Persistent access via modified authentication files, backdoor accounts, or unauthorized cron jobs.</li>
+<li><strong>Blast radius without chattr:</strong> Silent modification of any file on the system; changes may go undetected until the next integrity scan (AIDE, Tripwire) which could be hours later.</li>
+<li><strong>Blast radius with chattr:</strong> Any modification attempt on a protected file is refused with <code>EPERM</code>. The attacker must first call <code>chattr -i</code>, which is auditable via auditd <code>FS_SETATTR</code> rules.</li>
+</ul>
+<h2 id="the-%2Bi-flag%3A-filesystem-level-immutability" tabindex="-1"><a class="header-anchor" href="#the-%2Bi-flag%3A-filesystem-level-immutability">The +i Flag: Filesystem-Level Immutability</a></h2>
+<p>The immutable flag (<code>+i</code>) is a filesystem-level attribute stored in the inode, separate from Unix permission bits and POSIX ACLs. When set, the kernel’s filesystem driver refuses all of the following operations on the file — regardless of the caller’s UID or capability set:</p>
+<ul>
+<li><strong>Write:</strong> <code>O_WRONLY</code> and <code>O_RDWR</code> opens fail with <code>EPERM</code>.</li>
+<li><strong>Truncation:</strong> <code>truncate(2)</code> and <code>ftruncate(2)</code> fail.</li>
+<li><strong>Deletion:</strong> <code>unlink(2)</code> fails; the file cannot be removed.</li>
+<li><strong>Rename:</strong> <code>rename(2)</code> fails; the file cannot be moved.</li>
+<li><strong>Hard link creation:</strong> <code>link(2)</code> fails; no new hard links can point to the inode.</li>
+<li><strong>Attribute modification:</strong> <code>chown(2)</code>, <code>chmod(2)</code>, and <code>setxattr(2)</code> fail. The inode’s metadata is frozen along with its data.</li>
+<li><strong>Append:</strong> Unlike the <code>+a</code> flag, <code>+i</code> blocks appending as well as overwriting.</li>
+</ul>
+<p>The check happens inside the filesystem driver, not in the VFS layer. This is critical: it means that even a process bypassing normal VFS permission checks (e.g., via a <code>CAP_DAC_OVERRIDE</code> capability) will still be blocked — the filesystem driver enforces <code>CAP_LINUX_IMMUTABLE</code> specifically.</p>
+<p>Clearing the <code>+i</code> flag requires <code>CAP_LINUX_IMMUTABLE</code>. In a default unconfined root shell, root has all capabilities, so an attacker with full root can clear the flag. The defense value is therefore:</p>
+<ol>
+<li><strong>Confinement:</strong> If the compromised process runs in a capability-restricted environment (container with dropped capabilities, SELinux domain without the <code>chattr</code> permission, systemd service with <code>AmbientCapabilities=</code> restricting the set), <code>CAP_LINUX_IMMUTABLE</code> is unavailable and the flag cannot be cleared.</li>
+<li><strong>Detection:</strong> Even for unconfined root, every <code>chattr -i</code> call is a detectable event. Without the flag, silent modification leaves no audit trail.</li>
+<li><strong>Defense in depth:</strong> Combined with auditd, IMA/EVM, and rate-limiting on privilege escalation paths, the window for undetected tampering is reduced to seconds.</li>
+</ol>
+<h3 id="setting-and-checking-flags" tabindex="-1"><a class="header-anchor" href="#setting-and-checking-flags">Setting and Checking Flags</a></h3>
+<pre><code class="language-bash"># Set the immutable flag on a single file.
+sudo chattr +i /etc/passwd
+
+# Set the immutable flag on multiple files at once.
+sudo chattr +i /etc/passwd /etc/shadow /etc/group /etc/gshadow
+
+# Remove the immutable flag (requires CAP_LINUX_IMMUTABLE).
+sudo chattr -i /etc/passwd
+
+# Check flags on a file — lsattr is the read counterpart to chattr.
+lsattr /etc/passwd
+# Output: ----i---------e------- /etc/passwd
+# The 'i' in position 5 indicates the immutable flag.
+# The 'e' indicates extent-mapped (normal for ext4; ignore it).
+
+# Check all files in a directory (non-recursive).
+lsattr /etc/
+
+# Recursive check — useful for auditing an entire directory tree.
+lsattr -R /etc/ssh/
+
+# Check a specific set of sensitive files.
+lsattr /etc/passwd /etc/shadow /etc/sudoers /etc/ssh/sshd_config
+</code></pre>
+<p>The output format from <code>lsattr</code> is a 22-character flag string followed by the filename. Each position corresponds to a specific attribute; the relevant ones are:</p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5</td>
+<td><code>i</code></td>
+<td>Immutable</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>a</code></td>
+<td>Append-only</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>s</code></td>
+<td>Secure deletion (zero on delete)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>u</code></td>
+<td>Undeletable (data preserved after unlink)</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>e</code></td>
+<td>Extents (normal ext4 internal flag)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="recursive-application" tabindex="-1"><a class="header-anchor" href="#recursive-application">Recursive Application</a></h3>
+<pre><code class="language-bash"># Make all files under /etc/cron.d/ immutable.
+# -R applies recursively. Directories themselves also get +i,
+# which prevents creating new files inside them.
+sudo chattr -R +i /etc/cron.d/
+
+# CAUTION: setting +i on a directory prevents file creation inside it.
+# This is useful for locking down cron.d but will break package manager
+# operations that write new cron jobs to that path.
+# See the &quot;Package Manager Workflow&quot; section below.
+
+# Check that it applied correctly.
+lsattr -R /etc/cron.d/
+</code></pre>
+<h2 id="the-%2Ba-flag%3A-append-only-for-log-files" tabindex="-1"><a class="header-anchor" href="#the-%2Ba-flag%3A-append-only-for-log-files">The +a Flag: Append-Only for Log Files</a></h2>
+<p>The append-only flag (<code>+a</code>) allows a file to be opened for appending but not for overwriting or deletion. It is the correct flag for log files: a logging daemon can write new lines, but an attacker cannot truncate the log to erase evidence.</p>
+<pre><code class="language-bash"># Mark a log file append-only.
+sudo chattr +a /var/log/auth.log
+sudo chattr +a /var/log/syslog
+
+# Confirm the flag.
+lsattr /var/log/auth.log
+# Output: -----a--------e------- /var/log/auth.log
+
+# An append-only file accepts appended writes...
+echo &quot;test entry&quot; | sudo tee -a /var/log/auth.log   # succeeds
+
+# ...but not truncation or overwriting.
+sudo truncate -s 0 /var/log/auth.log     # EPERM
+sudo tee /var/log/auth.log &lt; /dev/null   # EPERM (O_WRONLY without O_APPEND)
+</code></pre>
+<p>Key operational considerations for <code>+a</code>:</p>
+<ul>
+<li><strong>Log rotation:</strong> Standard <code>logrotate</code> with <code>copytruncate</code> will fail because it truncates the original. Use the <code>create</code> method instead (rename + create new file). However, <code>rename(2)</code> also fails on <code>+a</code> files that are hardlinked in certain configurations — test your rotation configuration before deploying.</li>
+<li><strong>journald:</strong> systemd-journald writes to its own binary journal format and does not use <code>+a</code> on individual log files. For journald log protection, use <code>chattr +i</code> on completed archived journals or rely on remote log shipping.</li>
+<li><strong>rsyslog/syslog-ng:</strong> These daemons open log files with <code>O_WRONLY|O_APPEND</code>, which is compatible with <code>+a</code>. Set the flag after the daemon starts and has opened its files, or after confirming the daemon uses <code>O_APPEND</code>.</li>
+</ul>
+<h2 id="files-to-protect" tabindex="-1"><a class="header-anchor" href="#files-to-protect">Files to Protect</a></h2>
+<p>A practical baseline for most Linux servers:</p>
+<pre><code class="language-bash"># Authentication and authorization.
+sudo chattr +i \
+  /etc/passwd \
+  /etc/shadow \
+  /etc/group \
+  /etc/gshadow \
+  /etc/sudoers \
+  /etc/sudoers.d/
+
+# SSH configuration.
+sudo chattr +i \
+  /etc/ssh/sshd_config \
+  /etc/ssh/ssh_config
+
+# PAM configuration (controls authentication stack).
+sudo chattr +i \
+  /etc/pam.d/common-auth \
+  /etc/pam.d/common-account \
+  /etc/pam.d/sshd \
+  /etc/pam.d/sudo \
+  /etc/pam.d/su
+
+# Scheduled tasks.
+sudo chattr +i \
+  /etc/crontab \
+  /etc/cron.d/ \
+  /etc/cron.daily/ \
+  /etc/cron.weekly/ \
+  /etc/cron.monthly/
+
+# System initialization (prevents persistent backdoors via rc.local or init).
+sudo chattr +i /etc/rc.local
+
+# Log files (append-only, not fully immutable).
+sudo chattr +a \
+  /var/log/auth.log \
+  /var/log/secure \
+  /var/log/syslog
+</code></pre>
+<p><strong>Do not</strong> set <code>+i</code> on:</p>
+<ul>
+<li><code>/etc/hosts</code>, <code>/etc/resolv.conf</code>, <code>/etc/hostname</code> — these legitimately change on reconfiguration and often on DHCP lease renewal.</li>
+<li><code>/etc/motd</code>, <code>/etc/issue</code> — minor but legitimate updates are normal.</li>
+<li>Any file managed by a configuration management system (Ansible, Puppet, Chef) unless you build the unset/reset cycle into the playbook.</li>
+<li>The entirety of <code>/etc/</code> recursively without testing — many tools write to <code>/etc/</code> as part of normal operation.</li>
+</ul>
+<h2 id="what-%2Bi-does-not-protect-against" tabindex="-1"><a class="header-anchor" href="#what-%2Bi-does-not-protect-against">What +i Does NOT Protect Against</a></h2>
+<p>Understanding the limitations is as important as understanding the capability:</p>
+<p><strong>Remounting with different options:</strong> If an attacker can reboot the system and modify kernel boot parameters (e.g., by booting from external media or editing GRUB), they can mount the filesystem offline and modify files directly, bypassing the kernel’s attribute enforcement entirely. Mitigations: GRUB password, UEFI Secure Boot with locked boot order, LUKS full-disk encryption with TPM sealing (see <a href="/articles/linux/luks-tpm2-sealing/">LUKS TPM2 Sealing</a>).</p>
+<p><strong>Parent directory deletion:</strong> <code>chattr +i</code> on a file prevents deletion of that file, but it does not prevent deletion of the parent directory if the directory itself is not also marked immutable. If <code>/etc/cron.d/</code> is not <code>+i</code>, an attacker can delete the directory and recreate it with different contents. Always set <code>+i</code> on both the directory and its files.</p>
+<p><strong>Bind mounts and overlays:</strong> An attacker with sufficient privileges can create a bind mount that shadows an immutable file with a different file at the same path. The original file remains immutable but the shadow file is served to processes using the overlaid path. Mitigation: restrict <code>CAP_SYS_ADMIN</code> in containers and service units; audit new mount operations via auditd.</p>
+<p><strong>Memory-only attacks:</strong> <code>chattr +i</code> has no effect on what happens in memory. An attacker can modify the in-memory contents of a running process (e.g., patch <code>sshd</code>’s running binary in memory via <code>/proc/&lt;pid&gt;/mem</code>) without touching the on-disk file. This is a different attack class requiring a different defense (runtime integrity, process isolation).</p>
+<p><strong>Race conditions in tools:</strong> Some tools check for the immutable flag, temporarily remove it, perform their operation, then re-set it. If an attacker has a race window during that interval, they can write to the file. This is rare in practice but relevant for automated scripts.</p>
+<p><strong>Kernel exploits:</strong> An attacker with a kernel-level exploit (ring-0 code execution) can disable filesystem attribute enforcement entirely. <code>chattr +i</code> is a userspace-enforced kernel feature — it does not survive kernel compromise.</p>
+<h2 id="combination-with-ima%2Fevm" tabindex="-1"><a class="header-anchor" href="#combination-with-ima%2Fevm">Combination with IMA/EVM</a></h2>
+<p><code>chattr +i</code> and IMA/EVM are complementary, not redundant:</p>
+<table>
+<thead>
+<tr>
+<th>Protection</th>
+<th>chattr +i</th>
+<th>IMA/EVM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prevents writes</td>
+<td>Yes</td>
+<td>No (detects after the fact)</td>
+</tr>
+<tr>
+<td>Works without TPM</td>
+<td>Yes</td>
+<td>Partial (no remote attestation)</td>
+</tr>
+<tr>
+<td>Survives kernel exploit</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Detects offline tampering</td>
+<td>No</td>
+<td>Yes (EVM HMAC check at boot)</td>
+</tr>
+<tr>
+<td>Covers execution-time hash</td>
+<td>No</td>
+<td>Yes (IMA measures at exec)</td>
+</tr>
+<tr>
+<td>Scope</td>
+<td>Named files</td>
+<td>All executed files per policy</td>
+</tr>
+</tbody>
+</table>
+<p>The practical combination:</p>
+<ol>
+<li>Use <code>chattr +i</code> on specific high-value configuration files to prevent runtime modification.</li>
+<li>Use IMA appraisal (with <code>security.ima</code> xattrs) to verify that protected binaries have not been replaced between boots.</li>
+<li>Use EVM to protect IMA’s xattrs themselves from offline modification.</li>
+</ol>
+<pre><code class="language-bash"># After setting chattr +i on critical files,
+# generate IMA signatures for them so IMA appraisal can verify them at exec.
+# (Requires evmctl from the ima-evm-utils package.)
+sudo evmctl ima_sign --key /etc/keys/ima-signing.pem /etc/ssh/sshd_config
+sudo evmctl ima_sign --key /etc/keys/ima-signing.pem /etc/sudoers
+
+# Verify IMA signature on a file.
+sudo evmctl ima_verify /etc/sudoers
+</code></pre>
+<p>See <a href="/articles/linux/linux-ima-evm/">Linux IMA/EVM: Kernel-Level File Integrity Measurement</a> for full IMA/EVM configuration.</p>
+<h2 id="automating-at-boot" tabindex="-1"><a class="header-anchor" href="#automating-at-boot">Automating at Boot</a></h2>
+<p>Manually setting <code>chattr +i</code> is fragile — a reboot, package update, or disk replacement loses the flags. The flags must be re-applied automatically after boot.</p>
+<h3 id="systemd-oneshot-service-(recommended)" tabindex="-1"><a class="header-anchor" href="#systemd-oneshot-service-(recommended)">Systemd Oneshot Service (Recommended)</a></h3>
+<pre><code class="language-ini"># /etc/systemd/system/file-immutability.service
+[Unit]
+Description=Set filesystem immutability flags on critical system files
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/set-immutable-flags.sh
+
+[Install]
+WantedBy=sysinit.target
+</code></pre>
+<pre><code class="language-bash"># /usr/local/sbin/set-immutable-flags.sh
+#!/bin/bash
+set -euo pipefail
+
+IMMUTABLE_FILES=(
+  /etc/passwd
+  /etc/shadow
+  /etc/group
+  /etc/gshadow
+  /etc/sudoers
+  /etc/ssh/sshd_config
+  /etc/pam.d/sshd
+  /etc/pam.d/sudo
+  /etc/pam.d/su
+  /etc/crontab
+  /etc/rc.local
+)
+
+IMMUTABLE_DIRS=(
+  /etc/sudoers.d
+  /etc/cron.d
+  /etc/cron.daily
+  /etc/cron.weekly
+  /etc/cron.monthly
+)
+
+APPEND_ONLY_FILES=(
+  /var/log/auth.log
+  /var/log/syslog
+)
+
+log() { logger -t file-immutability &quot;$*&quot;; }
+
+for f in &quot;${IMMUTABLE_FILES[@]}&quot;; do
+  if [[ -f &quot;$f&quot; ]]; then
+    chattr +i &quot;$f&quot; &amp;&amp; log &quot;Set +i on $f&quot; || log &quot;WARNING: failed to set +i on $f&quot;
+  else
+    log &quot;WARNING: $f not found, skipping&quot;
+  fi
+done
+
+for d in &quot;${IMMUTABLE_DIRS[@]}&quot;; do
+  if [[ -d &quot;$d&quot; ]]; then
+    # Set +i on directory itself AND all files within it.
+    chattr +i &quot;$d&quot;
+    find &quot;$d&quot; -maxdepth 1 -type f -exec chattr +i {} \;
+    log &quot;Set +i on $d and contents&quot;
+  fi
+done
+
+for f in &quot;${APPEND_ONLY_FILES[@]}&quot;; do
+  if [[ -f &quot;$f&quot; ]]; then
+    chattr +a &quot;$f&quot; &amp;&amp; log &quot;Set +a on $f&quot; || log &quot;WARNING: failed to set +a on $f&quot;
+  fi
+done
+</code></pre>
+<pre><code class="language-bash"># Install and enable the service.
+sudo chmod 750 /usr/local/sbin/set-immutable-flags.sh
+sudo chown root:root /usr/local/sbin/set-immutable-flags.sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now file-immutability.service
+
+# Verify it ran successfully.
+sudo systemctl status file-immutability.service
+</code></pre>
+<p>The service runs before <code>sysinit.target</code>, which means it executes before most daemons start but after the local filesystem is mounted read-write. The <code>DefaultDependencies=no</code> prevents circular ordering dependencies during early boot.</p>
+<h3 id="%2Fetc%2Frc.local-approach" tabindex="-1"><a class="header-anchor" href="#%2Fetc%2Frc.local-approach">/etc/rc.local Approach</a></h3>
+<pre><code class="language-bash"># /etc/rc.local — simpler but less controllable than systemd.
+# Runs late in boot, after all other services.
+#!/bin/bash
+chattr +i /etc/passwd /etc/shadow /etc/group /etc/sudoers
+chattr +i /etc/ssh/sshd_config
+chattr +a /var/log/auth.log /var/log/syslog
+exit 0
+</code></pre>
+<p><code>rc.local</code> runs later in the boot sequence than the systemd oneshot approach, leaving a window between filesystem mount and immutability being set. Prefer the systemd service for production systems.</p>
+<h2 id="package-manager-workflow" tabindex="-1"><a class="header-anchor" href="#package-manager-workflow">Package Manager Workflow</a></h2>
+<p>APT and DNF write directly to files in <code>/etc/</code> and <code>/usr/</code> as part of package installation and upgrade. If those files are immutable, the update will fail:</p>
+<pre><code>dpkg: error processing package openssh-server (--configure):
+ cannot open '/etc/ssh/sshd_config' for writing: Operation not permitted
+</code></pre>
+<p>The correct workflow is:</p>
+<pre><code class="language-bash"># 1. Remove immutability before updating.
+sudo chattr -i /etc/ssh/sshd_config /etc/pam.d/sshd
+
+# 2. Perform the update.
+sudo apt-get install --only-upgrade openssh-server
+
+# 3. Review changes made by the package (important!).
+sudo diff /etc/ssh/sshd_config /etc/ssh/sshd_config.dpkg-new 2&gt;/dev/null || true
+
+# 4. Re-apply immutability.
+sudo chattr +i /etc/ssh/sshd_config /etc/pam.d/sshd
+</code></pre>
+<p>For automated updates (unattended-upgrades, dnf-automatic), the update wrapper must handle this lifecycle. An example pre/post hook for <code>unattended-upgrades</code>:</p>
+<pre><code class="language-bash"># /etc/apt/apt.conf.d/98-chattr-hooks
+DPkg::Pre-Invoke  { &quot;/usr/local/sbin/chattr-remove-for-update.sh&quot;; };
+DPkg::Post-Invoke { &quot;/usr/local/sbin/chattr-restore-after-update.sh&quot;; };
+</code></pre>
+<pre><code class="language-bash"># /usr/local/sbin/chattr-remove-for-update.sh
+#!/bin/bash
+# Strip immutability from files that package managers may update.
+# Called before every dpkg invocation.
+MANAGED_BY_PACKAGES=(
+  /etc/ssh/sshd_config
+  /etc/pam.d/sshd
+  /etc/pam.d/sudo
+  /etc/sudoers
+)
+for f in &quot;${MANAGED_BY_PACKAGES[@]}&quot;; do
+  [[ -f &quot;$f&quot; ]] &amp;&amp; chattr -i &quot;$f&quot;
+done
+</code></pre>
+<pre><code class="language-bash"># /usr/local/sbin/chattr-restore-after-update.sh
+#!/bin/bash
+# Re-apply immutability after dpkg completes.
+MANAGED_BY_PACKAGES=(
+  /etc/ssh/sshd_config
+  /etc/pam.d/sshd
+  /etc/pam.d/sudo
+  /etc/sudoers
+)
+for f in &quot;${MANAGED_BY_PACKAGES[@]}&quot;; do
+  [[ -f &quot;$f&quot; ]] &amp;&amp; chattr +i &quot;$f&quot;
+done
+</code></pre>
+<p>This approach has a race window: between the pre-invoke hook removing immutability and the post-invoke hook re-applying it, the files are unprotected. For high-security environments, disable unattended upgrades and perform all updates manually with explicit chattr transitions.</p>
+<h2 id="detecting-tampering" tabindex="-1"><a class="header-anchor" href="#detecting-tampering">Detecting Tampering</a></h2>
+<h3 id="auditing-expected-immutable-files" tabindex="-1"><a class="header-anchor" href="#auditing-expected-immutable-files">Auditing Expected Immutable Files</a></h3>
+<p>Run periodic checks to verify that expected files still have the immutable flag set. A missing flag indicates either a failed boot service or an attacker who removed it:</p>
+<pre><code class="language-bash">#!/bin/bash
+# /usr/local/sbin/audit-immutability.sh
+# Run via cron or systemd timer. Exits non-zero if any expected flag is missing.
+
+EXPECTED_IMMUTABLE=(
+  /etc/passwd
+  /etc/shadow
+  /etc/sudoers
+  /etc/ssh/sshd_config
+  /etc/crontab
+)
+
+FAIL=0
+for f in &quot;${EXPECTED_IMMUTABLE[@]}&quot;; do
+  flags=$(lsattr &quot;$f&quot; 2&gt;/dev/null | awk '{print $1}')
+  if [[ &quot;$flags&quot; != *i* ]]; then
+    echo &quot;ALERT: $f is missing the immutable flag (flags: ${flags:-not found})&quot; &gt;&amp;2
+    FAIL=1
+  fi
+done
+
+exit &quot;$FAIL&quot;
+</code></pre>
+<pre><code class="language-bash"># Install as a systemd timer for hourly checks.
+# /etc/systemd/system/audit-immutability.service
+[Unit]
+Description=Audit filesystem immutability flags
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/audit-immutability.sh
+</code></pre>
+<pre><code class="language-ini"># /etc/systemd/system/audit-immutability.timer
+[Unit]
+Description=Hourly immutability audit
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+</code></pre>
+<h3 id="auditd-rules-for-chattr-calls" tabindex="-1"><a class="header-anchor" href="#auditd-rules-for-chattr-calls">auditd Rules for chattr Calls</a></h3>
+<p>Any call to <code>chattr</code> that modifies filesystem attributes is detectable via auditd. The <code>chattr</code> command uses the <code>ioctl(2)</code> syscall with <code>FS_IOC_SETFLAGS</code> to change inode flags:</p>
+<pre><code class="language-bash"># /etc/audit/rules.d/immutability.rules
+
+# Watch for chattr being executed on sensitive paths.
+# chattr uses ioctl with FS_IOC_SETFLAGS; detect by watching the binary
+# and the target paths for attribute changes.
+-a always,exit -F arch=b64 -S setxattr -S lsetxattr -S fsetxattr \
+  -F dir=/etc -F key=etc-xattr-change
+
+# Watch for ioctl calls that could correspond to chattr operations.
+# arch=b64 covers both native 64-bit and 32-bit compat syscalls.
+-a always,exit -F arch=b64 -S ioctl \
+  -F path=/usr/bin/chattr -F key=chattr-exec
+
+# Audit writes to critical files — catches editors, dd, and other
+# direct writes that don't go through a syscall chattr watches.
+-w /etc/passwd -p wa -k passwd-change
+-w /etc/shadow -p wa -k shadow-change
+-w /etc/sudoers -p wa -k sudoers-change
+-w /etc/ssh/sshd_config -p wa -k sshd-config-change
+-w /etc/crontab -p wa -k crontab-change
+-w /etc/cron.d/ -p wa -k crond-change
+
+# Load rules: sudo augenrules --load
+</code></pre>
+<p>With these rules in place, any attempt to modify a protected file generates an audit event. Even if the attack succeeds (because the file was temporarily unprotected), the audit log records the event:</p>
+<pre><code class="language-bash"># Search for attempts to modify passwd.
+sudo ausearch -k passwd-change --interpret
+
+# Search for chattr executions.
+sudo ausearch -k chattr-exec --interpret
+
+# Show all recent EPERM errors on watched paths (failed modification attempts).
+sudo ausearch -k passwd-change -sv no --interpret | grep -A5 'EPERM\|EACCES'
+</code></pre>
+<p>See <a href="/articles/linux/auditd-deep-dive/">Linux Audit Framework Deep Dive</a> for full auditd configuration.</p>
+<h2 id="dm-verity-vs-chattr%3A-when-to-use-each" tabindex="-1"><a class="header-anchor" href="#dm-verity-vs-chattr%3A-when-to-use-each">dm-verity vs chattr: When to Use Each</a></h2>
+<p>These two mechanisms address different parts of the integrity problem:</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>chattr +i</th>
+<th>dm-verity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scope</td>
+<td>Individual files, runtime</td>
+<td>Entire block device, read-only</td>
+</tr>
+<tr>
+<td>Granularity</td>
+<td>Per-file, selective</td>
+<td>All blocks on a partition</td>
+</tr>
+<tr>
+<td>Writable filesystem</td>
+<td>Yes</td>
+<td>No (root must be read-only)</td>
+</tr>
+<tr>
+<td>Survives reboot with modified file</td>
+<td>Yes (flag persists in inode)</td>
+<td>Yes (block-level hash tree)</td>
+</tr>
+<tr>
+<td>Bypassed by root (unconfined)</td>
+<td>Yes (chattr -i then modify)</td>
+<td>No (Merkle root is signed)</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td>Low</td>
+<td>High (image builds, A/B partitions)</td>
+</tr>
+<tr>
+<td>Suitable for /etc changes</td>
+<td>Yes (selective immutability)</td>
+<td>No (entire partition is read-only)</td>
+</tr>
+<tr>
+<td>Suitable for immutable OS image</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Package updates</td>
+<td>Manual unset/reset cycle</td>
+<td>Full image rebuild</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use chattr +i when:</strong></p>
+<ul>
+<li>You need selective, per-file protection on an otherwise writable filesystem.</li>
+<li>The system runs a conventional Linux distribution where <code>/etc/</code> is legitimately writable most of the time.</li>
+<li>You want defense-in-depth around a specific set of files (authentication, SSH, cron) without restructuring the OS.</li>
+<li>Operational simplicity is a constraint.</li>
+</ul>
+<p><strong>Use dm-verity when:</strong></p>
+<ul>
+<li>You are building an immutable OS image (appliance, container host, edge device).</li>
+<li>You need cryptographic proof that the running system matches a known-good image.</li>
+<li>You are doing remote attestation and need TPM measurements tied to block-level integrity.</li>
+<li>The threat model includes persistent rootkits that survive reboots.</li>
+</ul>
+<p>For most production servers running conventional distributions, chattr provides the right trade-off: meaningful protection against the most common persistence techniques, with manageable operational overhead. For high-assurance systems where the threat model includes sophisticated persistent adversaries, dm-verity is the appropriate foundation — with chattr adding defense-in-depth for writable data partitions on top.</p>
+<h2 id="filesystem-compatibility" tabindex="-1"><a class="header-anchor" href="#filesystem-compatibility">Filesystem Compatibility</a></h2>
+<p><code>chattr</code> and <code>lsattr</code> from <code>e2fsprogs</code> work on:</p>
+<ul>
+<li><strong>ext2/ext3/ext4:</strong> Full support. All flags work as documented.</li>
+<li><strong>XFS:</strong> The immutable flag (<code>+i</code>) is supported. Append-only (<code>+a</code>) is supported. Some other flags are ignored.</li>
+<li><strong>btrfs:</strong> The immutable flag is supported. Note that btrfs subvolumes can be snapshotted; a snapshot of an immutable file is itself immutable.</li>
+<li><strong>tmpfs:</strong> The immutable flag is <strong>not</strong> supported. <code>/tmp</code> and <code>/run</code> are typically tmpfs.</li>
+<li><strong>overlayfs (container overlay):</strong> The lower layer attributes are honored; the upper layer typically does not propagate <code>+i</code> from the lower layer. Do not rely on <code>chattr +i</code> for files on overlayfs mount points.</li>
+<li><strong>NFS:</strong> NFS v4 has limited support; behavior depends on the server’s filesystem. Do not rely on <code>chattr +i</code> over NFS.</li>
+</ul>
+<p>Always verify with <code>lsattr</code> after setting flags, especially on less-common filesystems.</p>
+<h2 id="summary" tabindex="-1"><a class="header-anchor" href="#summary">Summary</a></h2>
+<p><code>chattr +i</code> is a low-cost, high-signal control. Set it on files where modification is almost never legitimate at runtime: password files, SSH config, sudoers, PAM configuration, and cron tables. Set <code>+a</code> on log files to prevent evidence destruction. Automate enforcement via a systemd oneshot service that runs before <code>sysinit.target</code>. Pair with auditd rules to detect <code>chattr -i</code> calls, creating an audit trail for any attempt to clear the protection.</p>
+<p>The flag is not a silver bullet — a fully unconfined root can clear it, and a kernel exploit bypasses it entirely. Its value is in the detection layer it creates and in the effectiveness it has against the most common case: a compromised application process that has escalated to root via a single CVE, lacks <code>CAP_LINUX_IMMUTABLE</code> in its capability set, and cannot easily establish persistence against immutable authentication files.</p>
+<p>Pair this control with <a href="/articles/linux/linux-ima-evm/">Linux IMA/EVM</a> for kernel-level measurement of executed files, <a href="/articles/linux/auditd-deep-dive/">auditd</a> for syscall-level audit coverage, and <a href="/articles/linux/dm-verity/">dm-verity</a> when the threat model justifies a fully immutable root filesystem.</p>
+
+  </div>
+
+  <script src="/static/tts.js"></script>
+  <footer class="article-footer">
+    
+      <p class="article-updated">Last updated: 7 May 2026</p>
+    
+    <nav class="article-nav">
+      <a href="/articles/">All articles</a>
+      <a href="/articles/linux/">More in Linux / OS Hardening</a>
+    </nav>
+  </footer>
+</article>
+
+  </main>
+
+  <div class="site-footer-wrap">
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-tagline">
+        <p>Hardening real systems in production, for engineers who actually run them.</p>
+        <p class="footer-built">Built for humans and AI agents.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/articles/">Articles</a>
+        <a href="/about/">About</a>
+        <a href="/principles/">Principles</a>
+        <a href="/feed.xml">RSS Feed</a>
+      </div>
+      <p class="footer-copy">&copy; systemshardening.com 2026</p>
+    </div>
+  </footer>
+</div>
+
+
+  <script>
+    (function() {
+      var btn = document.querySelector('.theme-toggle');
+      if (!btn) return;
+      var current = document.documentElement.dataset.theme;
+      btn.textContent = current === 'dark' ? '\u2600' : '\u263E';
+      btn.addEventListener('click', function() {
+        var isDark = document.documentElement.dataset.theme === 'dark';
+        var next = isDark ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('theme', next);
+        btn.textContent = next === 'dark' ? '\u2600' : '\u263E';
+      });
+    })();
+  </script>
+</body>
+</html>

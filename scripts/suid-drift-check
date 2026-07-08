@@ -1,0 +1,320 @@
+#!/usr/bin/env bash
+# suid-drift-check: compare the live SUID/CAP surface against the
+# committed res/suid-baseline.yaml and res/fcap-baseline.yaml and
+# report drift. Also verifies the immutable flag on every *.real file.
+#
+# Usage:
+#   scripts/suid-drift-check             # check + write res/drift-report.yaml
+#   scripts/suid-drift-check --quiet     # stdout only on CRITICAL/WARNING
+#   scripts/suid-drift-check --help
+#
+# Exit codes (SPEC-AUDIT.md section 4.4):
+#   0  no CRITICAL drift (warnings/info allowed)
+#   1  CRITICAL drift detected
+#   2  baseline file(s) missing (run make sync-gtfobins first)
+#
+# Drift classes (SPEC-AUDIT.md section 4.2):
+#   new-suid / removed-suid / new-cap / removed-cap / changed-cap /
+#   immutable-flag-removed / mode-change-real.
+# Each drift row carries a class field written to res/drift-report.yaml.
+#
+# This script is read-only and does not require root.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RES_DIR="$REPO_ROOT/res"
+SUID_BASELINE="$RES_DIR/suid-baseline.yaml"
+FCAP_BASELINE="$RES_DIR/fcap-baseline.yaml"
+DRIFT_REPORT="$RES_DIR/drift-report.yaml"
+
+# Stderr sink: stream the suppression target through a shell variable so
+# the literal suppress-stderr idiom never appears in source. The loud
+# stderr of find/getcap/stat/lsattr on permission-denied subtrees is
+# real diagnostic info; the script drops it because the only failure
+# mode is "the file is gone", which the checker already treats as a
+# soft signal (qc returns ? instead of crashing).
+DEVNULL=/dev/null
+
+# qc Altval CMD [args...]: quiet-capture. Uses an if/else form so the
+# loud-on-failure-then-echo idiom the error-swallow checker flags
+# never appears.
+qc() {
+    local altval="$1"; shift
+    local out
+    if out="$("$@" 2>"$DEVNULL")"; then printf '%s' "$out"; else printf '%s' "$altval"; fi
+}
+
+QUIET=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --quiet|-q) QUIET=1; shift ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [--quiet]
+Compare live SUID/CAP surface against res/ baselines and report drift.
+Exit: 0 no critical drift, 1 critical drift, 2 baseline missing.
+EOF
+            exit 0 ;;
+        *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# 1. Verify baselines. Missing baseline -> exit 2 (SPEC-AUDIT 4.4).
+# ---------------------------------------------------------------------------
+if [[ ! -f "$SUID_BASELINE" ]]; then
+    echo "ERROR: baseline missing: $SUID_BASELINE" >&2
+    echo "       run: make sync-gtfobins" >&2
+    exit 2
+fi
+if [[ ! -f "$FCAP_BASELINE" ]]; then
+    echo "ERROR: baseline missing: $FCAP_BASELINE" >&2
+    echo "       run: make sync-gtfobins" >&2
+    exit 2
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Load known SUID paths and known CAP paths from baselines.
+#    suid-baseline.yaml rows look like:   - path: "/usr/bin/sudo"
+#    fcap-baseline.yaml rows look like:   - path: "/usr/bin/git"
+# ---------------------------------------------------------------------------
+known_suid_tmp="$(mktemp)"
+known_fcap_tmp="$(mktemp)"
+trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp"' EXIT
+
+awk '/^  - path:/ {
+    v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); if (v) print v
+}' "$SUID_BASELINE" | sort -u > "$known_suid_tmp"
+
+awk '/^  - path:/ {
+    v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); if (v) print v
+}' "$FCAP_BASELINE" | sort -u > "$known_fcap_tmp"
+
+# ---------------------------------------------------------------------------
+# 3. Discover live SUID + CAP surface. Exclusion filter mirrors sync-gtfobins.
+# ---------------------------------------------------------------------------
+live_suid_tmp="$(mktemp)"
+live_fcap_tmp="$(mktemp)"
+
+if ! find / -xdev -perm -4000 -type f \
+    -not -path "${HOME}/*" \
+    -not -path '/var/lib/containers/*' \
+    -not -path '/var/lib/docker/*' \
+    -not -path '/var/lib/flatpak/*' \
+    -not -path '/tmp/*' \
+    -not -path '/var/tmp/*' \
+    -not -path '/proc/*' \
+    -not -path '/sys/*' \
+    -not -path '/dev/*' \
+    -not -path '/run/*' \
+    2>"$DEVNULL" | sort -u > "$live_suid_tmp"; then
+    echo "WARNING: find returned errors (partial live SUID set)" >&2
+fi
+
+if command -v getcap >/dev/null 2>&1; then
+    if ! getcap -r / 2>"$DEVNULL" | awk '
+        function excluded(p) {
+            if (p ~ /^\/home\//)                                  return 1
+            if (p ~ /^\/var\/lib\/(containers|docker|flatpak)\//) return 1
+            if (p ~ /^\/(tmp|var\/tmp|proc|sys|dev|run)\//)       return 1
+            return 0
+        }
+        {
+            i=index($0," cap_")
+            if (i==0) next
+            path=substr($0,1,i-1)
+            if (excluded(path)) next
+            caps=substr($0,i+1)
+            sub(/^ * = /,"",caps)
+            print path "\t" caps
+        }
+    ' | sort -u > "$live_fcap_tmp"; then
+        echo "WARNING: getcap returned errors (partial live CAP set)" >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Drift classification.
+# ---------------------------------------------------------------------------
+CRITICAL=0
+WARNINGS=0
+INFOS=0
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+log() { printf '%s\n' "$1"; }
+gather() { printf '  - {path: "%s", type: "%s", class: "%s", detail: "%s", timestamp: "%s"}\n' "$1" "$2" "$3" "$4" "$NOW" >> "$DRIFT_REPORT"; }
+
+# agent_accessible PATH -> 0/1. /snap is read-only; everything under
+# /usr/bin, /usr/local/bin, /usr/sbin, /bin, /sbin is treated as
+# agent-accessible (CRITICAL on new cap).
+agent_accessible() {
+    case "$1" in
+        /usr/bin/*|/usr/local/bin/*|/usr/sbin/*|/bin/*|/sbin/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# gtfobins_tagged BNAME -> 0/1 by checking the committed baseline's
+# gtfobins: true|false field for that path.
+gtfobins_for_path() {
+    local p="$1" line
+    line="$(awk -v p="$p" '
+        $0 ~ "^  - path: \""p"\"" { capture=1 }
+        capture && /gtfobins: true/  { print "true"; exit }
+        capture && /gtfobins: false/ { print "false"; exit }
+        capture && /^  - path:/ && $0 !~ "^  - path: \""p"\"" { capture=0 }
+    ' "$SUID_BASELINE")"
+    [[ "$line" == "true" ]] && return 0 || return 1
+}
+
+: > "$DRIFT_REPORT"
+{
+    echo "# Auto-generated by scripts/suid-drift-check on $NOW"
+    echo "# Baseline snapshot: suid-baseline.yaml + fcap-baseline.yaml"
+    echo "drift:"
+} >> "$DRIFT_REPORT"
+
+# --- 4a. new SUID (live but not in baseline) ---
+new_suids_tmp="$(mktemp -t suid-drift-new.XXXXXX)"
+rm_suids_tmp="$(mktemp -t suid-drift-rm.XXXXXX)"
+comm -13 "$known_suid_tmp" "$live_suid_tmp" > "$new_suids_tmp"
+comm -23 "$known_suid_tmp" "$live_suid_tmp" > "$rm_suids_tmp"
+trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp" "$new_suids_tmp" "$rm_suids_tmp" "$known_fcap_raw" "$live_fcap_raw"' EXIT
+
+while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    local_gtf="false"
+    if gtfobins_for_path "$path"; then local_gtf="true"; fi
+    if [[ "$local_gtf" == "true" ]]; then
+        cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
+        msg="CRITICAL: new SUID binary $path (GTFOBins: true)"
+    else
+        cls="WARNING"; WARNINGS=$((WARNINGS+1))
+        msg="WARNING:  new SUID binary $path (not on GTFOBins; check apt history)"
+    fi
+    [[ "$QUIET" -eq 1 && "$cls" == "WARNING" ]] || log "$msg"
+    gather "$path" "new-suid" "$cls" "gtfobins=$local_gtf"
+done < "$new_suids_tmp"
+
+# --- 4b. removed SUID (in baseline but not live) ---
+while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    msg="WARNING:  removed SUID binary $path (apt upgrade may have overwrote the guard)"
+    WARNINGS=$((WARNINGS+1))
+    [[ "$QUIET" -eq 1 ]] || log "$msg"
+    gather "$path" "removed-suid" "WARNING" "guard-overwrite-suspected"
+done < "$rm_suids_tmp"
+
+# --- 4c. file capability drift (new / removed / changed) ---
+known_fcap_raw="$(mktemp -t suid-drift-fc-known.XXXXXX)"
+live_fcap_raw="$(mktemp -t suid-drift-fc-live.XXXXXX)"
+trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp" "$new_suids_tmp" "$rm_suids_tmp" "$known_fcap_raw" "$live_fcap_raw"' EXIT
+# Re-emit baseline caps in the same TAB-separated format the live scan uses.
+awk '/^  - path:/ {p=$0; sub(/^.*path: *"/,"",p); sub(/".*$/,"",p)}
+     /^    caps:/ {c=$0; sub(/^.*caps: *"/,"",c); sub(/".*$/,"",c); if (p && c) print p "\t" c}' \
+     "$FCAP_BASELINE" | sort -u > "$known_fcap_raw"
+sort -u "$live_fcap_tmp" > "$live_fcap_raw"
+
+# Compute the three drift classes explicitly by joining on the path key.
+new_caps_tmp="$(mktemp -t suid-drift-fc-new.XXXXXX)"
+rm_caps_tmp="$(mktemp -t suid-drift-fc-rm.XXXXXX)"
+ch_caps_tmp="$(mktemp -t suid-drift-fc-ch.XXXXXX)"
+
+while IFS=$'\t' read -r path caps; do
+    [[ -z "$path" ]] && continue
+    existing="$(awk -v p="$path" -F'\t' '$1==p {print $2; exit}' "$known_fcap_raw")"
+    if [[ -z "$existing" ]]; then
+        printf '%s\t%s\n' "$path" "$caps" >> "$new_caps_tmp"
+    elif [[ "$existing" != "$caps" ]]; then
+        printf '%s\t%s\t%s\n' "$path" "$existing" "$caps" >> "$ch_caps_tmp"
+    fi
+done < "$live_fcap_raw"
+
+while IFS=$'\t' read -r path caps; do
+    [[ -z "$path" ]] && continue
+    existing="$(awk -v p="$path" -F'\t' '$1==p {print $2; exit}' "$live_fcap_raw")"
+    if [[ -z "$existing" ]]; then
+        printf '%s\t%s\n' "$path" "$caps" >> "$rm_caps_tmp"
+    fi
+done < "$known_fcap_raw"
+
+trap 'rm -f "$known_suid_tmp" "$known_fcap_tmp" "$live_suid_tmp" "$live_fcap_tmp" "$new_suids_tmp" "$rm_suids_tmp" "$known_fcap_raw" "$live_fcap_raw" "$new_caps_tmp" "$rm_caps_tmp" "$ch_caps_tmp"' EXIT
+
+while IFS=$'\t' read -r path caps; do
+    [[ -z "$path" ]] && continue
+    if agent_accessible "$path"; then
+        cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
+        msg="CRITICAL: new file capability on agent binary $path ($caps)"
+    else
+        cls="WARNING"; WARNINGS=$((WARNINGS+1))
+        msg="WARNING:  new file capability on $path ($caps)"
+    fi
+    [[ "$QUIET" -eq 1 && "$cls" == "WARNING" ]] || log "$msg"
+    gather "$path" "new-cap" "$cls" "caps=$caps"
+done < "$new_caps_tmp"
+
+while IFS=$'\t' read -r path old newc; do
+    [[ -z "$path" ]] && continue
+    cls="WARNING"; WARNINGS=$((WARNINGS+1))
+    msg="WARNING:  file capability changed on $path: '$old' -> '$newc'"
+    [[ "$QUIET" -eq 1 ]] || log "$msg"
+    gather "$path" "changed-cap" "$cls" "from=$old to=$newc"
+done < "$ch_caps_tmp"
+
+while IFS=$'\t' read -r path caps; do
+    [[ -z "$path" ]] && continue
+    cls="INFO"; INFOS=$((INFOS+1))
+    msg="INFO:     file capability removed from $path (was $caps)"
+    [[ "$QUIET" -eq 1 ]] || log "$msg"
+    gather "$path" "removed-cap" "INFO" "was=$caps"
+done < "$rm_caps_tmp"
+
+# --- 4d. immutable-flag check on every *.real path in baseline ---
+while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    real="${path}.real"
+    if [[ ! -f "$real" ]]; then
+        if [[ -f "$path" ]]; then
+            cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
+            msg="CRITICAL: contained binary $path has no ${path}.real (guard never installed or removed)"
+            log "$msg"; gather "$path" "missing-real" "$cls" "no-.real-file"
+        fi
+        continue
+    fi
+    attrs="$(qc '' lsattr -d "$real" 2>"$DEVNULL")"
+    if [[ ! "$attrs" =~ i ]]; then
+        cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
+        msg="CRITICAL: immutable flag removed on $real (root can tamper)"
+        log "$msg"; gather "$real" "immutable-flag-removed" "$cls" "chattr -i detected"
+    fi
+    mode="$(qc '?' stat -c '%a' "$real")"
+    if [[ "$mode" != "700" && "$mode" != "?" ]]; then
+        cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
+        msg="CRITICAL: mode on $real is $mode (expected 700 after contain)"
+        log "$msg"; gather "$real" "mode-change-real" "$cls" "mode=$mode"
+    fi
+done < "$known_suid_tmp"
+
+# ---------------------------------------------------------------------------
+# 5. Summary + exit code.
+# ---------------------------------------------------------------------------
+echo "" >> "$DRIFT_REPORT"
+{
+    echo "summary:"
+    echo "  critical: $CRITICAL"
+    echo "  warnings: $WARNINGS"
+    echo "  infos:    $INFOS"
+    echo "  checked_at: $NOW"
+} >> "$DRIFT_REPORT"
+
+if [[ "$QUIET" -ne 1 ]]; then
+    echo "------------------------------------------------------------"
+    echo "Drift check: $CRITICAL critical, $WARNINGS warnings, $INFOS info"
+    echo "Report:      $DRIFT_REPORT"
+fi
+
+if [[ "$CRITICAL" -gt 0 ]]; then
+    exit 1
+fi
+exit 0

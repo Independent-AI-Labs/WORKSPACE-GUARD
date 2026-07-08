@@ -1,0 +1,19 @@
+# Rootless profile tunables (Landlock + seccomp + namespaces + cgroups).
+# See docs/specifications/SPEC-SANDBOX.md section 3.
+# Values are applied to the systemd unit template at install time
+# (make install-sandbox regenerates config/systemd/workspace-agent@.service).
+#
+# cgroup v2 unified hierarchy values; -1 / 0 mean "do not set".
+
+memory_max: 536870912     # bytes (512 MiB)
+cpu_quota: 200000         # microseconds per 100000 period (= 2 cores / 200%)
+pids_max: 256
+io_weight: 50
+net_host: false           # true: keep host network namespace; false: loopback only
+
+# rlimits applied to the child before execve (SPEC-SANDBOX.md section 3.6).
+rlimits:
+  RLIMIT_CORE: 0          # no core dumps
+  RLIMIT_NOFILE: 256      # max 256 file descriptors
+  RLIMIT_NPROC: 256       # max 256 processes
+  RLIMIT_FSIZE: 1073741824   # max 1 GiB file size

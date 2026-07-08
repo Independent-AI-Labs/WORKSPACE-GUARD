@@ -1,0 +1,68 @@
+# config/systemd/workspace-agent@.service
+#
+# Template unit for systemd-managed agent workloads. The %i instance name
+# maps to the sandbox profile (rootless / gvisor / firecracker).
+# See docs/specifications/SPEC-SANDBOX.md section 7 and
+# docs/specifications/SPEC-CAP-THROTTLE.md section 6.
+#
+# Install: sudo cp config/systemd/workspace-agent@.service /etc/systemd/system/
+#          sudo systemctl daemon-reload
+#          sudo systemctl start workspace-agent@rootless
+
+[Unit]
+Description=WORKSPACE Agent (%i)
+After=network.target
+
+[Service]
+Type=exec
+
+# Capability throttle (SPEC-CAP-THROTTLE section 6): start with zero caps.
+# Per section 6, the unit grants no capabilities by default; the agent
+# runs fully de-privileged inside the sandbox. Any needed cap must be
+# added explicitly and risk-assessed against the always-dropped table.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+
+# Address family restriction (AF_ALG block for Copy Fail CVE-2026-31431).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# Filesystem protection
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+# Namespace isolation
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+
+# Resource limits (overridden by config/sandbox/rootless.yaml at install)
+MemoryMax=512M
+CPUQuota=200%
+TasksMax=256
+LimitCORE=0
+LimitNOFILE=256
+
+# Seccomp: deny syscall classes known to enable container / SUID breakouts.
+# See SPEC-SANDBOX.md section 3.3 for the per-syscall rationale.
+SystemCallFilter=~@mount @module @raw-io @debug @chroot @swap @clock @cpu-emulation
+SystemCallFilter=~open_by_handle_at io_uring_setup io_uring_enter io_uring_register
+SystemCallFilter=~personality kexec_load kexec_file_load init_module finit_module delete_module
+SystemCallFilter=~bpf perf_event_open fanotify_init userfaultfd ptrace process_vm_readv process_vm_writev
+
+# %i maps to the profile; the wrapper handles profile selection then calls
+# the sandbox launcher with the workload command (argv after `--`).
+ExecStart=/usr/local/bin/workspace-sandbox-launcher --profile %i --
+
+[Install]
+WantedBy=multi-user.target

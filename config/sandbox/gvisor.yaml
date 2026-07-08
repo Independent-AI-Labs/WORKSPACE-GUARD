@@ -1,0 +1,9 @@
+# gVisor (runsc) profile tunables.
+# See docs/specifications/SPEC-SANDBOX.md section 4.
+# The launcher passes these as runsc flags; values map directly.
+
+platform: systrap          # "systrap" preferred; "ptrace" if systrap unavailable
+network: none              # "none" (loopback only) or "host"
+debug: false
+strace: false
+profile: false             # CPU profiling output to /tmp/profile.pb.gz

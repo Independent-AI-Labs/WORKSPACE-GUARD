@@ -197,7 +197,7 @@ Gemini CLI shipped LXC + gVisor sandbox support in March 2026. The sandbox:
 
 gVisor's Sentry process reimplements the Linux kernel API in userspace (Go). Benefits:
 - No direct host kernel syscalls from sandboxed processes
-- Checkpoint/restore support for agentic workloads
+- Checkpoint/restore support for autonomous workloads
 - Docker-in-gVisor allows safe code execution (Hermes Agent architecture)
 
 **Limitations:**
@@ -205,9 +205,9 @@ gVisor's Sentry process reimplements the Linux kernel API in userspace (Go). Ben
 - Not all syscalls supported (some require platform-specific patches)
 - Does not protect against vulnerabilities in gVisor's own Sentry implementation (but this surface is much smaller than the full host kernel)
 
-### 5.5 WORKSPACE-GUARD in Agentic Environments
+### 5.5 WORKSPACE-GUARD in Autonomous-Agent Environments
 
-WORKSPACE-GUARD's function in an agentic context:
+WORKSPACE-GUARD's function in an autonomous-agent context:
 - Prevents agents from rewriting git history or destroying work via `git reset --hard`, `git push --force`, etc.
 - Blocks `--no-verify` to ensure hooks fire.
 - Scrub environment of hook-bypass variables (`SKIP`, `PRE_COMMIT_ALLOW_NO_CONFIG`).

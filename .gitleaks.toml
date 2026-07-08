@@ -1,0 +1,44 @@
+# WORKSPACE-GUARD gitleaks configuration.
+#
+# This file is the canonical rule-exclusion POLICY for this repository. It
+# extends gitleaks' embedded default rules (via [extend] useDefault = true) so
+# every upstream rule (generic-api-key, jwt, ...) stays active on all
+# non-excluded paths, and it adds a repository-local path allowlist that
+# scope-excludes docs/references/ (verbatim cached external reference content
+# containing third-party tokens that are not OUR secrets).
+#
+# This file is loaded by gitleaks scan modes that discover config at the
+# repo root ("(target path)/.gitleaks.toml" with target path = "."), e.g.
+# `gitleaks git .`, the gitleaks-action GitHub workflow, or any explicit
+# `gitleaks ... --config .gitleaks.toml` invocation.
+#
+# NOTE on the WORKSPACE-CI pre-commit secret scan: the shared CI wrapper
+# (CI/lib/checks_secrets.sh) enumerates tracked files with `git ls-files` and
+# runs `gitleaks dir <file>` per file, so the per-file invocation's target
+# path is the file itself and gitleaks therefore does NOT auto-load this
+# repo-root .gitleaks.toml during the pre-commit hook. Because the file list
+# is also the sole filter the CI wrapper honours, the practical enforcement
+# layer for the pre-commit scan is the sibling `.gitleaksignore` file (loaded
+# by default via gitleaks' `-i .` flag from the repo-root working directory),
+# which lists the exact finding fingerprints that occur in docs/references/.
+# `.gitleaks.toml` (this file) and `.gitleaksignore` must be kept in step:
+# whenever a new cached reference file is added, regenerate `.gitleaksignore`
+# via `make sync-gtfobins` (or run gitleaks on docs/references/ and append the
+# new fingerprints). Both files are kept so that direct `gitleaks git .` and
+# the GitHub-hosted gitleaks-action honour the path allowlist, while the
+# shell-hook pre-commit path remains covered by the fingerprints allow-list.
+
+title = "WORKSPACE-GUARD gitleaks config"
+
+[extend]
+# Extend the gitleaks default config built in to the binary.
+useDefault = true
+
+[[allowlists]]
+description = "WORKSPACE-GUARD repository-local allow list (verbatim external reference content)"
+# Path regexes are matched against the file path reported by gitleaks.
+# docs/references/ holds cached external reference content; its secrets
+# belong to third parties and are out of scope for THIS repository.
+paths = [
+    '''docs/references/.*''',
+]

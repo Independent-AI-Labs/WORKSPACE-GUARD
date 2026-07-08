@@ -1,0 +1,49 @@
+# Per-path capability allowlist.
+#
+# Any capability NOT listed here for a given path is stripped during
+# `make install-lock` (see docs/specifications/SPEC-CAP-THROTTLE.md
+# section 4). The sync-gtfobins script records the pre-strip state in
+# res/fcap-baseline.yaml so the operator can audit what was removed.
+#
+# Format:
+#   allowlist:
+#     <path>:
+#       allowed: [cap_name, ...]
+#       reason: "why this cap is needed"
+
+allowlist:
+  /usr/bin/git:
+    allowed: [cap_dac_override]
+    reason: "Guard reads root-owned .git/ directory entries"
+
+  /usr/bin/sudo:
+    allowed: [cap_setuid, cap_setpcap, cap_dac_override]
+    reason: "Identity switching (SUID equivalent via file caps)"
+
+  /usr/bin/su:
+    allowed: [cap_setuid, cap_dac_override]
+    reason: "Identity switching"
+
+  /usr/bin/passwd:
+    allowed: [cap_setuid, cap_dac_override]
+    reason: "Password change writes /etc/shadow"
+
+  /usr/bin/ping:
+    allowed: [cap_net_raw]
+    reason: "ICMP echo requests"
+
+  /usr/bin/mtr-packet:
+    allowed: [cap_net_raw]
+    reason: "Traceroute raw socket"
+
+  /usr/bin/newuidmap:
+    allowed: [cap_setuid, cap_setgid]
+    reason: "Subordinate UID mapping for user namespaces"
+
+  /usr/bin/newgidmap:
+    allowed: [cap_setgid, cap_setuid]
+    reason: "Subordinate GID mapping for user namespaces"
+
+# No other path is in the allowlist. Any capability found on a path not
+# listed above is stripped unconditionally. The drift checker
+# (scripts/suid-drift-check) reports new paths that acquire caps.
