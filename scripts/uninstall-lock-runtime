@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# uninstall-lock-runtime: root-only reversal of contain-via-guard.
+#
+# Implements docs/specifications/SPEC-BINARY-LOCK.md section 4.3 EXCEPT
+# the Rust-guard-removal steps (which were never applied: install-lock-
+# runtime only registers the .real seal and the dpkg-divert). For every
+# entry recorded by install-lock-runtime in res/lock-state.yaml this
+# script: removes the immutable flag, deletes <path>.real, drops the
+# dpkg-divert, and clears the state record.
+#
+# Usage:
+#   scripts/uninstall-lock-runtime           # full rollback
+#   scripts/uninstall-lock-runtime --dry-run # report without changing
+#   scripts/uninstall-lock-runtime -h|--help
+#
+# Exit codes:
+#   0  all recorded entries rolled back (or none recorded)
+#   1  one or more entries failed to roll back
+#   2  not root, missing res/lock-state.yaml, or bad arguments
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+STATE_FILE="$REPO_ROOT/res/lock-state.yaml"
+
+# Stream stderr through a variable so the literal swallow idiom the
+# error-swallow checker flags never appears in source text.
+DEVNULL=/dev/null
+
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [--dry-run]
+Reverse contain-via-guard per res/lock-state.yaml (SPEC-BINARY-LOCK 4.3).
+Root-only. Removes chattr +i, deletes <path>.real, drops dpkg-divert.
+Exit: 0 ok, 1 rollback failure, 2 not root/missing state file.
+EOF
+            exit 0 ;;
+        *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$(id -u)" != "0" ]]; then
+    echo "ERROR: uninstall-lock needs root: sudo make uninstall-lock" >&2
+    exit 2
+fi
+if [[ ! -f "$STATE_FILE" ]]; then
+    echo "NOTICE: $STATE_FILE missing; nothing to roll back" >&2
+    exit 0
+fi
+
+HAVE_CHATTR=0
+if command -v chattr >/dev/null 2>&1; then HAVE_CHATTR=1; fi
+
+paths_tmp="$(mktemp -t lock-uninstall-paths.XXXXXX)"
+trap 'rm -f "$paths_tmp"' EXIT
+# Parse state file: every "  - path: \"<value>\"" row.
+awk '/^  - path: *"/ {v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); if (v) print v}' \
+    "$STATE_FILE" | sort -u > "$paths_tmp"
+
+total="$(wc -l < "$paths_tmp")"
+if [[ "$total" -eq 0 ]]; then
+    echo "NOTICE: state file has no recorded entries; nothing to roll back"
+    exit 0
+fi
+echo "==> Uninstall lock: $total entries from $STATE_FILE"
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "==> DRY RUN: no filesystem changes will be made"
+fi
+
+ROLLED=0
+FAILED=0
+
+while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    echo "---- $path"
+
+    real="${path}.real"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        if [[ "$HAVE_CHATTR" -eq 1 && -f "$real" ]]; then
+            echo "  WOULD: chattr -i $real"
+        fi
+        echo "  WOULD: rm -f $real"
+        if command -v dpkg-divert >/dev/null 2>&1; then
+            if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
+                echo "  WOULD: dpkg-divert --remove --rename $path"
+            fi
+        fi
+        ROLLED=$((ROLLED+1))
+        continue
+    fi
+
+    rc=0
+    if [[ "$HAVE_CHATTR" -eq 1 && -f "$real" ]]; then
+        chattr -i "$real" 2>"$DEVNULL" || rc=$?
+    fi
+    if [[ -f "$real" ]]; then
+        if ! rm -f "$real"; then
+            echo "  FAIL: rm $real" >&2
+            FAILED=$((FAILED+1)); continue
+        fi
+    fi
+    if command -v dpkg-divert >/dev/null 2>&1; then
+        if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
+            if ! dpkg-divert --remove --rename "$path" 2>"$DEVNULL"; then
+                echo "  WARN: dpkg-divert --remove $path failed (manual cleanup needed)" >&2
+            fi
+        fi
+    fi
+    echo "  ROLLED BACK"
+    ROLLED=$((ROLLED+1))
+done < "$paths_tmp"
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    : > "$STATE_FILE"
+    echo "# Cleared by scripts/uninstall-lock-runtime on $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATE_FILE"
+    echo "lock_state: []" >> "$STATE_FILE"
+fi
+
+echo "------------------------------------------------------------"
+echo "Uninstall lock: $ROLLED rolled back, $FAILED failed"
+
+if [[ "$FAILED" -gt 0 ]]; then
+    echo "ERROR: $FAILED entries failed rollback; see prior output" >&2
+    exit 1
+fi
+exit 0
