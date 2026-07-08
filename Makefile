@@ -51,7 +51,8 @@ init: ## Install system-level dependencies (apt packages + Rust toolchain)
 	$(SUDO) apt-get install -y --no-install-recommends \
 		curl tar ca-certificates \
 		libcap2-bin e2fsprogs file \
-		build-essential pkg-config
+		build-essential pkg-config \
+		bats bats-assert bats-support bats-file
 	@echo "==> Installing Rust toolchain (if missing)..."
 	@if ! command -v cargo > /dev/null; then \
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal; \
@@ -124,6 +125,14 @@ type-check: ## Rust has no separate type-check; run cargo check
 test: ## Run cargo test (all feature combinations)
 	cargo test --workspace
 	cargo test --no-default-features --features root-only
+
+.PHONY: test-shell
+test-shell: ## Run the bats shell test suite (NOT gated in check-push).
+	@if ! command -v bats >/dev/null 2>&1; then \
+		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
+		exit 1; \
+	fi
+	bats tests/shell/
 
 .PHONY: check-push
 check-push: ## Pre-push quality gate: fmt + clippy + check (both feature combos) + tests (both feature combos).
@@ -236,4 +245,12 @@ install-sandbox: ## Install sandbox profile + systemd unit (ROOT)
 
 .PHONY: sandbox-check
 sandbox-check: ## Dry-run: report which sandbox profile auto-selection would pick on this host
-	@host=$$(hostname); awk -v host="$$host" 'BEGIN { m=0 } /pattern:/ { p=$$0; sub(/.*pattern:[[:space:]]*"/,"",p); sub(/".*/,"",p) } /profile:/ { f=$$0; sub(/.*profile:[[:space:]]*/,"",f); sub(/[[:space:]#].*/,"",f); if (m==0 && host ~ p) { printf "host=%s -> profile=%s (pattern=\"%s\")\n", host, f, p; m=1 } } END { if (m==0) { printf "host=%s -> no match (pass --profile explicitly)\n", host; exit 2 } }' config/sandbox/profiles.yaml
+	@host=$$(hostname); \
+	out=$$(source scripts/lib/sandbox-profile.sh && select_profile "$$host" config/sandbox/profiles.yaml); rc=$$?; \
+	if [ $$rc -eq 0 ]; then \
+		printf 'host=%s -> profile=%s\n' "$$host" "$$out"; \
+	elif [ $$rc -eq 1 ]; then \
+		echo "ERROR: config/sandbox/profiles.yaml missing or empty" >&2; exit 1; \
+	else \
+		printf 'host=%s -> no match (pass --profile explicitly)\n' "$$host"; exit 2; \
+	fi
