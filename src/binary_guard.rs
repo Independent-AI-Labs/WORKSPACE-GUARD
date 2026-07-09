@@ -287,3 +287,7 @@ fn log_block(invoked_name: &str, target: &str, reason: &str) {
         eprint!("{}", line);
     }
 }
+
+#[cfg(test)]
+#[path = "binary_guard_tests.rs"]
+mod tests;
