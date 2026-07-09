@@ -145,6 +145,10 @@ build: ## Build release binary (default + root-only)
 	cargo build --release
 	cargo build --release --no-default-features --features root-only
 
+.PHONY: build-binary-guard
+build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins table)
+	cargo build --release --features binary-guard --bin workspace-binary-guard
+
 .PHONY: clean
 clean: ## Clean build artifacts
 	rm -rf target
@@ -200,17 +204,18 @@ drift-check-quiet: ## Same as drift-check but stdout only on CRITICAL; res/drift
 	bash scripts/suid-drift-check --quiet
 
 .PHONY: install-lock
-install-lock: ## Contain-via-guard every SUID binary per config/binary-lock.yaml (ROOT)
+install-lock: build-binary-guard ## Contain-via-guard every SUID binary per res/binary-lock.yaml (ROOT)
 	@if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-lock needs root: sudo make install-lock" >&2; exit 1; \
 	fi
-	@echo "==> Installing binary lock per config/binary-lock.yaml..."
-	@# The runtime installer for SUID guards is a separate root-only
-	@# script that mirrors docs/specifications/SPEC-BINARY-LOCK.md
-	@# section 4.1 (copy -> chown root:root -> chmod 0700 .real ->
-	@# chattr +i -> build per-binary guard -> dpkg-divert).
+	@echo "==> Installing binary lock per res/binary-lock.yaml..."
+	@# The generic guard binary is built once (build-binary-guard dep above);
+	@# install-lock-runtime copies that single binary to every contained path.
+	@# Mirrors docs/specifications/SPEC-BINARY-LOCK.md section 4.2
+	@# (copy -> chown root:root -> chmod 0700 .real ->
+	@# chattr +i -> install generic guard binary -> dpkg-divert).
 	@test -x scripts/install-lock-runtime && bash scripts/install-lock-runtime \
-		|| { echo "NOTICE: scripts/install-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.1 documents the procedure." >&2; exit 1; }
+		|| { echo "NOTICE: scripts/install-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-lock
 uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID path (ROOT)

@@ -162,8 +162,8 @@ This document specifies the requirements for the Rust binary. The installation/d
   - Relocation read-only (`relro = "full"`)
   - Stack protector enabled
   - Code generation with `overflow-checks = true` in debug, configurable in release
-- **REQ-GGUARD-121**: The binary shall NOT use `unsafe` blocks unless required for `getauxval(AT_SECURE)` or `/proc/self/stat` reading. All `unsafe` blocks shall be documented with a safety comment.
-- **REQ-GGUARD-122**: The binary shall NOT depend on any crate that performs network I/O, file system watching, or dynamic loading. Only minimal crates: `std`, `nix` (or `libc`), and optionally `clap` for argument parsing.
+- **REQ-GGUARD-121**: The binary shall minimise `unsafe` blocks to irreducible FFI. All `unsafe` blocks shall be documented with a `// SAFETY:` comment. The allowed irreducible sites are: `libc::getauxval(AT_SECURE)` (SUID detection, no `nix` wrapper), `libc::fork` (async-signal-safety hazard), `libc::_exit` (only async-signal-safe exit), and `libc::lchown` (nix::chown follows symlinks). Every other syscall MUST use a safe `nix` wrapper or `std` equivalent. The test module may retain raw `libc::fork`/`libc::_exit` so tests exercise the exact FFI the production path uses.
+- **REQ-GGUARD-122**: The binary shall NOT depend on any crate that performs network I/O, file system watching, or dynamic loading. Allowed crates: `std`, `libc` (for the four irreducible FFI sites in REQ-GGUARD-121), `nix` (safe wrappers for all other syscalls), and `caps` (optional, capability mode only). No `clap`; argument parsing is manual via `std::env::args_os()`.
 - **REQ-GGUARD-123**: String allocations from user input (argv) shall be validated for UTF-8. Non-UTF-8 arguments shall be handled via `OsStr`/`OsString` and passed through to real git unmodified for non-blocking decisions.
 - **REQ-GGUARD-124**: The binary shall set its own `RLIMIT_NOFILE` to a reasonable limit (e.g., 256) and `RLIMIT_CORE` to 0 (no core dumps) before exec-ing real git, to limit blast radius.
 - **REQ-GGUARD-125**: The binary shall NOT open any file descriptors other than `/dev/tty`, `/proc/self/stat`, and the real git binary before exec-ing. No temporary files, no log file open during argument processing.
@@ -235,7 +235,7 @@ This document specifies the requirements for the Rust binary. The installation/d
       └── integration_test.rs
   ```
 - **REQ-GGUARD-171**: The `Cargo.toml` shall specify: `edition = "2021"`, `panic = "abort"`, `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`.
-- **REQ-GGUARD-172**: The allowed dependencies are `libc = "0.2"` (required) and `caps = "0.5"` (optional, only for capability mode). No other crates shall be used.
+- **REQ-GGUARD-172**: The allowed dependencies are `libc = "0.2"` (required, for the four irreducible FFI sites in REQ-GGUARD-121), `nix = "0.29"` (required, safe wrappers for all other syscalls; `default-features = false`, features `["user", "process", "signal", "resource", "fs"]`), and `caps = "0.5"` (optional, only for capability mode). No other crates shall be used.
 - **REQ-GGUARD-173**: The `Cargo.toml` shall define the following feature flags:
   - `capability-mode` (default): enables `caps` dependency, cap checks
   - `root-only`: skips cap checks, verifies `geteuid() == 0`
@@ -245,8 +245,8 @@ This document specifies the requirements for the Rust binary. The installation/d
 ## Constraints
 
 - **Rust 1.75+** (minimum stable toolchain available on target systems).
-- **Dependencies**: `libc` (required), `caps` (optional, capability mode only). No `clap` or argument parsing frameworks: manual `std::env::args_os()` parsing to minimise dependency surface.
-- **Statically linked preferred** to avoid shared library injection vectors. If dynamically linked, only link against `libc`, `libgcc_s`, and `libm`.
+- **Dependencies**: `libc` (required, irreducible FFI only), `nix` (required, safe syscall wrappers), `caps` (optional, capability mode only). No `clap` or argument parsing frameworks: manual `std::env::args_os()` parsing to minimise dependency surface.
+- **Statically linked preferred** to avoid shared library injection vectors. If dynamically linked, only link against `libc`, `nix`'s transitive deps (`bitflags`, `cfg-if`), `libgcc_s`, and `libm`.
 - **Target**: `x86_64-unknown-linux-musl` (static) or `x86_64-unknown-linux-gnu` (dynamic) or `aarch64-unknown-linux-gnu` depending on availability of musl toolchain and target architecture.
 - **No shell, no Python, no interpreter**: the binary is fully self-contained.
 - **Binary size target**: under 500KB stripped.

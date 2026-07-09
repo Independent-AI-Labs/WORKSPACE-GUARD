@@ -11,6 +11,7 @@
 #   res/suid-baseline.yaml
 #   res/fcap-baseline.yaml
 #   res/cve-catalog.yaml
+#   res/binary-lock.yaml   (full GTFOBins coverage, per-host contained flags)
 #   res/canonical-sources.sha256  (--verify only)
 #
 # This script does NOT require root. It does read-only discovery of the
@@ -385,8 +386,10 @@ CATALOG_EOF
 }
 
 # ---------------------------------------------------------------------------
-# 7. Verify mode: SHA-256 manifest of canonical sources
+# 7. Emit binary-lock.yaml (full GTFOBins coverage; see scripts/lib/binary-lock-yaml.sh)
 # ---------------------------------------------------------------------------
+
+source "$SCRIPT_DIR/lib/binary-lock-yaml.sh" || exit 1
 
 emit_verify_manifest() {
     local out="$RES_DIR/canonical-sources.sha256"
@@ -452,6 +455,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "  res/suid-baseline.yaml"
     echo "  res/fcap-baseline.yaml"
     echo "  res/cve-catalog.yaml"
+    echo "  res/binary-lock.yaml  (full GTFOBins coverage, per-host contained flags)"
     echo "==> Dry run complete (no files written)."
     exit 0
 fi
@@ -460,4 +464,5 @@ echo "==> Emitting baselines..."
 emit_suid_baseline
 emit_fcap_baseline
 emit_cve_catalog
+emit_binary_lock
 echo "==> Sync complete."

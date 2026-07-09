@@ -62,8 +62,11 @@ use std::ffi::CString;
 use std::fs;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use nix::unistd::{chown, Gid, Uid};
 
 use crate::{is_sudo, CHILD_PATH, GIT_ORIGINAL_PATH};
 
@@ -342,15 +345,25 @@ fn cpath(path: &Path) -> std::io::Result<CString> {
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "nul byte in path"))
 }
 
+/// chown(2) following symlinks, used only on paths already verified
+/// non-symlink by the caller (lock_dir/lock_file check `meta.is_symlink()`
+/// first and divert symlinks to lchown_root). Uses nix::unistd::chown,
+/// which is safe: no pointer juggling, no raw errno.
 fn chown_root(path: &Path) -> std::io::Result<()> {
-    let c = cpath(path)?;
-    let rc = unsafe { libc::chown(c.as_ptr(), 0, 0) };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    chown(path, Some(Uid::from_raw(0)), Some(Gid::from_raw(0)))
+        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
 }
 
+/// lchown(2) does not follow symlinks: required for symlinks so we chown
+/// the link itself rather than the target. nix has no lchown wrapper as of
+/// 0.29 (nix::unistd::chown follows symlinks, which would chown the wrong
+/// file unnoticed), so this is an irreducible unsafe FFI block.
+// SAFETY: libc::lchown(3) takes a NUL-terminated path string and two
+// numeric ids (0, 0 for root:root). `c` is a valid CString produced from
+// the OsStr bytes of `path`, so c.as_ptr() is a valid NUL-terminated
+// pointer for the duration of the call. lchown does not follow symlinks,
+// so there is no dereference hazard. The return value is the libc errno
+// convention (-1 on error, errno set).
 fn lchown_root(path: &Path) -> std::io::Result<()> {
     let c = cpath(path)?;
     let rc = unsafe { libc::lchown(c.as_ptr(), 0, 0) };
@@ -360,13 +373,13 @@ fn lchown_root(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// chmod(2) using std::fs::set_permissions, which is safe and
+/// symlink-following (matches the prior libc::chmod behaviour). Callers
+/// check `meta.is_symlink()` before calling, so this never operates on a
+/// symlink.
 fn chmod(path: &Path, mode: u32) -> std::io::Result<()> {
-    let c = cpath(path)?;
-    let rc = unsafe { libc::chmod(c.as_ptr(), mode as libc::mode_t) };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    let perms = fs::Permissions::from_mode(mode);
+    fs::set_permissions(path, perms)
 }
 
 /// Return the hardened env overrides that neutralise `.git/config` payloads

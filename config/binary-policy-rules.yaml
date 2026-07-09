@@ -1,0 +1,121 @@
+# config/binary-policy-rules.yaml: full GTFOBins coverage, host-independent.
+#
+# This is the catalog of policy rules for every exploitable binary listed in
+# the GTFOBins universe. It is hand-maintained and reviewed. It NEVER
+# references a host path or a live SUID listing; only `name:` and `tags:`.
+#
+# Rules are walked top-to-bottom; first match wins. A row matches when ALL
+# non-empty matcher fields agree (name AND tags). The catch-all at the end
+# covers every GTFOBins binary without an explicit name rule: a binary that
+# appears on a host with no explicit name rule falls through to the
+# `tags: [suid]` rule and gets `deny-non-root`. This is how the same compiled
+# guard binary is portable across hosts without recompile.
+#
+# sync-gtfobins joins this catalog against the live GTFOBins parse + on-host
+# SUID baseline and emits res/binary-lock.yaml (per-host snapshot with
+# `path:` + `contained:` flags). See SPEC-BINARY-LOCK.md section 2 + 3.
+#
+# Schema:
+#   rules:
+#     - name: <binary basename>          # optional (omit for tag-only catch-all)
+#       tags: [suid, sudo, cap, ...]     # optional; AND-matched with name
+#       policy: <deny-non-root|deny-all-non-root|arg-validate|pass-through>
+#       allow_subcommands: [list]        # for arg-validate; also symlink aliases
+#       allow_self_username: true|false  # passwd-style: argv[1] may be own uid name
+#       reject_patterns:
+#         - kind: flag|regex
+#           flag: "-X"                    # for kind: flag: literal argv token
+#           pattern: "regex"              # for kind: regex: matches joined argv
+#           subcommand: "name"            # optional: gate regex on this subcommand
+#           requires_flags: ["-s"]        # optional: gate regex on these flags present
+#           reason: "CVE-xxxx explanation"
+#       env_sanitise: [LD_PRELOAD, ...]
+
+version: 1
+rules:
+  # --- CVE-specific name rules -------------------------------------------
+  # Binaries with active CVEs get an explicit name rule with arg-validate and
+  # reject patterns encoding the CVE signature.
+
+  - name: sudo
+    tags: [suid, sudo]
+    policy: arg-validate
+    allow_subcommands: [sudo, sudoedit]
+    reject_patterns:
+      - kind: regex
+        subcommand: sudoedit
+        requires_flags: ["-s"]
+        pattern: '\\$'              # any arg ending with backslash, in sudoedit -s
+        reason: "Baron Samedit CVE-2021-3156"
+      - kind: flag
+        flag: "-R"
+        reason: "chroot LPE CVE-2025-32463"
+      - kind: flag
+        flag: "--chroot"
+        reason: "chroot LPE CVE-2025-32463"
+      - kind: flag
+        flag: "--host"
+        reason: "host confusion CVE-2025-32462"
+    env_sanitise:
+      - LD_PRELOAD
+      - LD_LIBRARY_PATH
+      - GCONV_PATH
+      - GLIBC_TUNABLES
+      - SUDO_ASKPASS
+
+  - name: pkexec
+    tags: [suid]
+    policy: deny-all-non-root
+    env_sanitise: [GCONV_PATH, LD_PRELOAD, LD_LIBRARY_PATH]
+
+  - name: passwd
+    tags: [suid]
+    policy: arg-validate
+    allow_subcommands: [passwd]
+    allow_self_username: true
+    reject_patterns:
+      - kind: flag
+        flag: "-S"
+        reason: "status query requires root"
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  # newuidmap / newgidmap are NOT in GTFOBins (they are shadow-utils
+  # binaries) but they carry cap_setuid and are exploitable via user-namespace
+  # delegation. Rule them here so the catalog covers the full privileged
+  # surface, not just GTFOBins.
+  - name: newuidmap
+    tags: []
+    policy: arg-validate
+    allow_subcommands: [newuidmap]
+    validate: subordinate_uid_range
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  - name: newgidmap
+    tags: []
+    policy: arg-validate
+    allow_subcommands: [newgidmap]
+    validate: subordinate_gid_range
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  # --- tag-level catch-all: every suid-tagged binary without an explicit
+  # --- name rule above gets deny-non-root. Covers ~320 GTFOBins SUID entries.
+  - tags: [suid]
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  # --- capability-bearing binaries (not SUID) -----------------------------
+  - tags: [cap]
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  # --- sudo-tagged binaries that are NOT the sudo binary (sudoedit is a
+  # --- symlink handled via allow_subcommands above; any other sudo-tagged
+  # --- entry with no explicit name rule falls here).
+  - tags: [sudo]
+    policy: deny-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
+
+  # --- final default: unknown binaries (no name, no tag match), fail closed.
+  - name: "*"
+    policy: deny-all-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]

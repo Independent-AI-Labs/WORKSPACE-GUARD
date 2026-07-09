@@ -372,7 +372,7 @@ The commit-identity vars `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
 `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`, and `EMAIL`, plus the editor vars
 above (`EDITOR`, `VISUAL`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`), are
 **sudo-gated**: dropped (with an explicit warning, no exit) for non-root and
-passed through only when the guard runs as root (`getuid()==0`).
+passed through only when the guard runs in SUID context (`getauxval(AT_SECURE) != 0`).
 
 ### 5.4 Implementation: Allow-List Approach
 
@@ -396,29 +396,16 @@ let mut envp: Vec<CString> = ALLOWED_VARS
 // Inject safe PATH
 envp.push(CString::new("PATH=/usr/local/bin:/usr/bin:/bin").unwrap());
 
-// execve expects a null-terminated pointer array
-let envp_ptrs: Vec<*const libc::c_char> = envp.iter()
-    .map(|s| s.as_ptr())
-    .chain(std::iter::once(std::ptr::null()))
-    .collect();
-
-let argv_ptrs: Vec<*const libc::c_char> = argv_c.iter()
-    .map(|s| s.as_ptr())
-    .chain(std::iter::once(std::ptr::null()))
-    .collect();
-
-// SAFETY: All pointers are valid null-terminated C strings.
+// nix::unistd::execve is a safe wrapper over execve(2). It takes &CStr
+// slices and constructs the null-terminated pointer arrays internally.
 // execve replaces the process image and does not return on success.
-// (The call site in src/exec.rs wraps this in the required unsafe block.)
-libc::execve(
-    GIT_ORIGINAL_PATH.as_ptr(),
-    argv_ptrs.as_ptr(),
-    envp_ptrs.as_ptr(),
-)
-
-// If execve returns, it failed
-eprintln!("FATAL: execve failed: {}", std::io::Error::last_os_error());
-std::process::exit(3);
+match nix::unistd::execve(git_path, &argv_c, &envp) {
+    Ok(inf) => match inf {},
+    Err(errno) => {
+        eprintln!("FATAL: execve failed: {}", std::io::Error::from_raw_os_error(errno as i32));
+        std::process::exit(3);
+    }
+}
 ```
 
 This approach has two advantages over `remove_var()`:
@@ -493,7 +480,7 @@ Example:
 
 ### 7.2 Log Location
 
-`${HOME}/.workspace-guard.log`: the HOME is the **real user's** home directory (from `getpwuid(getuid())`), not root's home. Since the guard runs as SUID root but the real UID is the invoking user, we must use the real UID to find the correct HOME.
+`${HOME}/.workspace-guard.log`: the HOME is the **real user's** home directory (resolved via `nix::unistd::User::from_uid(getuid())`, a safe wrapper over `getpwuid_r(3)`), not root's home. Since the guard runs as SUID root but the real UID is the invoking user, we must use the real UID to find the correct HOME.
 
 ### 7.3 Secret-Safe Logging
 

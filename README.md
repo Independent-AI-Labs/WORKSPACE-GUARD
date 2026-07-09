@@ -27,7 +27,9 @@ Every instance of the framework applies the same five steps:
    `<path>.original` (git guard) or `<path>.real` (system-binary lockdown),
    mode 0700 `root:root`: unreadable and unexecutable by non-root.
 2. **Install.** Place a compiled Rust shim (git guard, ~1,600 lines, 5
-   modules) or a shell-driven guard layer (system-binary lockdown) at the
+   modules) or a single generic Rust guard binary (system-binary lockdown:
+   one binary compiled once, copied to every contained path, dispatching by
+   `basename(argv[0])` at runtime) at the
    public path, with a minimal set of Linux file capabilities.
 3. **Gate.** Before `execve()` of the real binary, the shim validates the
    full argument vector, intercepted `-c`/`--config` keys, and the
@@ -151,8 +153,9 @@ Every blocked operation is logged to `~/.workspace-guard.log`:
 <timestamp>|<cwd>|git <command>|<reason>|uid=<uid>
 ```
 
-Home directory resolved via `libc::getpwuid()` using the real UID (not
-spoofable `$HOME`). Block messages written to both stderr and `/dev/tty`.
+Home directory resolved via `nix::unistd::User::from_uid(getuid())` (safe
+wrapper over `getpwuid_r(3)`) using the real UID (not spoofable `$HOME`).
+Block messages written to both stderr and `/dev/tty`.
 
 ### Git guard residual risk
 
@@ -173,8 +176,9 @@ Rust) and covers four pillars:
    against the live host (`/proc`, `getcap`). The baseline matches whatever
    binaries are actually installed, not a static snapshot. Emits
    `res/suid-baseline.yaml`, `res/fcap-baseline.yaml`, `res/cve-catalog.yaml`.
-2. **Contain.** Each exploitable binary gets a per-binary guard policy
-   (`config/binary-lock.yaml`) plus a cap allowlist
+2. **Contain.** Every exploitable binary gets a row in the policy rule
+   catalog (`config/binary-policy-rules.yaml`, host-independent, full
+   GTFOBins coverage) plus a cap allowlist
    (`config/cap-allowlist.yaml`) that throttles `CAP_*` to a documented
    minimum. Disposition is **contain-via-guard only**: binaries are never
    purged. The real binary is moved to `<path>.real` and the guard installed
@@ -218,7 +222,8 @@ make sandbox-check      <-- (any user) resolve per-host profile
    contract IDs `REQ-LCK-*`, `REQ-CAP-*`, `REQ-SBX-*`, `REQ-AUD-*`,
    `REQ-SYNC-*`, `REQ-MAKE-*`, `REQ-ART-*`.
 3. [docs/specifications/SPEC-BINARY-LOCK.md](docs/specifications/SPEC-BINARY-LOCK.md):
-   contain-via-guard procedure and per-binary policies.
+   contain-via-guard procedure, full-GTFOBins policy rules catalog, generic
+   guard binary architecture, and codegen boundary.
 4. [docs/specifications/SPEC-CAP-THROTTLE.md](docs/specifications/SPEC-CAP-THROTTLE.md):
    capability allowlist + systemd `CapabilityBoundingSet`.
 5. [docs/specifications/SPEC-AUDIT.md](docs/specifications/SPEC-AUDIT.md):
@@ -315,8 +320,9 @@ make test                                                # Full workspace test s
 9. **Release hardening**: `opt-level=z, lto=true, codegen-units=1,
    panic=abort, strip=true` for smallest attack surface.
 10. **Log symlink protection**: `O_NOFOLLOW` on log opens prevents symlink
-    attacks. **HOME spoofing prevention**: `getpwuid(getuid())`, never
-    `$HOME`. **2-second subprocess timeout** (git guard).
+    attacks. **HOME spoofing prevention**: `User::from_uid(getuid())` (safe
+    `getpwuid_r` wrapper), never `$HOME`. **2-second subprocess timeout**
+    (git guard).
 
 ### Git guard only
 

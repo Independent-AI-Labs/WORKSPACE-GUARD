@@ -21,14 +21,14 @@
 # Exit codes:
 #   0  all lock-surface binaries contained (or already contained)
 #   1  one or more binaries failed containment (rolled back per binary)
-#   2  not root, missing config/binary-lock.yaml, or bad arguments
+#   2  not root, missing res/binary-lock.yaml, or bad arguments
 #   3  chattr binary present but immutable flag could not be applied
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG="$REPO_ROOT/config/binary-lock.yaml"
+CONFIG="$REPO_ROOT/res/binary-lock.yaml"
 STATE_FILE="$REPO_ROOT/res/lock-state.yaml"
 LOG_FILE="/var/log/workspace-binary-guard-install.log"
 
@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             cat <<EOF
 Usage: $0 [--dry-run]
-Apply contain-via-guard per config/binary-lock.yaml (SPEC-BINARY-LOCK 4.1).
+Apply contain-via-guard per res/binary-lock.yaml (SPEC-BINARY-LOCK 4.2).
 Root-only. Seals <path>.real (0700 root:root, chattr +i) and configures
 dpkg-divert. Per-binary Rust guard install is a separate stage.
 Exit: 0 ok, 1 containment failure (rolled back), 2 not root/missing config,

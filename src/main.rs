@@ -2,6 +2,9 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 use std::process;
 
+#[cfg(feature = "root-only")]
+use nix::unistd::geteuid;
+
 mod args;
 mod block;
 mod config_keys;
@@ -50,8 +53,34 @@ mod guard_config {
 
 pub use guard_config::*;
 
+/// Returns true when the guard is executing in secure-execution mode, i.e. the
+/// kernel set the AT_SECURE auxv flag at exec time. This is the correct SUID
+/// detection primitive: AT_SECURE is non-zero whenever euid != ruid OR
+/// egid != rgid at exec (set-user-ID or set-group-ID binary), and zero
+/// otherwise (plain non-SUID exec, whether elevated or not). The prior
+/// `getuid() == 0` heuristic was incorrect: it conflated "running as root"
+/// with "running in SUID context", and returned the wrong answer whenever
+/// root invoked the guard directly or a non-root user ran a non-SUID guard.
+///
+/// The application code uses `is_sudo()` to gate behaviour that must only
+/// fire in the SUID scenario (e.g. removing real-euid disparities, denying
+/// sudo-only config keys). It MUST NOT fire just because euid==0.
 pub fn is_sudo() -> bool {
-    unsafe { libc::getuid() == 0 }
+    aux_secure() != 0
+}
+
+/// Read the AT_SECURE auxv flag set by the kernel at exec(2). No `nix`
+/// wrapper exists for `getauxval` as of nix 0.29, so this is an irreducible
+/// unsafe FFI call.
+// SAFETY: getauxval(3) is a libc function that reads the process auxiliary
+// vector, a kernel-populated in-memory array available at process start.
+// The argument AT_SECURE is a libc integer constant naming a well-known
+// key. The kernel guarantees the auxv is initialised before user code runs
+// and never mutated thereafter. The function returns an unsigned long with
+// no nullability pitfalls. This is the only correct secure-execution
+// detection primitive; the dynamic linker uses the same call internally.
+fn aux_secure() -> usize {
+    unsafe { libc::getauxval(libc::AT_SECURE) as usize }
 }
 
 pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
@@ -103,7 +132,7 @@ fn main() {
 
 #[cfg(feature = "root-only")]
 fn check_privileges() -> Result<(), GuardError> {
-    let euid = unsafe { libc::geteuid() };
+    let euid = geteuid();
     if euid != 0 {
         eprintln!(
             "FATAL: root-only mode requires euid 0 (got {}). \

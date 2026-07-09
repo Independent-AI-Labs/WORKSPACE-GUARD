@@ -4,6 +4,11 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+use nix::sys::resource::{setrlimit, Resource};
+use nix::sys::signal::{kill, Signal};
+use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+use nix::unistd::{getuid, Pid, User};
+
 use crate::{
     args::ArgState, GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT,
     CONTRACT_TIMEOUT_MS, CORE_LIMIT, ENFORCEMENT_CONFIG, GIT_ORIGINAL, NOFILE_LIMIT,
@@ -58,40 +63,23 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
 fn raise_child_dac_override() {}
 
 pub fn set_resource_limits() {
-    unsafe {
-        libc::setrlimit(
-            libc::RLIMIT_NOFILE,
-            &libc::rlimit {
-                rlim_cur: NOFILE_LIMIT,
-                rlim_max: NOFILE_LIMIT,
-            },
-        );
-        libc::setrlimit(
-            libc::RLIMIT_CORE,
-            &libc::rlimit {
-                rlim_cur: CORE_LIMIT,
-                rlim_max: CORE_LIMIT,
-            },
-        );
-    }
+    let _ = setrlimit(Resource::RLIMIT_NOFILE, NOFILE_LIMIT, NOFILE_LIMIT);
+    let _ = setrlimit(Resource::RLIMIT_CORE, CORE_LIMIT, CORE_LIMIT);
 }
 
 fn resolve_safe_home() -> String {
-    let uid = unsafe { libc::getuid() };
-    unsafe {
-        let pwd = libc::getpwuid(uid);
-        if !pwd.is_null() {
-            let dir = (*pwd).pw_dir;
-            if !dir.is_null() {
-                if let Ok(s) = CStr::from_ptr(dir).to_str() {
-                    if !s.is_empty() {
-                        return s.to_string();
-                    }
-                }
+    let uid = getuid();
+    match User::from_uid(uid) {
+        Ok(Some(user)) => {
+            let s = user.dir.to_string_lossy().to_string();
+            if !s.is_empty() {
+                s
+            } else {
+                "/".to_string()
             }
         }
+        _ => "/".to_string(),
     }
-    "/".to_string()
 }
 
 fn verify_git_original() -> Result<(), GuardError> {
@@ -222,37 +210,53 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
         }
     }
 
-    let mut argv_ptrs: Vec<*const libc::c_char> = argv_c.iter().map(|s| s.as_ptr()).collect();
-    argv_ptrs.push(std::ptr::null());
-    let mut envp_ptrs: Vec<*const libc::c_char> = envp.iter().map(|s| s.as_ptr()).collect();
-    envp_ptrs.push(std::ptr::null());
-
-    let pid = unsafe { libc::fork() };
+    let pid;
+    // SAFETY: libc::fork is an irreducible async-signal-safe primitive with no
+    // safe nix substitute that preserves the exact fork-without-atfork-handler
+    // semantics the guard depends on. Any allocation or lock acquisition between
+    // fork and exec would be a defect; the only calls in the child below are
+    // raise_child_dac_override() (caps syscalls), nix::execve (execve(2)), and
+    // libc::_exit, all async-signal-safe.
+    unsafe {
+        pid = libc::fork();
+    }
     match pid {
         -1 => Err(GuardError::GitOriginalMissing),
         0 => {
             raise_child_dac_override();
+            let _ = nix::unistd::execve(git_path, &argv_c, &envp);
+            // SAFETY: libc::_exit is the only async-signal-safe exit path;
+            // std::process::exit and Drop runtimes are forbidden in the
+            // post-fork child. nix has no _exit wrapper.
             unsafe {
-                libc::execve(git_path.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
                 libc::_exit(3);
             }
         }
         _ => {
-            let mut status: libc::c_int = 0;
-            unsafe {
-                libc::waitpid(pid, &mut status, 0);
+            let child_pid = Pid::from_raw(pid);
+            match waitpid(child_pid, None) {
+                Ok(WaitStatus::Exited(_, code)) => {
+                    #[cfg(feature = "capability-mode")]
+                    {
+                        crate::gitdir::lock();
+                    }
+                    std::process::exit(code);
+                }
+                Ok(WaitStatus::Signaled(_, sig, _)) => {
+                    #[cfg(feature = "capability-mode")]
+                    {
+                        crate::gitdir::lock();
+                    }
+                    std::process::exit(128 + sig as i32);
+                }
+                _ => {
+                    #[cfg(feature = "capability-mode")]
+                    {
+                        crate::gitdir::lock();
+                    }
+                    std::process::exit(1);
+                }
             }
-            #[cfg(feature = "capability-mode")]
-            {
-                crate::gitdir::lock();
-            }
-            if libc::WIFEXITED(status) {
-                std::process::exit(libc::WEXITSTATUS(status));
-            }
-            if libc::WIFSIGNALED(status) {
-                std::process::exit(128 + libc::WTERMSIG(status));
-            }
-            std::process::exit(1);
         }
     }
 }
@@ -304,24 +308,25 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         .spawn()
         .map_err(|e| GuardError::ContractFailed(format!("Failed to run contract check: {}", e)))?;
 
-    let pid = child.id() as libc::pid_t;
+    let pid = Pid::from_raw(child.id() as i32);
     let mut stderr_pipe = child.stderr;
 
-    let mut status: libc::c_int = 0;
+    let mut final_status: WaitStatus = WaitStatus::StillAlive;
     let timeout_ms = CONTRACT_TIMEOUT_MS;
-    unsafe {
+    {
         let mut elapsed: u64 = 0;
         loop {
-            let ret = libc::waitpid(pid, &mut status, libc::WNOHANG);
-            if ret == pid {
-                break;
-            }
-            if ret < 0 {
-                break;
+            match waitpid(Some(pid), Some(WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::StillAlive) => {}
+                Ok(s) => {
+                    final_status = s;
+                    break;
+                }
+                Err(_) => break,
             }
             if elapsed >= timeout_ms {
-                libc::kill(pid, libc::SIGKILL);
-                libc::waitpid(pid, &mut status, 0);
+                let _ = kill(pid, Some(Signal::SIGKILL));
+                let _ = waitpid(Some(pid), None);
                 eprintln!(
                     "WARNING: WORKSPACE-CI contract check timed out after {}ms: skipping",
                     timeout_ms
@@ -333,7 +338,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         }
     }
 
-    if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
+    if let WaitStatus::Exited(_, 0) = final_status {
         return Ok(());
     }
 

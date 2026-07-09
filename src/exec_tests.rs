@@ -134,18 +134,27 @@ fn is_guard_binary_detects_sentinel() {
 
 #[test]
 fn fork_child_clears_and_exits() {
+    // SAFETY: libc::fork is exercised here intentionally so the test suite
+    // hits the exact same async-signal-safe FFI the production exec path
+    // uses (see src/exec.rs). No allocations occur between fork and exit
+    // in the child branch.
     let pid = unsafe { libc::fork() };
     assert!(pid >= 0, "fork should succeed");
     if pid == 0 {
         raise_child_dac_override();
-        std::process::exit(0);
-    } else {
-        let mut status: libc::c_int = 0;
+        // SAFETY: libc::_exit is the only async-signal-safe exit path; using
+        // std::process::exit here would run Drop handlers and could deadlock
+        // on malloc locks held across fork. nix has no _exit wrapper.
         unsafe {
-            libc::waitpid(pid, &mut status, 0);
+            libc::_exit(0);
         }
-        assert!(libc::WIFEXITED(status));
-        assert_eq!(libc::WEXITSTATUS(status), 0);
+    } else {
+        match nix::sys::wait::waitpid(nix::unistd::Pid::from_raw(pid), None) {
+            Ok(nix::sys::wait::WaitStatus::Exited(_, code)) => {
+                assert_eq!(code, 0);
+            }
+            other => panic!("unexpected wait status: {:?}", other),
+        }
     }
 }
 

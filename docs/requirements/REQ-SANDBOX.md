@@ -103,11 +103,15 @@ The threat model and CVE catalog that these requirements defend against are in
 
 ### 1.5 Per-Binary Policy
 
-- **REQ-LCK-040**: Each contained binary shall have a policy entry in
-  `config/binary-lock.yaml` specifying: binary path, guard behavior (deny-all
-  for non-root, allow-specific-subcommands, pass-through), environment
-  sanitisation list, and audit-log fields. The schema is defined in
-  [SPEC-BINARY-LOCK](../specifications/SPEC-BINARY-LOCK.md) section 5.
+- **REQ-LCK-040**: Every exploitable binary (full GTFOBins coverage) shall
+  have a rule in `config/binary-policy-rules.yaml` (host-independent:
+  name + tags keyed, first-match-wins) and a generated entry in
+  `res/binary-lock.yaml` (per-host snapshot with `path` + `contained` flag)
+  specifying: binary name, tags, guard behavior (deny-all for non-root,
+  allow-specific-subcommands, pass-through), environment sanitisation list,
+  and audit-log fields. One generic guard binary is compiled from the
+  generated table; no per-binary build target exists. The schema is defined
+  in [SPEC-BINARY-LOCK](../specifications/SPEC-BINARY-LOCK.md) section 5.
 - **REQ-LCK-041**: The default policy for a contained binary with no
   documented unprivileged use is **deny-all for non-root**: the guard exits 2
   for any non-root invocation and execs the real binary for root.

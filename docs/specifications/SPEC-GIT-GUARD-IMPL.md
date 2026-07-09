@@ -27,28 +27,69 @@ A single package is preferred over multiple crates for a single guard binary.
 
 ```toml
 [dependencies]
-libc = "0.2"    # for getauxval, execve, stat, getpwuid, prctl
+libc = "0.2"    # irreducible FFI: getauxval, fork, _exit, lchown (no nix wrappers)
+nix = "0.29"    # safe wrappers for everything else (user/process/signal/resource/fs)
 ```
 
-No other dependencies. Argument parsing is manual. No `clap`, no `thiserror`, no `anyhow`. The standard library is sufficient.
+`nix` is an always-on dependency (not feature-gated) with `default-features = false`
+and features `["user", "process", "signal", "resource", "fs"]`. Argument parsing
+is manual. No `clap`, no `thiserror`, no `anyhow`. The standard library is
+sufficient. `libc` is kept ONLY for the four irreducible FFI calls that have no
+safe `nix` substitute (see §8.3).
 
 ### 8.3 Unsafe Blocks
 
-Only two FFI sites need the `unsafe` gate (their call-site blocks live in `src/exec.rs`; the snippets below show the raw FFI signatures without the gating block):
+Only **four** FFI sites in production code require the `unsafe` gate. Every
+other syscall goes through a safe `nix` wrapper or `std`. Each unsafe block
+carries a `// SAFETY:` comment explaining why it cannot be made safe.
 
-1. **`getauxval(AT_SECURE)`**: libc FFI call:
+| # | File | Call | Why irreducible |
+|---|------|------|-----------------|
+| 1 | `src/main.rs` | `libc::getauxval(AT_SECURE)` | No `nix` wrapper; only correct SUID-context detection primitive |
+| 2 | `src/exec.rs` | `libc::fork` | Async-signal-safety hazard; no safe substitute preserves fork-without-atfork-handler semantics |
+| 3 | `src/exec.rs` | `libc::_exit` | Only async-signal-safe exit path; `std::process::exit` and Drop runtimes are forbidden post-fork; no `nix` wrapper |
+| 4 | `src/gitdir.rs` | `libc::lchown` | `nix::unistd::chown` follows symlinks (would chown the wrong file); no `nix::lchown` wrapper as of 0.29 |
+
+The test module `src/exec_tests.rs` keeps raw `libc::fork` + `libc::_exit` so
+the suite exercises the exact FFI the production path uses (decision: tests
+mirror prod FFI, not nix wrappers).
+
+The call-site snippets (without the gating blocks):
+
+1. **`getauxval(AT_SECURE)`** in `src/main.rs`:
    ```rust
-   // SAFETY: getauxval is a standard libc function. AT_SECURE is a valid
-   // auxiliary vector key defined by the ELF ABI. Returns 0 if not found.
-   libc::getauxval(libc::AT_SECURE)
+   // SAFETY: getauxval(3) reads the process auxiliary vector, a
+   // kernel-populated in-memory array available at process start and never
+   // mutated thereafter. AT_SECURE is a libc integer constant naming a
+   // well-known key. This is the only correct secure-execution detection
+   // primitive; the dynamic linker uses the same call internally.
+   unsafe { libc::getauxval(libc::AT_SECURE) as usize }
    ```
 
-2. **`execve()`**: libc FFI call with C strings:
+2. **`fork()`** in `src/exec.rs`:
    ```rust
-   // SAFETY: git_path, argv_c, and envp_c are all valid null-terminated
-   // CStrings. Their pointers remain valid for the duration of the call.
-   // execve does not return on success.
-   libc::execve(git_path.as_ptr(), argv_ptr, envp_ptr)
+   // SAFETY: libc::fork is an irreducible async-signal-safe primitive with
+   // no safe nix substitute. No allocations or lock acquisitions occur
+   // between fork and exec; the only calls in the child are
+   // raise_child_dac_override() (caps syscalls), nix::execve (execve(2)),
+   // and libc::_exit, all async-signal-safe.
+   let pid = unsafe { libc::fork() };
+   ```
+
+3. **`_exit()`** in `src/exec.rs`:
+   ```rust
+   // SAFETY: libc::_exit is the only async-signal-safe exit path;
+   // std::process::exit and Drop runtimes are forbidden in the post-fork
+   // child. nix has no _exit wrapper.
+   unsafe { libc::_exit(3); }
+   ```
+
+4. **`lchown()`** in `src/gitdir.rs`:
+   ```rust
+   // SAFETY: libc::lchown(3) takes a NUL-terminated path string and two
+   // numeric ids. `c` is a valid CString from the OsStr bytes of `path`.
+   // lchown does not follow symlinks, so there is no dereference hazard.
+   let rc = unsafe { libc::lchown(c.as_ptr(), 0, 0) };
    ```
 
 ### 8.4 Cargo.toml
@@ -68,6 +109,7 @@ strip = true           # strip symbols
 
 [dependencies]
 libc = "0.2"
+nix = { version = "0.29", default-features = false, features = ["user", "process", "signal", "resource", "fs"] }
 ```
 
 ### 8.5 Build Target
@@ -76,7 +118,7 @@ Primary target: `x86_64-unknown-linux-musl` (statically linked).
 
 Static linking eliminates shared library injection vectors: there are no `.so` files to preload or replace. The binary is fully self-contained.
 
-If musl toolchain is unavailable, fall back to `x86_64-unknown-linux-gnu` (dynamically linked). In that case, only `libc` and the musl-compatible minimal set of libraries are linked.
+If musl toolchain is unavailable, fall back to `x86_64-unknown-linux-gnu` (dynamically linked). In that case, only `libc`, `nix`'s transitive deps (`bitflags`, `cfg-if`), and the musl-compatible minimal set of libraries are linked.
 
 ### 8.6 Resource Limits
 
@@ -84,7 +126,7 @@ Before `execve()`, the guard sets:
 - `RLIMIT_NOFILE` to 256: limits open file descriptors
 - `RLIMIT_CORE` to 0: disables core dumps (prevents memory disclosure from SUID context)
 
-Set via `libc::prctl()` and `libc::setrlimit()`.
+Set via `nix::sys::resource::setrlimit()` (safe wrapper over `setrlimit(2)`).
 
 ### 8.7 Error Handling Strategy
 
