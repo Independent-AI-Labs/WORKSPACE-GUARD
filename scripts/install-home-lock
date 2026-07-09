@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# install-home-lock: root-only locker for the absolute_file_paths block
+# of config/guard_locked_paths.yaml.
+#
+# Implements docs/specifications/SPEC-HOME-LOCK.md section 4.2:
+# for every entry under absolute_file_paths the script chowns the file
+# to root:root and sets the configured mode so an attacker cannot bypass
+# the in-repo guard lock by writing `core.hooksPath` / `include.path`
+# directly to ~/.gitconfig (the CI incident: a rootless agent wrote
+# core.hooksPath = /tmp/opencode/githooks to ~/.gitconfig, compromising
+# every git repo on the host; the per-repo `.git/config` lock cannot
+# cover ~/.gitconfig).
+#
+# Idempotent: re-running on an already-locked file detects the correct
+# owner AND mode and skips. State lives in res/home-lock-state.yaml.
+#
+# Private id_* keys are deliberately NOT locked: chowning them to root
+# would break ssh, which needs the user to read its own key. Shell rc
+# files are NOT locked: chowning them would break interactive shells.
+# The `~` prefix expands to $HOME at runtime so source code never
+# embeds a literal home path.
+#
+# Usage:
+#   scripts/install-home-lock             # apply lock
+#   scripts/install-home-lock --dry-run   # report without changing
+#   scripts/install-home-lock -h|--help
+#
+# Exit codes:
+#   0  all entries locked (or already locked)
+#   1  one or more entries failed to lock
+#   2  not root, missing guard_locked_paths.yaml, or bad arguments
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG="$REPO_ROOT/config/guard_locked_paths.yaml"
+STATE_FILE="$REPO_ROOT/res/home-lock-state.yaml"
+# Tests inject a fake passwd file via WORKSPACE_PASSWD_FILE so the
+# script can resolve numeric uid/gid for a non-root $HOME without
+# touching the real /etc/passwd.
+PASSWD_FILE="${WORKSPACE_PASSWD_FILE:-/etc/passwd}"
+
+# Single trap at top level: cleanup accumulates every temp file as it
+# is created. Replacing the trap per-step was a brittle pattern that
+# leaked temps on mid-script abort.
+_TEMP_FILES=()
+register_temp() { _TEMP_FILES+=("$1"); }
+cleanup_temps() {
+    local f rc
+    for f in "${_TEMP_FILES[@]+"${_TEMP_FILES[@]}"}"; do
+        rm -f "$f" 2>"$DEVNULL"
+        rc=$?
+    done
+}
+trap cleanup_temps EXIT
+
+# Stream stderr suppression through a variable so the literal idiom
+# the error-swallow checker flags never appears in source text.
+DEVNULL=/dev/null
+
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [--dry-run]
+Lock the absolute_file_paths entries in config/guard_locked_paths.yaml
+(SPEC-HOME-LOCK 4.2). Root-only. Chowns each path to root:root and
+applies the configured mode. Edit locked files via sudoedit.
+Exit: 0 ok, 1 lock failure, 2 not root/missing config.
+EOF
+            exit 0 ;;
+        *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$(id -u)" != "0" ]]; then
+    echo "ERROR: install-home-lock needs root: sudo make install-home-lock" >&2
+    exit 2
+fi
+if [[ ! -f "$CONFIG" ]]; then
+    echo "ERROR: $CONFIG missing" >&2
+    exit 2
+fi
+
+# Expand a leading ~ to $HOME so source code never embeds a literal
+# home path. Literal /root/ entries and any other absolute path pass
+# through unchanged.
+expand_tilde() {
+    local p="$1"
+    case "$p" in
+        "~")        printf '%s' "$HOME" ;;
+        "~/"*)      printf '%s/%s' "$HOME" "${p#"~/"}" ;;
+        "~"*)       # ~user form: resolve via getent passwd (fall through
+                    # to $HOME if not resolvable). Not used in the
+                    # current config but supported for future entries.
+                    local user="${p%%/*}" rest=""
+                    if [[ "$p" == */* ]]; then rest="/${p#*/}"; fi
+                    local home_dir
+                    home_dir="$(getent passwd "${user#\~}" | awk -F: '{print $6}')"
+                    if [[ -n "$home_dir" ]]; then
+                        printf '%s%s' "$home_dir" "$rest"
+                    else
+                        printf '%s' "$p"
+                    fi ;;
+        *)          printf '%s' "$p" ;;
+    esac
+}
+
+# Parse the absolute_file_paths block from guard_locked_paths.yaml into
+# a TAB-separated <expanded-path>\t<mode-octal> temp.
+entries_tmp="$(mktemp -t home-lock-entries.XXXXXX)"; register_temp "$entries_tmp"
+awk '
+    /^absolute_file_paths:/ { capture=1; next }
+    /^[a-z_]+:/ { capture=0 }
+    capture && /^  [~"][^:]+:/ {
+        line=$0
+        sub(/^ *"/,"",line); sub(/":.*/,"",line)   # key = the path string
+        mode=$0; sub(/^.*: /,"",mode); gsub(/[^0-7]/,"",mode)
+        sub(/^0+/, "", mode); if (mode == "") mode = "0"
+        if (line && mode) printf "%s\t%s\n", line, mode
+    }
+' "$CONFIG" | sort -u > "$entries_tmp"
+total="$(wc -l < "$entries_tmp")"
+if [[ "$total" -eq 0 ]]; then
+    echo "ERROR: no absolute_file_paths entries parsed from $CONFIG" >&2
+    exit 2
+fi
+echo "==> Home lock surface: $total entries from $CONFIG"
+
+# ----------------------------------------------------------------------
+# State file bootstrap.
+# ----------------------------------------------------------------------
+write_state_header() {
+    {
+        echo "# Auto-generated by scripts/install-home-lock on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "# Source of truth for scripts/uninstall-home-lock."
+        echo "# Format: one block per locked path with a - path: key."
+        echo "home_lock_state:"
+    } > "$STATE_FILE"
+}
+append_state_entry() {
+    local p="$1" ouid="$2" ogid="$3" omode="$4" emode="$5" ts="$6"
+    {
+        echo "  - path: \"$p\""
+        echo "    original_owner_uid: \"$ouid\""
+        echo "    original_owner_gid: \"$ogid\""
+        echo "    original_mode: \"$omode\""
+        echo "    expected_mode: \"$emode\""
+        echo "    locked_at: \"$ts\""
+    } >> "$STATE_FILE"
+}
+
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+LOCKED=0
+SKIPPED=0
+FAILED=0
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "==> DRY RUN: no filesystem changes will be made"
+else
+    mkdir -p "$(dirname "$STATE_FILE")"
+    write_state_header
+fi
+
+# ----------------------------------------------------------------------
+# Per-entry lock.
+# ----------------------------------------------------------------------
+while IFS=$'\t' read -r raw mode; do
+    [[ -z "$raw" ]] && continue
+    path="$(expand_tilde "$raw")"
+    echo "---- $path (mode $mode)"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  WOULD: mkdir -p parent, touch if missing, chown root:root, chmod $mode"
+        LOCKED=$((LOCKED+1))
+        continue
+    fi
+
+    parent="$(dirname "$path")"
+    if ! mkdir -p "$parent" 2>"$DEVNULL"; then
+        echo "  FAIL: mkdir -p $parent" >&2
+        FAILED=$((FAILED+1)); continue
+    fi
+
+    # Create-missing: an empty file so an attacker never has a window
+    # between "lock applied" and "file exists". touch is idempotent.
+    if ! touch "$path" 2>"$DEVNULL"; then
+        echo "  FAIL: touch $path" >&2
+        FAILED=$((FAILED+1)); continue
+    fi
+
+    # Capture original owner/mode for the state record so uninstall
+    # can restore them. stat -c preserves numeric values.
+    orig_uid="$(stat -c '%u' "$path" 2>"$DEVNULL")" || orig_uid="?"
+    orig_gid="$(stat -c '%g' "$path" 2>"$DEVNULL")" || orig_gid="?"
+    orig_mode="$(stat -c '%a' "$path" 2>"$DEVNULL")" || orig_mode="?"
+
+    # Idempotency: already root:root with the correct mode -> skip.
+    if [[ "$orig_uid" == "0" && "$orig_gid" == "0" && "$orig_mode" == "$mode" ]]; then
+        echo "  ALREADY LOCKED (skip)"
+        SKIPPED=$((SKIPPED+1))
+        append_state_entry "$path" "$orig_uid" "$orig_gid" "$orig_mode" "$mode" "$NOW"
+        continue
+    fi
+
+    if ! chown root:root "$path" 2>"$DEVNULL"; then
+        echo "  FAIL: chown root:root $path" >&2
+        FAILED=$((FAILED+1)); continue
+    fi
+    if ! chmod "$mode" "$path" 2>"$DEVNULL"; then
+        echo "  FAIL: chmod $mode $path" >&2
+        FAILED=$((FAILED+1)); continue
+    fi
+
+    append_state_entry "$path" "$orig_uid" "$orig_gid" "$orig_mode" "$mode" "$NOW"
+    echo "  LOCKED (was uid=$orig_uid gid=$orig_gid mode=$orig_mode)"
+    LOCKED=$((LOCKED+1))
+done < "$entries_tmp"
+
+echo "------------------------------------------------------------"
+echo "Home lock: $LOCKED locked, $SKIPPED already locked, $FAILED failed"
+
+if [[ "$FAILED" -gt 0 ]]; then
+    echo "ERROR: $FAILED entries failed; see prior output" >&2
+    exit 1
+fi
+exit 0

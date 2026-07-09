@@ -225,6 +225,30 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 	@test -x scripts/uninstall-lock-runtime && bash scripts/uninstall-lock-runtime \
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
+.PHONY: install-home-lock
+install-home-lock: ## Lock the absolute_file_paths entries in config/guard_locked_paths.yaml (ROOT)
+	@if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: install-home-lock needs root: sudo make install-home-lock" >&2; exit 1; \
+	fi
+	@test -x scripts/install-home-lock && bash scripts/install-home-lock \
+		|| { echo "NOTICE: scripts/install-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
+
+.PHONY: uninstall-home-lock
+uninstall-home-lock: ## Rollback home lock: restore original owner/mode per res/home-lock-state.yaml (ROOT)
+	@if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: uninstall-home-lock needs root: sudo make uninstall-home-lock" >&2; exit 1; \
+	fi
+	@test -x scripts/uninstall-home-lock && bash scripts/uninstall-home-lock \
+		|| { echo "NOTICE: scripts/uninstall-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
+
+.PHONY: home-drift-check
+home-drift-check: ## Compare live home-lock surface against res/home-lock-state.yaml; exit 1 on CRITICAL
+	bash scripts/home-drift-check
+
+.PHONY: home-drift-check-quiet
+home-drift-check-quiet: ## Same as home-drift-check but stdout only on CRITICAL
+	bash scripts/home-drift-check --quiet
+
 .PHONY: install-auditd
 install-auditd: ## Install auditd rules + generated per-binary execve watches (ROOT)
 	@if [ "$$(id -u)" != "0" ]; then \

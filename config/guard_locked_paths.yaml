@@ -12,15 +12,28 @@
 #                            hook files under hooks/ → 0o755.
 #   individual_file_paths  : individual file paths (relative to repo root)
 #                            to lock with an explicit mode (octal).
-#   recursive_tree_glob_patterns : directory-name glob patterns. Every
+#   recursive_tree_glob_patterns : directory-name glob patterns.  Every
 #                                  directory in the repo tree whose name
 #                                  matches is recursively locked.
-#                                  Dirs → 0o755, files → 0o644.
+#                                  Dirs -> 0o755, files -> 0o644.
 #   individual_file_paths  : individual file paths (relative to repo root)
 #                            to lock with an explicit mode (octal).
 #   glob_patterns          : filename-only glob patterns. Every file in the
 #                            repo tree whose name matches is locked with
 #                            the given mode (octal).
+#   absolute_file_paths    : absolute paths (with an optional leading ~ for
+#                            the current user $HOME, or a literal /root/ path
+#                            for root) of files OUTSIDE the repo tree that
+#                            the home-lock program (scripts/install-home-
+#                            lock) chowns to root:root and mode-sets so an
+#                            attacker cannot bypass the in-repo lock via a
+#                            direct file write to ~/.gitconfig /
+#                            ~/.ssh/config / authorized_keys. Private id_*
+#                            keys and shell rc files are deliberately NOT
+#                            listed here: chowning them would break ssh and
+#                            interactive shells. Edit via `sudoedit <path>`
+#                            (root owns them; root reads and writes them
+#                            directly, no unlock/relock dance required).
 
 version: 1
 
@@ -35,3 +48,13 @@ individual_file_paths:
 
 glob_patterns:
   "*_exceptions.yaml": 0o644
+
+absolute_file_paths:
+  "~/.gitconfig": 0o644
+  "~/.config/git/config": 0o644
+  "~/.gitconfig.local": 0o644
+  "~/.ssh/authorized_keys": 0o600
+  "~/.ssh/config": 0o644
+  "/root/.gitconfig": 0o644
+  "/root/.ssh/authorized_keys": 0o600
+  "/root/.ssh/config": 0o644

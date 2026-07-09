@@ -29,3 +29,9 @@ fields:
     type: map<string,integer>
     required: true
     description: "Filename-only glob patterns. Every file in the repo tree whose name matches the pattern is locked with the given octal mode. Key = glob pattern, value = octal mode (e.g. 0o644)."
+
+  - path: absolute_file_paths
+    type: map<string,integer>
+    required: false
+    default: "{}"
+    description: "Absolute paths (with an optional leading ~ for the current user $HOME, or a literal /root/ path for root) of files OUTSIDE the repo tree that the home-lock program chowns to root:root and mode-sets. Covers ~/.gitconfig, ~/.config/git/config, ~/.gitconfig.local, ~/.ssh/authorized_keys, ~/.ssh/config, plus /root/ equivalents. Private id_* keys and shell rc files are deliberately NOT listed. Key = absolute or ~ -prefixed path, value = octal mode (e.g. 0o644 for gitconfig, 0o600 for authorized_keys)."

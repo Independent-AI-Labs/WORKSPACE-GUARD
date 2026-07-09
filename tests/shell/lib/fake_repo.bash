@@ -20,6 +20,9 @@ copy_real_scripts() {
     mkdir -p "$dir/scripts/lib"
     cp "$GUARD_ROOT/scripts/sync-gtfobins"        "$dir/scripts/sync-gtfobins"
     cp "$GUARD_ROOT/scripts/suid-drift-check"     "$dir/scripts/suid-drift-check"
+    cp "$GUARD_ROOT/scripts/install-home-lock"    "$dir/scripts/install-home-lock"
+    cp "$GUARD_ROOT/scripts/uninstall-home-lock"  "$dir/scripts/uninstall-home-lock"
+    cp "$GUARD_ROOT/scripts/home-drift-check"     "$dir/scripts/home-drift-check"
     cp "$GUARD_ROOT/scripts/regen-gitleaksignore" "$dir/scripts/regen-gitleaksignore"
     cp "$GUARD_ROOT/scripts/install-lock-runtime" "$dir/scripts/install-lock-runtime"
     cp "$GUARD_ROOT/scripts/uninstall-lock-runtime" "$dir/scripts/uninstall-lock-runtime"
@@ -133,4 +136,54 @@ fake_konstruktoid_list() {
     local file="$1"; shift
     mkdir -p "$(dirname "$file")"
     printf '%s\n' "$@" > "$file"
+}
+
+# Copy config/guard_locked_paths.yaml into the fake repo so install-
+# home-lock can read the absolute_file_paths block. Also copies the
+# real config dir if absent. Tests can later overwrite the YAML.
+copy_real_locked_paths() {
+    local dir="$1"
+    mkdir -p "$dir/config"
+    cp "$GUARD_ROOT/config/guard_locked_paths.yaml" "$dir/config/" 2>"$DEVNULL" || true
+}
+
+# Write a minimal fake /etc/passwd file at $1 with one user row. The
+# row maps the user's home dir so install-home-lock straceability
+# tests under WORKSPACE_PASSWD_FILE get a deterministic uid/gid. Most
+# tests just need a fake passwd that exists; the install-home-lock
+# script does not actually read /etc/passwd for the chown path
+# (chown root:root is unconditional), but the env var is reserved
+# for future entries that may need ~user resolution.
+fake_passwd() {
+    local file="$1"; shift
+    local user="${1:-agent}" uid="${2:-1000}" gid="${3:-1000}" home="${4:-$TEST_TMPDIR/fakehome}"
+    mkdir -p "$(dirname "$file")"
+    {
+        echo "root:x:0:0:root:$home:/bin/bash"
+        echo "$user:x:$uid:$gid:$user:$home:/bin/bash"
+    } > "$file"
+}
+
+# Materialize a fake home tree at $1 with empty .gitconfig, .ssh/,
+# .config/git/ files. Non-existent paths become empty files so install-
+# home-lock's create-missing branch can be exercised by tests that
+# delete the tree first.
+fake_home_tree() {
+    local dir="$1"
+    mkdir -p "$dir/.ssh" "$dir/.config/git"
+    touch "$dir/.gitconfig" "$dir/.gitconfig.local" \
+          "$dir/.config/git/config" \
+          "$dir/.ssh/authorized_keys" "$dir/.ssh/config"
+}
+
+# Assert $1 (state file) has a path entry for $2 with the given mode.
+# Returns 0/1 (no output) so tests can `[ assert_home_state_entry ... ]`.
+assert_home_state_entry() {
+    local state="$1" path="$2" mode="${3:-}"
+    [ -f "$state" ] || return 1
+    grep -q "path: \"$path\"" "$state" || return 1
+    if [ -n "$mode" ]; then
+        grep -q "expected_mode: \"$mode\"" "$state" || return 1
+    fi
+    return 0
 }

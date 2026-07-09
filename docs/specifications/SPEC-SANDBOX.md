@@ -411,3 +411,6 @@ This spec implements the sandbox row of the defense-in-depth map from
 3. [REQ-SANDBOX](../requirements/REQ-SANDBOX.md) section 3: REQ-SBX-* requirements
 4. [SPEC-CAP-THROTTLE](SPEC-CAP-THROTTLE.md) section 6: systemd CapabilityBoundingSet
 5. [SPEC-AUDIT](SPEC-AUDIT.md): auditd and drift detection
+6. [SPEC-HOME-LOCK](SPEC-HOME-LOCK.md): home-dir chown lock (closes the
+   direct-file-write vector that bypasses the `git config` command
+   intercept)

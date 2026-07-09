@@ -573,6 +573,7 @@ contain secrets are replaced with `...`.
 | New SUID binary added by apt upgrade | dpkg-divert + apt hook | Partial: hook warns but does not auto-contain. |
 | SGID binaries not contained | drift checker monitors | Documented: future extension. |
 | Kernel exploit via SUID binary (not in guard logic) | seccomp + cap drop in sandbox | Full when sandboxed. |
+| Direct file write to `~/.gitconfig` (bypass `git config` intercept) | [SPEC-HOME-LOCK](SPEC-HOME-LOCK.md): home-dir chown lock | Full when `make install-home-lock` has run. |
 
 ---
 

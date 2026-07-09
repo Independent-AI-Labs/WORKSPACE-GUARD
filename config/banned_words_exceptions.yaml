@@ -73,3 +73,12 @@ exceptions:
   #    the regex anchors to the directory so no other file is covered.
   - pattern: '.*'
     paths: ['^docs/references/']
+
+  # 7. SPEC-HOME-LOCK.md example drift/state YAML output uses
+  #    `/home/alice/...` placeholders to show what a real home-lock
+  #    state row looks like. The paths in those examples are not
+  #    source code literals; they are illustrative snapshots. Adding
+  #    this exception to the /home/ rule keeps the example readable
+  #    without weakening the rule for actual scripts and Rust source.
+  - pattern: '/home/'
+    paths: ['docs/specifications/SPEC-HOME-LOCK.md', 'docs/requirements/REQ-HOME-LOCK.md']

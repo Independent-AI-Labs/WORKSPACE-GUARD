@@ -441,3 +441,49 @@ fn fcap_baseline_paths_are_absolute_and_unique() {
         assert!(seen.insert(p), "duplicate fcap path: {p}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// config/guard_locked_paths.yaml absolute_file_paths (home-lock surface)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn home_lock_paths_parses() {
+    let _ = load_yaml("config/guard_locked_paths.yaml");
+}
+
+#[test]
+fn home_lock_paths_are_absolute_or_tilde_prefixed() {
+    let doc = load_yaml("config/guard_locked_paths.yaml");
+    let map = doc
+        .get("absolute_file_paths")
+        .and_then(|v| v.as_mapping())
+        .unwrap_or_else(|| panic!("absolute_file_paths is a mapping"));
+    assert!(!map.is_empty(), "absolute_file_paths is empty");
+    for (k, _v) in map {
+        let p = k.as_str().expect("key is a string");
+        assert!(
+            p.starts_with('/') || p.starts_with('~'),
+            "home-lock path is neither absolute nor ~ -prefixed: {p}"
+        );
+    }
+}
+
+#[test]
+fn home_lock_modes_are_in_valid_range() {
+    let doc = load_yaml("config/guard_locked_paths.yaml");
+    let map = doc
+        .get("absolute_file_paths")
+        .unwrap()
+        .as_mapping()
+        .unwrap();
+    for (_k, v) in map {
+        let mode = v
+            .as_u64()
+            .or_else(|| v.as_i64().map(|i| i as u64))
+            .unwrap_or_else(|| panic!("mode is an integer: {:?}", v));
+        assert!(
+            (0o400..=0o777).contains(&mode),
+            "home-lock mode {mode:o} outside [0o400,0o777]"
+        );
+    }
+}

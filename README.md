@@ -8,15 +8,16 @@ The shim validates arguments, configuration keys, and environment before
 The same pattern applies to every privileged entry point on the box, not just
 one tool.
 
-Two programs ship in this repo today:
+Three programs ship in this repo today:
 
 | Program | Target surface | State |
 |---------|----------------|-------|
 | **Git Guard** (Program I) | `/usr/bin/git` only | Built, deployed, tested (90 unit + 3 integration tests) |
 | **System-Binary Lockdown + Sandbox + Audit** (Program II) | Full GTFOBins SUID + file-capability catalog | Baselines, specs, sync + drift scripts, config artifacts; runtime install pending |
+| **Home-Dir Lock** (Program III) | `~/.gitconfig`, `~/.config/git/config`, `~/.ssh/config`, `~/.ssh/authorized_keys`, `/root/*` | Scripts + bats suite (34 tests) + 3 Rust consistency tests; runtime install pending |
 
-Both programs share the same core mechanics, described next. Detail for each
-program follows. Architecture lives in `docs/specifications/`; tooling in
+All three programs share the same core mechanics, described next. Detail for
+each program follows. Architecture lives in `docs/specifications/`; tooling in
 `scripts/`; policies in `config/`.
 
 ## The Guard Pattern
@@ -230,7 +231,12 @@ make sandbox-check      <-- (any user) resolve per-host profile
    auditd execve watch rules + AIDE/FIM + drift detection.
 6. [docs/specifications/SPEC-SANDBOX.md](docs/specifications/SPEC-SANDBOX.md):
    profile picker + seccomp/Landlock/namespaces + systemd unit template.
-7. [docs/references/SOURCES.md](docs/references/SOURCES.md): offline-cached
+7. [docs/requirements/REQ-HOME-LOCK.md](docs/requirements/REQ-HOME-LOCK.md):
+   home-dir lock requirements (`REQ-HL-*`) protecting `~/.gitconfig`,
+   `~/.ssh/config`, `~/.ssh/authorized_keys` against direct file writes.
+8. [docs/specifications/SPEC-HOME-LOCK.md](docs/specifications/SPEC-HOME-LOCK.md):
+   install / uninstall / drift-check scripts; `absolute_file_paths` YAML block.
+9. [docs/references/SOURCES.md](docs/references/SOURCES.md): offline-cached
    canonical sources (GTFOBins, konstruktoid, NVD, sudo advisories, man7).
 
 ### Why the layers
@@ -243,6 +249,48 @@ guard can reach. The layered design reflects that split: the guard is the
 **first** control, the sandbox profile is the **post-exploit** control, and
 auditd is the **detection** control. Removing any single layer re-opens the
 class of CVEs that layer was responsible for.
+
+## Program III: Home-Dir Lock
+
+The git guard (Program I) intercepts the `git config` command so
+`core.hooksPath` cannot be set via the command line. The `.git/config`
+lock inside each repo closes the per-repo vector. NEITHER covers the
+**file-write** vector: a non-root agent can open `~/.gitconfig` with a
+text-editor subprocess and write `core.hooksPath = /tmp/evil`
+directly. Because every git invocation for that user reads
+`~/.gitconfig`, this silently compromises every repo on the host.
+This exact attack happened in WORKSPACE-CI; it persisted across
+reboots and produced no drift alert.
+
+Program III closes the vector by chowning the user-global git and SSH
+config files to `root:root` so a non-root agent (without
+`CAP_DAC_OVERRIDE`) cannot open them for write. Editing is still
+possible via `sudoedit <path>` (runs the editor as root, subject to
+the git guard's `git config core.hooksPath` BLOCK inside that
+editor shell).
+
+Three scripts, all data-driven from
+`config/guard_locked_paths.yaml` (the `absolute_file_paths:` block):
+
+- `scripts/install-home-lock` -- root-only chown + chmod, create-missing,
+  idempotent, writes `res/home-lock-state.yaml`.
+- `scripts/uninstall-home-lock` -- root-only restore-from-state, clears
+  state on completion.
+- `scripts/home-drift-check` -- report-only (no auto-repair, audit
+  trail preserved); exits 1 on CRITICAL.
+
+`make install-home-lock` / `make uninstall-home-lock` / `make home-drift-check`.
+See [docs/specifications/SPEC-HOME-LOCK.md](docs/specifications/SPEC-HOME-LOCK.md)
+(§4) and [docs/requirements/REQ-HOME-LOCK.md](docs/requirements/REQ-HOME-LOCK.md)
+(`REQ-HL-*`).
+
+Coverage: 34 bats tests (`tests/shell/12-home-lock.bats`) + 3 Rust
+consistency tests (`home_lock_paths_parses`,
+`home_lock_paths_are_absolute_or_tilde_prefixed`,
+`home_lock_modes_are_in_valid_range`). `build.rs` also bakes the
+`absolute_file_paths` block into `LOCKED_ABSOLUTE_FILE_PATHS` so future
+in-binary enforcement (e.g. an `lstat` guard at start-up) does not
+require a runtime config read.
 
 ## Deployment
 

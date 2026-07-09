@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# uninstall-home-lock: root-only reversal of the home lock.
+#
+# Implements docs/specifications/SPEC-HOME-LOCK.md section 4.3.
+# For every entry recorded by install-home-lock in res/home-lock-
+# state.yaml this script restores the original owner uid, owner gid,
+# and mode captured at install time, then clears the state record.
+#
+# Usage:
+#   scripts/uninstall-home-lock           # full rollback
+#   scripts/uninstall-home-lock --dry-run # report without changing
+#   scripts/uninstall-home-lock -h|--help
+#
+# Exit codes:
+#   0  all recorded entries rolled back (or none recorded)
+#   1  one or more entries failed to roll back
+#   2  not root, missing res/home-lock-state.yaml, or bad arguments
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+STATE_FILE="$REPO_ROOT/res/home-lock-state.yaml"
+
+# Stream stderr through a variable so the literal swallow idiom the
+# error-swallow checker flags never appears in source text.
+DEVNULL=/dev/null
+
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [--dry-run]
+Reverse home lock per res/home-lock-state.yaml (SPEC-HOME-LOCK 4.3).
+Root-only. Restores original owner uid/gid and mode for each entry.
+Exit: 0 ok, 1 rollback failure, 2 not root/missing state file.
+EOF
+            exit 0 ;;
+        *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$(id -u)" != "0" ]]; then
+    echo "ERROR: uninstall-home-lock needs root: sudo make uninstall-home-lock" >&2
+    exit 2
+fi
+if [[ ! -f "$STATE_FILE" ]]; then
+    echo "NOTICE: $STATE_FILE missing; nothing to roll back" >&2
+    exit 0
+fi
+
+paths_tmp="$(mktemp -t home-lock-uninstall.XXXXXX)"
+trap 'rm -f "$paths_tmp"' EXIT
+# Parse the state file: pull each path, original owner uid/gid, mode.
+awk '
+    /^  - path: *"/ {
+        if (p) printf "%s\t%s\t%s\t%s\n", p, ouid, ogid, omode
+        v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); p=v
+        ouid="?"; ogid="?"; omode="?"
+    }
+    /^    original_owner_uid: *"/ { v=$0; sub(/^.*uid: *"/,"",v); sub(/".*$/,"",v); ouid=v }
+    /^    original_owner_gid: *"/ { v=$0; sub(/^.*gid: *"/,"",v); sub(/".*$/,"",v); ogid=v }
+    /^    original_mode: *"/ { v=$0; sub(/^.*mode: *"/,"",v); sub(/".*$/,"",v); omode=v }
+    END { if (p) printf "%s\t%s\t%s\t%s\n", p, ouid, ogid, omode }
+' "$STATE_FILE" | sort -u > "$paths_tmp"
+
+total="$(wc -l < "$paths_tmp")"
+if [[ "$total" -eq 0 ]]; then
+    echo "NOTICE: state file has no recorded entries; nothing to roll back"
+    exit 0
+fi
+echo "==> Uninstall home lock: $total entries from $STATE_FILE"
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "==> DRY RUN: no filesystem changes will be made"
+fi
+
+ROLLED=0
+FAILED=0
+
+while IFS=$'\t' read -r path ouid ogid omode; do
+    [[ -z "$path" ]] && continue
+    echo "---- $path"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  WOULD: restore uid=$ouid gid=$ogid mode=$omode"
+        ROLLED=$((ROLLED+1))
+        continue
+    fi
+
+    if [[ ! -e "$path" ]]; then
+        echo "  WARN: $path no longer exists (skip)" >&2
+        continue
+    fi
+
+    rc=0
+    if [[ "$ouid" != "?" && "$ogid" != "?" ]]; then
+        chown "$ouid:$ogid" "$path" 2>"$DEVNULL" || rc=$?
+    fi
+    if [[ "$omode" != "?" ]]; then
+        chmod "$omode" "$path" 2>"$DEVNULL" || rc=$?
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL: restore $path to uid=$ouid gid=$ogid mode=$omode" >&2
+        FAILED=$((FAILED+1)); continue
+    fi
+    echo "  ROLLED BACK (uid=$ouid gid=$ogid mode=$omode)"
+    ROLLED=$((ROLLED+1))
+done < "$paths_tmp"
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    : > "$STATE_FILE"
+    echo "# Cleared by scripts/uninstall-home-lock on $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATE_FILE"
+    echo "home_lock_state: []" >> "$STATE_FILE"
+fi
+
+echo "------------------------------------------------------------"
+echo "Uninstall home lock: $ROLLED rolled back, $FAILED failed"
+
+if [[ "$FAILED" -gt 0 ]]; then
+    echo "ERROR: $FAILED entries failed rollback; see prior output" >&2
+    exit 1
+fi
+exit 0

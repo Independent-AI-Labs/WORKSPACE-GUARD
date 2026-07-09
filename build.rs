@@ -66,6 +66,8 @@ struct LockedPathsConfig {
     recursive_tree_glob_patterns: Vec<String>,
     individual_file_paths: std::collections::HashMap<String, u32>,
     glob_patterns: std::collections::HashMap<String, u32>,
+    #[serde(default)]
+    absolute_file_paths: std::collections::HashMap<String, u32>,
 }
 
 // --- binary-guard codegen structs ----------------------------------------
@@ -269,6 +271,13 @@ fn main() {
         .collect();
     globs.sort_by(|a, b| a.0.cmp(b.0));
     emit_str_u32_pairs(&mut code, "LOCKED_GLOB_PATTERNS", &globs);
+    let mut absolute: Vec<(&str, u32)> = locked
+        .absolute_file_paths
+        .iter()
+        .map(|(k, v)| (k.as_str(), *v))
+        .collect();
+    absolute.sort_by(|a, b| a.0.cmp(b.0));
+    emit_str_u32_pairs(&mut code, "LOCKED_ABSOLUTE_FILE_PATHS", &absolute);
 
     let out_dir = env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("guard_config.rs"), code).unwrap();
