@@ -16,6 +16,7 @@ use crate::{
 };
 
 #[cfg(feature = "capability-mode")]
+#[allow(dead_code)]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
     // Raise all guard caps into the Inheritable set so forked children
     // can promote them into Ambient before exec. We do NOT raise

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# chown stub: no-op success. install-lock-runtime and uninstall-lock-
+# runtime call chown root:root on .real and guard files; the real
+# chown requires root but the bats suite runs as non-root. This stub
+# accepts any chown arguments and exits 0 so the containment flow
+# proceeds without actual ownership changes.
+exit 0

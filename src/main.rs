@@ -133,7 +133,7 @@ fn main() {
 #[cfg(feature = "root-only")]
 fn check_privileges() -> Result<(), GuardError> {
     let euid = geteuid();
-    if euid != 0 {
+    if euid != nix::unistd::Uid::from_raw(0) {
         eprintln!(
             "FATAL: root-only mode requires euid 0 (got {}). \
              Build without --features root-only for capability-based mode.",

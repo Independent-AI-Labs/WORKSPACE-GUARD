@@ -27,6 +27,35 @@ copy_real_scripts() {
     chmod +x "$dir/scripts/"*
 }
 
+# Copy config/binary-policy-rules.yaml into the fake repo so
+# emit_binary_lock (sourced from scripts/lib/binary-lock-yaml.sh) can
+# join rules against the universe. Also creates config/ if absent.
+copy_real_config() {
+    local dir="$1"
+    mkdir -p "$dir/config"
+    cp "$GUARD_ROOT/config/binary-policy-rules.yaml" "$dir/config/"
+}
+
+# Stage a fake guard binary at $dir/target/release/workspace-binary-guard
+# so install-lock-runtime's GUARD_BIN preflight passes. The fake binary
+# contains the "workspace-guard" sentinel string (used by rollback_path
+# and idempotency checks) and responds to --version / --help.
+fake_guard_binary() {
+    local dir="$1"
+    mkdir -p "$dir/target/release"
+    local gb="$dir/target/release/workspace-binary-guard"
+    cat > "$gb" <<'GUARDEOF'
+#!/usr/bin/env bash
+# workspace-guard sentinel marker
+case "${1:-}" in
+    --version) echo "workspace-binary-guard 0.1.0 (fake)"; exit 0 ;;
+    --help)    echo "workspace-binary-guard (fake)"; exit 0 ;;
+esac
+exit 0
+GUARDEOF
+    chmod 0755 "$gb"
+}
+
 # Emit a minimal binary-lock.yaml with the given paths as the lock
 # surface. Each path becomes a sequence entry with name, path, and a
 # deny-non-root policy. install-lock-runtime's awk parser reads only

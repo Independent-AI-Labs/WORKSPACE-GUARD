@@ -17,19 +17,38 @@ case "$1" in
     --add)
         # args: --add --rename --divert <p>.distrib <path>
         path="${!#}"
+        # Detect --divert target for the rename destination.
+        divert="" rename=0
+        prev=""
+        for a in "$@"; do
+            if [ "$prev" = "--divert" ]; then divert="$a"; fi
+            [ "$a" = "--rename" ] && rename=1
+            prev="$a"
+        done
         if [ -n "$db" ]; then
             mkdir -p "$(dirname "$db")"
             if ! grep -qxF -- "$path" "$db" 2>"$nulldev"; then
                 printf '%s\n' "$path" >> "$db"
             fi
         fi
+        # --rename: move $path to the divert target (default .distrib)
+        if [ "$rename" -eq 1 ] && [ -f "$path" ]; then
+            dest="${divert:-${path}.distrib}"
+            mv "$path" "$dest" 2>"$nulldev" || true
+        fi
         ;;
     --remove)
         path="${!#}"
+        rename=0
+        for a in "$@"; do [ "$a" = "--rename" ] && rename=1; done
         if [ -n "$db" ] && [ -f "$db" ]; then
             tmp="$(mktemp)"
             grep -vxF -- "$path" "$db" > "$tmp" 2>"$nulldev" || rc=$?
             mv "$tmp" "$db"
+        fi
+        # --rename: restore $(path).distrib back to $path
+        if [ "$rename" -eq 1 ] && [ -f "${path}.distrib" ]; then
+            mv "${path}.distrib" "$path" 2>"$nulldev" || true
         fi
         ;;
     *)
