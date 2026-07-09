@@ -410,23 +410,25 @@ For each <path> in installable rows:
   4. chmod 0700 <path>.real
   5. Verify SHA-256 of <path>.real matches <path>
   6. chattr +i <path>.real
-  7. Install guard at <path> BEFORE diverting:
+  7. Stage guard at <path>.guard_new (BEFORE divert):
        a. cp guard_binary <path>.guard_new
        b. chown root:root <path>.guard_new
        c. chmod 0755 <path>.guard_new
-       d. mv <path>.guard_new <path>      # atomic replace; path is never empty
   8. dpkg-divert --add --rename --divert <path>.distrib <path>
-  9. Verify: <path> --version or <path> responds (warm check)
-  10. Mark row contained: true in res/lock-state.yaml
+     (moves original to .distrib; <path> briefly empty)
+  9. mv <path>.guard_new <path>
+     (atomic fill; <path> is the guard, gap was one rename)
+  10. Verify: <path> --version or <path> responds (warm check)
+  11. Mark row contained: true in res/lock-state.yaml
 ```
 
-CRITICAL: step 7 installs the guard at `<path>` BEFORE step 8 diverts. In
-the previous destructive ordering, dpkg-divert moved the original to
-`<path>.distrib` and left `<path>` empty until a guard was copied in later;
-any invocation in that window hit a missing binary. The new ordering ensures
-`<path>` is never empty: the original is preserved as `<path>.real` first,
-then the guard atomic-mv replaces `<path>` in place, and dpkg-divert is only
-registered AFTER the guard is live so apt upgrades cannot displace the guard.
+CRITICAL: step 7 stages the guard at `<path>.guard_new` BEFORE step 8
+diverts. dpkg-divert --rename (required for package-owned files) moves
+the original to `<path>.distrib` and leaves `<path>` empty; step 9
+immediately fills `<path>` with the pre-staged guard via atomic mv.
+The gap is one rename operation (microseconds). The previous destructive
+ordering copied the guard AFTER diverting with no pre-staging, leaving
+`<path>` empty for the entire copy duration.
 
 ### 4.3 Rollback on failure
 

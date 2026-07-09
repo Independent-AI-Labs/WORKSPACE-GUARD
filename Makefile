@@ -213,7 +213,7 @@ install-lock: build-binary-guard ## Contain-via-guard every SUID binary per res/
 	@# install-lock-runtime copies that single binary to every contained path.
 	@# Mirrors docs/specifications/SPEC-BINARY-LOCK.md section 4.2
 	@# (copy -> chown root:root -> chmod 0700 .real ->
-	@# chattr +i -> install generic guard binary -> dpkg-divert).
+	@# chattr +i -> stage guard -> dpkg-divert --rename -> mv guard -> <path>).
 	@test -x scripts/install-lock-runtime && bash scripts/install-lock-runtime \
 		|| { echo "NOTICE: scripts/install-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 

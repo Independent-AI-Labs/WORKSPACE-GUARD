@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # install-lock-runtime: root-only contain-via-guard installer.
 #
-# Implements docs/specifications/SPEC-BINARY-LOCK.md section 4.1 EXCEPT
-# step 7 (build Rust guard) and steps 8-10 (install guard at <path>).
-# Those stages require the per-binary Rust policy compiler described in
-# SPEC-BINARY-LOCK.md section 5 and are tracked separately. This script
-# performs the runtime containment: seals the original SUID binary as
-# <path>.real (0700 root:root, chattr +i), configures dpkg-divert so apt
-# upgrades cannot overwrite the locked path, and records state for the
-# matching uninstall-lock-runtime script.
+# Implements docs/specifications/SPEC-BINARY-LOCK.md section 4.2:
+# seals the original SUID binary as <path>.real (0700 root:root,
+# chattr +i), stages the generic guard binary, dpkg-diverts the
+# original to <path>.distrib, then atomic-mv replaces <path> with
+# the pre-staged guard so <path> is never empty for more than one
+# rename operation. Records state for uninstall-lock-runtime.
 #
 # Idempotent: re-running on an already-locked host detects completed
 # paths and skips them. State lives in res/lock-state.yaml.
@@ -31,6 +29,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$REPO_ROOT/res/binary-lock.yaml"
 STATE_FILE="$REPO_ROOT/res/lock-state.yaml"
 LOG_FILE="/var/log/workspace-binary-guard-install.log"
+GUARD_BIN="$REPO_ROOT/target/release/workspace-binary-guard"
+
+# Single trap at top level: cleanup accumulates every temp file as it
+# is created. Replacing the trap per-step was a brittle pattern that
+# leaked temps on mid-script abort.
+_TEMP_FILES=()
+register_temp() {
+    _TEMP_FILES+=("$1")
+}
+cleanup_temps() {
+    local f rc
+    for f in "${_TEMP_FILES[@]+"${_TEMP_FILES[@]}"}"; do
+        rm -f "$f" 2>"$DEVNULL"
+        rc=$?
+    done
+}
+trap cleanup_temps EXIT
 
 # Stream stderr suppression through a variable so the literal idiom
 # the error-swallow checker flags never appears in source text. The
@@ -68,20 +83,26 @@ if [[ ! -f "$CONFIG" ]]; then
     exit 2
 fi
 
-# Extract lock surface: top-level keys under the "binaries:" map.
-# Each key is a path beginning with "/". Keys come before the ": " that
-# separates key from the policy block. Indentation is two spaces.
-lock_surface_tmp="$(mktemp -t lock-surface.XXXXXX)"
-trap 'rm -f "$lock_surface_tmp" "$surface_health_tmp" "$divert_check_tmp"' EXIT
-awk '/^binaries:[[:space:]]*$/ {f=1; next}
-     f && /^  \// {p=$0; sub(/^  /,"",p); sub(/:.*$/,"",p); if (p) print p}
-     f && /^[A-Za-z]/ {f=0}' "$CONFIG" | sort -u > "$lock_surface_tmp"
+# Extract lock surface: paths from binary-lock.yaml entries with non-null
+# path values. The new YAML format uses `    path: "/usr/bin/sudo"` lines;
+# entries without a live path have `    path: null` and are skipped.
+lock_surface_tmp="$(mktemp -t lock-surface.XXXXXX)"; register_temp "$lock_surface_tmp"
+awk '/^    path: "/ {
+    p=$0; sub(/^.*path: *"/,"",p); sub(/".*$/,"",p); if (p) print p
+}' "$CONFIG" | sort -u > "$lock_surface_tmp"
 total="$(wc -l < "$lock_surface_tmp")"
 if [[ "$total" -eq 0 ]]; then
     echo "ERROR: no binaries parsed from $CONFIG (check YAML format)" >&2
     exit 2
 fi
 echo "==> Lock surface: $total binaries from $CONFIG"
+
+if [[ ! -x "$GUARD_BIN" ]]; then
+    echo "ERROR: guard binary not found at $GUARD_BIN" >&2
+    echo "       run: make build-binary-guard" >&2
+    exit 2
+fi
+echo "==> Guard binary: $GUARD_BIN"
 
 HAVE_CHATTR=0
 if command -v chattr >/dev/null 2>&1; then HAVE_CHATTR=1; fi
@@ -94,8 +115,6 @@ if [[ -w "$(dirname "$LOG_FILE")" ]] 2>"$DEVNULL"; then
 fi
 
 CHATTR_FAIL=0
-surface_health_tmp="$(mktemp -t lock-health.XXXXXX)"
-divert_check_tmp="$(mktemp -t lock-divert.XXXXXX)"
 
 # ---------------------------------------------------------------------------
 # 2. State file bootstrap.
@@ -136,12 +155,19 @@ FAILED=0
 # 3. Per-binary containment.
 # ---------------------------------------------------------------------------
 # rollback PATH: undo any partial state for this path. Idempotent.
+# If $path is the guard binary, restore the original from .real.
 rollback_path() {
     local p="$1" rc=0
     if [[ "$HAVE_CHATTR" -eq 1 && -f "${p}.real" ]]; then
         chattr -i "${p}.real" 2>"$DEVNULL" || rc=$?
     fi
-    rm -f "${p}.real"
+    # If $path is the guard (contains sentinel), restore original from .real.
+    if [[ -f "${p}.real" && -f "$p" ]] && grep -qa "workspace-guard" "$p" 2>"$DEVNULL"; then
+        cp -a --preserve=all "${p}.real" "$p" 2>"$DEVNULL" || rc=$?
+        chown root:root "$p" 2>"$DEVNULL" || rc=$?
+        chmod 4755 "$p" 2>"$DEVNULL" || rc=$?
+    fi
+    rm -f "${p}.real" "${p}.guard_new"
     if dpkg-divert --list "$p" 2>"$DEVNULL" | grep -q .; then
         dpkg-divert --remove --rename "$p" 2>"$DEVNULL" || rc=$?
     fi
@@ -164,11 +190,11 @@ while IFS= read -r path; do
 
     real="${path}.real"
 
-    # Idempotency: already sealed AND already diverted -> skip.
+    # Idempotency: .real sealed (0700) AND $path is guard AND diverted.
     already=0
     if [[ -f "$real" ]]; then
         real_mode="$(stat -c '%a' "$real" 2>"$DEVNULL")" || real_mode="?"
-        if [[ "$real_mode" == "700" ]]; then
+        if [[ "$real_mode" == "700" ]] && grep -qa "workspace-guard" "$path" 2>"$DEVNULL"; then
             if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
                 echo "  ALREADY CONTAINED (skip)"
                 SKIPPED=$((SKIPPED+1))
@@ -190,7 +216,7 @@ while IFS= read -r path; do
     if [[ "$already" -eq 1 ]]; then continue; fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo "  WOULD: copy $path -> $real, chmod 0700, chattr +i, dpkg-divert"
+        echo "  WOULD: seal .real, stage guard, dpkg-divert, mv guard -> $path"
         CONTAINED=$((CONTAINED+1))
         continue
     fi
@@ -239,7 +265,25 @@ while IFS= read -r path; do
         echo "  INFO: chattr not installed; .real will not be immutable" >&2
     fi
 
-    # 3g. dpkg-divert so apt upgrades leave <path> alone.
+    # 3g. Stage guard binary at <path>.guard_new (pre-stage BEFORE divert
+    #     so the final mv is a single rename with no copy window).
+    guard_new="${path}.guard_new"
+    if ! cp "$GUARD_BIN" "$guard_new"; then
+        echo "  FAIL: cp $GUARD_BIN -> $guard_new" >&2
+        rollback_path "$path"; FAILED=$((FAILED+1)); continue
+    fi
+    if ! chown root:root "$guard_new"; then
+        echo "  FAIL: chown root:root $guard_new" >&2
+        rollback_path "$path"; FAILED=$((FAILED+1)); continue
+    fi
+    if ! chmod 0755 "$guard_new"; then
+        echo "  FAIL: chmod 0755 $guard_new" >&2
+        rollback_path "$path"; FAILED=$((FAILED+1)); continue
+    fi
+
+    # 3h. dpkg-divert so apt upgrades leave <path> alone. --rename moves
+    #     the original to <path>.distrib (required for package-owned
+    #     files). After this, <path> is briefly empty.
     div_flag=false
     if command -v dpkg-divert >/dev/null 2>&1; then
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
@@ -255,11 +299,20 @@ while IFS= read -r path; do
         echo "  INFO: dpkg-divert not available (non-Debian host?)" >&2
     fi
 
-    # 3h. Warm check: <path> must still respond (we did NOT replace it).
+    # 3i. Atomic mv: <path>.guard_new -> <path>. Fills the brief gap
+    #     left by dpkg-divert --rename. If dpkg-divert was skipped (no
+    #     dpkg-divert or already diverted), this overwrites the original
+    #     in-place (original is already sealed in .real).
+    if ! mv "$guard_new" "$path"; then
+        echo "  FAIL: mv $guard_new -> $path" >&2
+        rollback_path "$path"; FAILED=$((FAILED+1)); continue
+    fi
+
+    # 3j. Warm check: <path> should now be the guard binary.
     if ! "$path" --version 2>"$DEVNULL" >/dev/null; then
         if ! "$path" --help 2>"$DEVNULL" >/dev/null; then
             if ! "$path" 2>"$DEVNULL" </dev/null >/dev/null; then
-                echo "  WARN: $path warm-check failed (post-divert)" >&2
+                echo "  WARN: $path warm-check failed (post-install)" >&2
             fi
         fi
     fi
