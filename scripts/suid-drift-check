@@ -242,7 +242,20 @@ while IFS=$'\t' read -r path caps; do
     gather "$path" "removed-cap" "INFO" "was=$caps"
 done < "$rm_caps_tmp"
 
-# --- 4d. immutable-flag check on every *.real path in baseline ---
+# --- 4d. immutable-flag check on every contained binary in binary-lock ---
+# Only entries with contained: true and a non-null path in
+# res/binary-lock.yaml should have a .real file. Checking all baselined
+# SUID paths produces false positives for binaries that are tracked but
+# not yet contained.
+contained_tmp="$(mktemp -t suid-drift-contained.XXXXXX)"; register_temp "$contained_tmp"
+BINARY_LOCK="$RES_DIR/binary-lock.yaml"
+if [[ -f "$BINARY_LOCK" ]]; then
+    awk '/^  - name:/ { name=$0; sub(/^.*name: *"/,"",name); sub(/".*$/,"",name) }
+         /^    path:/ { p=$0; sub(/^.*path: *"/,"",p); sub(/".*$/,"",p) }
+         /^    contained: true/ { if (p && p != "null") print p }
+         /^    contained: false/ { p="" }' "$BINARY_LOCK" > "$contained_tmp"
+fi
+
 while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     real="${path}.real"
@@ -266,7 +279,7 @@ while IFS= read -r path; do
         msg="CRITICAL: mode on $real is $mode (expected 700 after contain)"
         log "$msg"; gather "$real" "mode-change-real" "$cls" "mode=$mode"
     fi
-done < "$known_suid_tmp"
+done < "$contained_tmp"
 
 # ---------------------------------------------------------------------------
 # 5. Summary + exit code.
