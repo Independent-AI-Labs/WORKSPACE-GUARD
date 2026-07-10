@@ -14,7 +14,15 @@
 # flow in WORKSPACE-CI inherits the guard's caps when it runs git
 # internally, so the hooks it writes are root-owned with the exec bit set.
 
-SHELL := /bin/bash
+# Platform detection. On macOS, prefer Homebrew bash 5.x over /bin/bash
+# (3.2) for nameref support (ci_capture_lines / ci_capture_pipe). The
+# Homebrew gnubin directories are prepended to PATH so GNU coreutils,
+# gnu-sed, and findutils shadow the BSD equivalents.
+_OS := $(shell uname -s)
+_HB_PREFIX := $(if $(wildcard /opt/homebrew),/opt/homebrew,$(if $(wildcard /usr/local),/usr/local))
+SHELL := $(if $(wildcard $(_HB_PREFIX)/bin/bash),$(_HB_PREFIX)/bin/bash,/bin/bash)
+export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-sed/libexec/gnubin:$(_HB_PREFIX)/opt/findutils/libexec/gnubin:$(_HB_PREFIX)/bin:$(PATH)
+
 .DEFAULT_GOAL := help
 
 REPO_ROOT := $(shell if [ -d .git ]; then git rev-parse --show-toplevel; else pwd; fi)
@@ -22,9 +30,11 @@ CI_DIR := $(abspath $(REPO_ROOT)/../CI)
 
 -include $(CI_DIR)/lib/makefile_contract.mk
 
-# Resolve WORKSPACE_ROOT the same way hooks/lib/ci.sh do, so gitleaks lands
-# in the exact ${WORKSPACE_ROOT}/.boot-linux/bin that the hooks prepend to PATH.
-# Error handling: if ci.sh is missing or unsourceable, fail loudly with a diagnostic.
+# Resolve WORKSPACE_ROOT and BOOT_NAME the same way hooks/lib/ci.sh do,
+# so gitleaks lands in the exact ${WORKSPACE_ROOT}/${BOOT_NAME}/bin that
+# the hooks prepend to PATH. BOOT_NAME is platform-aware: .boot-macos on
+# darwin, .boot-linux on linux -- resolved via ci_boot_name() in ci.sh.
+# Error handling: if ci.sh is missing or unsourceable, fail loudly.
 WORKSPACE_ROOT := $(shell \
 	if [ ! -f "$(CI_DIR)/lib/ci.sh" ]; then \
 		echo "ERROR: $(CI_DIR)/lib/ci.sh not found" >&2; exit 1; \
@@ -34,7 +44,8 @@ WORKSPACE_ROOT := $(shell \
 		echo "ERROR: CI_WORKSPACE_ROOT not set after sourcing ci.sh" >&2; exit 1; \
 	fi; \
 	echo "$$CI_WORKSPACE_ROOT")
-GITLEAKS_BIN := $(WORKSPACE_ROOT)/.boot-linux/bin/gitleaks
+BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
+GITLEAKS_BIN := $(WORKSPACE_ROOT)/$(BOOT_NAME)/bin/gitleaks
 
 SUDO := $(shell if [ "$$(id -u)" -eq 0 ]; then echo ""; else echo "sudo"; fi)
 
@@ -45,8 +56,29 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: init
-init: ## Install system-level dependencies (apt packages + Rust toolchain)
-	@echo "==> Installing system packages..."
+init: ## Install system-level dependencies (platform-aware: brew on macOS, apt on Linux + Rust toolchain)
+ifeq ($(_OS),Darwin)
+	@echo "==> Installing Homebrew + GNU tools (macOS)..."
+	@bash "$(CI_DIR)/scripts/bootstrap-homebrew"
+	@echo "==> Installing bats-core (macOS)..."
+	@if ! command -v bats > /dev/null 2>&1; then \
+		brew install bats-core; \
+	else \
+		echo "bats already installed: $$(bats --version)"; \
+	fi
+	@echo "==> Installing Rust toolchain (if missing)..."
+	@if ! command -v cargo > /dev/null 2>&1; then \
+		bash "$(CI_DIR)/scripts/bootstrap-rust"; \
+	else \
+		echo "cargo already installed: $$(cargo --version)"; \
+	fi
+	@echo "==> Installing Rust components (clippy, rustfmt)..."
+	@rustup component add clippy rustfmt
+	@echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
+	@$(MAKE) install-gitleaks
+	@echo "==> macOS system dependencies installed."
+else
+	@echo "==> Installing system packages (Linux)..."
 	$(SUDO) apt-get update -qq
 	$(SUDO) apt-get install -y --no-install-recommends \
 		curl tar ca-certificates \
@@ -54,7 +86,7 @@ init: ## Install system-level dependencies (apt packages + Rust toolchain)
 		build-essential pkg-config \
 		bats bats-assert bats-support bats-file
 	@echo "==> Installing Rust toolchain (if missing)..."
-	@if ! command -v cargo > /dev/null; then \
+	@if ! command -v cargo > /dev/null 2>&1; then \
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal; \
 	else \
 		echo "cargo already installed: $$(cargo --version)"; \
@@ -63,7 +95,8 @@ init: ## Install system-level dependencies (apt packages + Rust toolchain)
 	@rustup component add clippy rustfmt
 	@echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
 	@$(MAKE) install-gitleaks
-	@echo "==> System dependencies installed."
+	@echo "==> Linux system dependencies installed."
+endif
 
 .PHONY: preflight
 preflight: ## Verify required tooling is present
@@ -74,7 +107,7 @@ preflight: ## Verify required tooling is present
 	@echo "Preflight OK (WORKSPACE-CI at $(CI_DIR))"
 
 .PHONY: install-gitleaks
-install-gitleaks: ## Bootstrap gitleaks binary to ${WORKSPACE_ROOT}/.boot-linux/bin
+install-gitleaks: ## Bootstrap gitleaks binary to ${WORKSPACE_ROOT}/${BOOT_NAME}/bin
 	@mkdir -p "$(dir $(GITLEAKS_BIN))"
 	WORKSPACE_ROOT="$(WORKSPACE_ROOT)" GITLEAKS_BIN="$(GITLEAKS_BIN)" \
 		bash "$(CI_DIR)/scripts/bootstrap-gitleaks"
@@ -88,10 +121,9 @@ install-ci: preflight install-gitleaks ## CI install: gitleaks + no hooks (CI en
 	@:
 
 .PHONY: install-hooks
-install-hooks: preflight ## Regenerate native git hooks from .pre-commit-config.yaml
-	@if [ -d .git/hooks ] && [ "$$(stat -c '%u' .git/hooks)" = "0" ] \
-			&& [ "$$(id -u)" != "0" ]; then \
-		echo "ERROR: .git/hooks is root:root (locked by gitdir::lock in capability mode)." >&2; \
+install-hooks: ## Regenerate native git hooks from .pre-commit-config.yaml
+	@if [ -d .git/hooks ] && ! [ -w .git/hooks ] && [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: .git/hooks is not writable (locked by gitdir::lock in capability mode)." >&2; \
 		echo "       Hook installation requires root: sudo make install-hooks" >&2; \
 		echo "       (or run before the guard is installed / in root-only mode)" >&2; \
 		exit 1; \

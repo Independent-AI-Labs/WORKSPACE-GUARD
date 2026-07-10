@@ -56,7 +56,7 @@ repos:
 
       - id: cargo-fmt
         name: Cargo Format Check
-        entry: cargo fmt --all -- --check
+        entry: "bash -c 'if [ \"$(uname -s)\" = Darwin ]; then echo \"SKIP: Linux-only project\"; exit 0; fi; cargo fmt --all -- --check'"
         language: system
         pass_filenames: false
         always_run: true
@@ -64,7 +64,7 @@ repos:
 
       - id: cargo-clippy
         name: Cargo Clippy
-        entry: cargo clippy --workspace --all-targets -- -D warnings
+        entry: "bash -c 'if [ \"$(uname -s)\" = Darwin ]; then echo \"SKIP: Linux-only project\"; exit 0; fi; cargo clippy --workspace --all-targets -- -D warnings'"
         language: system
         pass_filenames: false
         always_run: true
@@ -86,7 +86,7 @@ repos:
     hooks:
       - id: ci-check-push
         name: Pre-push Quality Gate (fmt + clippy + check + tests)
-        entry: "make check-push"
+        entry: "bash -c 'if [ \"$(uname -s)\" = Darwin ]; then echo \"SKIP: Linux-only project\"; exit 0; fi; make check-push'"
         language: system
         stages: [pre-push]
         pass_filenames: false

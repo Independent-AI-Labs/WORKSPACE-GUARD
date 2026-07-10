@@ -7,12 +7,14 @@ $schema: 'https://moonrepo.dev/schemas/project.json'
 
 project:
   name: 'workspace-guard'
-  description: 'Rust SUID git-guard; boot-layout inherits from WORKSPACE-CI'
-  # Boot-layout metadata (descriptive; mirrors config/boot_layout.yaml).
-  # Compliance check (WORKSPACE-CI/ci/check_boot_venv_layout.py) verifies consistency.
-  bootDir: '.boot-linux'
-  parentBoot:
-    - '../WORKSPACE-CI/.boot-linux'
+  description: 'Rust SUID git-guard; boot-layout inherits from CI'
+  # Boot-layout inheritance: project-root paths whose $CI_BOOT_NAME/bin
+  # should be prepended to PATH via ci_resolve_boot_path(). Entries are
+  # project roots (e.g. '../CI'), NOT boot-dir paths. The resolver
+  # appends /$CI_BOOT_NAME/bin at runtime → platform-aware.
+  # GUARD inherits CI's boot dir for gitleaks and other tools.
+  inherited_boot_dirs:
+    - '../CI'
 
 language: 'rust'
 layer: 'library'
@@ -23,8 +25,8 @@ tags:
   - 'security'
   - 'tooling'
 
-# GUARD inherits WORKSPACE-CI/.boot-linux/ for gitleaks binaries
-# per config/boot_layout.yaml::inherit. This moon.yml::dependsOn edge MUST
+# GUARD inherits CI's boot dir for gitleaks binaries
+# per inherited_boot_dirs above. This dependsOn edge MUST
 # match (SPEC §8.2). Reverse direction (CI depending on GUARD) is invalid.
 dependsOn:
   - 'ci'
