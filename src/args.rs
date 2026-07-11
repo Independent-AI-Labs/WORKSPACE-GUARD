@@ -47,8 +47,7 @@ fn check_and_record_dangerous_config(key: &str, dangerous_keys: &mut Vec<String>
     if key.is_empty() {
         return;
     }
-    let sudo = crate::is_sudo();
-    if is_config_key_blocked(key, sudo) {
+    if is_config_key_blocked(key, crate::is_config_privileged()) {
         dangerous_keys.push(key.to_string());
     }
 }
@@ -103,7 +102,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if let Some(pos) = arg_str.find('=') {
                 let key = arg_str[..pos].trim();
                 check_and_record_dangerous_config(key, &mut state.dangerous_config_keys);
-            } else if is_config_key_blocked(arg_str.trim(), crate::is_sudo()) {
+            } else if is_config_key_blocked(arg_str.trim(), crate::is_config_privileged()) {
                 state.dangerous_config_keys.push(arg_str.to_string());
             }
             expecting_config = false;

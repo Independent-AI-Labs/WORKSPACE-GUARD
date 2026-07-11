@@ -1,0 +1,40 @@
+# WORKSPACE-GUARD Podman test image (ubuntu:22.04, matches WORKSPACE-VM).
+# Build: podman build -f Containerfile.test -t workspace-guard-test:ubuntu-22.04 .
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        git \
+        curl \
+        ca-certificates \
+        libcap2-bin \
+        e2fsprogs \
+        file \
+        dpkg-dev \
+        ripgrep \
+        sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 22.04 apt bats is too old for bats_require_minimum_version (needs 1.5+).
+ARG BATS_VERSION=1.13.0
+RUN curl -fsSL "https://github.com/bats-core/bats-core/archive/refs/tags/v${BATS_VERSION}.tar.gz" \
+    | tar -xz -C /tmp \
+    && "/tmp/bats-core-${BATS_VERSION}/install.sh" /usr/local \
+    && rm -rf "/tmp/bats-core-${BATS_VERSION}"
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN rustup component add clippy rustfmt
+
+# Tier 1 runs capability integration tests as non-root testagent; allow traverse
+# /root and read/execute the shared rustup toolchain (test container only).
+RUN chmod 711 /root && chmod -R a+rX /root/.cargo /root/.rustup
+
+WORKDIR /projects/WORKSPACE-GUARD

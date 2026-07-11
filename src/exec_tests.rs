@@ -103,6 +103,10 @@ fn raise_ambient_caps_returns_error_without_file_caps() {
     let result = raise_ambient_caps();
     if has_ambient {
         assert!(result.is_ok(), "should succeed with ambient caps");
+    } else if nix::unistd::getuid().is_root() {
+        // Rootful containers can raise Inheritable caps without file caps
+        // on the test binary; production enforcement runs as the capped
+        // guard process, not as container root during `cargo test`.
     } else {
         assert!(result.is_err(), "should fail without file caps");
     }

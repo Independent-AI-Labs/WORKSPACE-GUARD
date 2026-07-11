@@ -1,0 +1,104 @@
+# System dependencies for WORKSPACE-GUARD.
+# Checked and installed by: make init / make init-check
+# (via ../CI/scripts/install-system-deps)
+#
+# Unified schema :  see projects/CI/config/system-deps.yaml header.
+
+requires:
+  # --- bootstrap prerequisites ---
+  - check_cmd: curl
+    apt_package: curl
+    brew_package: curl
+    description: curl (HTTP client for bootstrap fetches)
+
+  - check_cmd: tar
+    apt_package: tar
+    description: tar (archive extraction)
+
+  - check_type: apt-package
+    apt_package: ca-certificates
+    description: ca-certificates (TLS root certs)
+    platforms: [linux]
+
+  # --- build toolchain ---
+  - check_type: apt-package
+    apt_package: build-essential
+    description: build-essential (gcc/g++/make for native builds)
+    platforms: [linux]
+
+  - check_cmd: pkg-config
+    apt_package: pkg-config
+    brew_package: pkg-config
+    description: pkg-config (library detection)
+
+  - check_cmd: git
+    apt_package: git
+    brew_package: git
+    description: Git version control
+
+  # --- Linux guard runtime tools (install-lock, drift-check, E2E) ---
+  - check_cmd: capsh
+    apt_package: libcap2-bin
+    description: libcap2-bin (setcap/getcap)
+    platforms: [linux]
+
+  - check_cmd: mke2fs
+    apt_package: e2fsprogs
+    description: e2fsprogs (chattr/e2fs tools)
+    platforms: [linux]
+
+  - check_cmd: file
+    apt_package: file
+    description: file (file-type detection)
+
+  - check_type: apt-package
+    apt_package: dpkg-dev
+    description: dpkg-dev (dpkg-divert for guard install)
+    platforms: [linux]
+
+  # --- shell test framework ---
+  - check_cmd: bats
+    apt_package: bats
+    brew_package: bats-core
+    description: bats (shell test framework)
+
+  - check_type: apt-package
+    apt_package: bats-assert
+    description: bats-assert (shell test helper; optional :  harness uses built-in asserts)
+    optional: true
+    platforms: [linux]
+
+  - check_type: apt-package
+    apt_package: bats-support
+    description: bats-support (shell test helper; optional :  harness uses built-in asserts)
+    optional: true
+    platforms: [linux]
+
+  - check_type: apt-package
+    apt_package: bats-file
+    description: bats-file (shell test helper; optional :  harness uses built-in asserts)
+    optional: true
+    platforms: [linux]
+
+  # --- shell test helpers ---
+  - check_cmd: rg
+    apt_package: ripgrep
+    brew_package: ripgrep
+    description: ripgrep (rg for regression shell tests)
+
+  # --- macOS: GNU grep for grep -P in shell tests ---
+  - check_cmd: ggrep
+    brew_package: grep
+    description: GNU grep (grep -P for shell tests)
+    platforms: [darwin]
+
+  # --- hermetic bootstraps (separate phase in make init) ---
+  - check_cmd: cargo
+    bootstrap_script: ../CI/scripts/bootstrap-rust
+    description: Rust toolchain (cargo)
+    component: rust
+
+  - check_cmd: podman
+    bootstrap_script: ../CI/scripts/bootstrap-podman
+    description: Podman (Linux container runtime)
+    component: podman

@@ -28,7 +28,7 @@ GUARD_BIN="$GUARD_ROOT/target/release/workspace-binary-guard"
 }
 
 @test "guard-build: invoked under own name produces BLOCK output" {
-    [ -x "$GUARD_BIN" ] || skip "guard binary not built"
+    require_guard_binary_runnable "$GUARD_BIN"
     run -127 "$GUARD_BIN" --version
     # The guard has no --version flag; it treats argv[0] basename as
     # the binary to guard. Invoked as workspace-binary-guard it blocks
@@ -38,7 +38,7 @@ GUARD_BIN="$GUARD_ROOT/target/release/workspace-binary-guard"
 }
 
 @test "guard-build: invoked as unknown binary denies non-root" {
-    [ -x "$GUARD_BIN" ] || skip "guard binary not built"
+    require_guard_binary_runnable "$GUARD_BIN"
     local link="$TEST_TMPDIR/nonexistent-binary"
     ln -sf "$GUARD_BIN" "$link"
     run -127 "$link"

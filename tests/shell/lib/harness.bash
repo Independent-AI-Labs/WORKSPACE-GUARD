@@ -209,6 +209,24 @@ require_cmd() {
     fi
 }
 
+# Skip when a compiled guard binary exists but cannot execute on this host
+# (e.g. Linux ELF left in target/ after a Podman build on Darwin).
+require_guard_binary_runnable() {
+    local bin="$1"
+    [ -x "$bin" ] || skip "guard binary not built (run: make build-binary-guard)"
+    if command -v file >/dev/null 2>&1; then
+        local ft
+        ft="$(file -b "$bin")"
+        if printf '%s' "$ft" | grep -q 'ELF.*executable'; then
+            case "$(uname -s)" in
+                Darwin)
+                    skip "guard binary is Linux ELF (runtime tests run in Podman on Darwin)"
+                    ;;
+            esac
+        fi
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Stub activation + per-test setup/teardown glue.
 #    setup()  { guard_setup; }

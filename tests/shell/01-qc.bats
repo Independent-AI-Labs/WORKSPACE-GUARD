@@ -95,3 +95,11 @@ c" "$out"
     out="$(qc "  spaced-alt  " false)" || rc=$?
     assert_equal "  spaced-alt  " "$out"
 }
+
+@test "qc: failure with || true does not abort under set -e" {
+    load_guard_lib qc
+    set -euo pipefail
+    local out
+    out="$(qc '?' false || true)"
+    assert_equal "?" "$out"
+}

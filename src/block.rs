@@ -16,6 +16,7 @@ pub fn check_blocked(
     cwd: Option<&str>,
 ) -> Result<(), GuardError> {
     let sudo = crate::is_sudo();
+    let config_privileged = crate::is_config_privileged();
     if subcommand == "config" {
         // Only block git config when setting a dangerous key.
         // Legitimate git config (user.name, user.email, etc.) is allowed.
@@ -48,7 +49,7 @@ pub fn check_blocked(
                 }
                 continue;
             }
-            if is_config_key_blocked(&s, sudo) {
+            if is_config_key_blocked(&s, config_privileged) {
                 return Err(GuardError::Blocked {
                     reason: format!("git config: dangerous config key: {}", s),
                     hint: "Use a non-dangerous config key instead".into(),

@@ -267,7 +267,7 @@ while IFS= read -r path; do
         fi
         continue
     fi
-    attrs="$(qc '' lsattr -d "$real" 2>"$DEVNULL")"
+    attrs="$(qc '' lsattr -d "$real")"
     if [[ ! "$attrs" =~ i ]]; then
         cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
         msg="CRITICAL: immutable flag removed on $real (root can tamper)"

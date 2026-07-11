@@ -335,12 +335,25 @@ make gitleaks-ignore-regen               # refresh .gitleaksignore for docs/refe
 cargo build                                              # Debug (capability-mode)
 cargo build --no-default-features --features root-only   # Debug (root-only)
 cargo build --release                                    # Release (opt-level=z, LTO, abort-on-panic, stripped)
-cargo test                                               # Cap mode: 90 unit + 3 integration
-cargo test --no-default-features --features root-only    # Root-only: 84 unit + 3 integration
+make test                                                # Unit + integration (integration gated by euid)
+make test-podman-quick                                   # Podman Tiers 0-2 (Linux gate on Darwin)
+make sync-gtfobins-linux                                 # Regenerate res/ baselines (Linux container)
 cargo fmt --all -- --check                               # Format check
 cargo clippy --workspace --all-targets -- -D warnings    # Strict lint
 make test                                                # Full workspace test suite
 ```
+
+On **macOS**, native `cargo test`/`clippy` are unavailable (Linux-only kernel
+features). Bootstrap once with `make init` (reads `config/system-deps.yaml`),
+then use the Podman harness:
+
+```bash
+make init               # system deps + Rust + Podman (yaml-driven)
+make test-podman        # Tiers 0-3 (full gate + root-only + capability E2E)
+make test-podman-quick  # Tiers 0-2 (skip privileged capability E2E)
+```
+
+See [docs/specifications/SPEC-PODMAN-TESTING.md](docs/specifications/SPEC-PODMAN-TESTING.md).
 
 ## Security Properties
 

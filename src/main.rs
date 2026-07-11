@@ -2,7 +2,6 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 use std::process;
 
-#[cfg(feature = "root-only")]
 use nix::unistd::geteuid;
 
 mod args;
@@ -67,6 +66,13 @@ pub use guard_config::*;
 /// sudo-only config keys). It MUST NOT fire just because euid==0.
 pub fn is_sudo() -> bool {
     aux_secure() != 0
+}
+
+/// Whether sudo-gated git config keys (`user.email`, `user.name`, …) may be
+/// set. Requires effective root (`sudo git config`); file-capability
+/// AT_SECURE alone is not sufficient in capability mode.
+pub fn is_config_privileged() -> bool {
+    geteuid().as_raw() == 0
 }
 
 /// Read the AT_SECURE auxv flag set by the kernel at exec(2). No `nix`

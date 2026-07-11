@@ -1,0 +1,288 @@
+# Specification: Podman-Based Linux Test Harness
+
+**Date:** 2026-07-11
+**Status:** ACTIVE
+**Type:** Specification
+**Parent:** [REQ-PODMAN-TESTING](../requirements/REQ-PODMAN-TESTING.md)
+
+---
+
+## 1. Overview
+
+This spec defines the authoritative layout for running WORKSPACE-GUARD's full
+Linux quality gate and guard-install E2E sanity check tests via Podman. It enables
+macOS developers to get Linux-kernel fidelity without a dedicated Linux VM.
+
+```
+Host (Darwin or Linux)
+  |
+  |-- Tier 0 (Darwin only): make test-shell (bats + stubs)
+  |
+  |-- Tier 1+2 (podman run, ubuntu:22.04, non-privileged, root inside)
+  |     make lint / check / test / test-shell / build-binary-guard
+  |     e2e-root-only.sh (install root-only guard, sanity check, uninstall)
+  |
+  |-- Tier 3 (podman run --privileged, ubuntu:22.04)
+        e2e-capability.sh (install capability guard, non-root sanity check, uninstall)
+```
+
+Orchestrator: `scripts/test-in-podman.sh`
+
+---
+
+## 2. Files
+
+| Path | Role |
+|------|------|
+| `Containerfile.test` | `FROM ubuntu:22.04`; apt + rustup toolchain |
+| `scripts/test-in-podman.sh` | Top-level orchestrator |
+| `scripts/podman/ensure-machine.sh` | Darwin: start Podman Machine; pull base image |
+| `scripts/podman/tier1-test.sh` | Tier 1 quality gate (unit + feature-gated integration) |
+| `scripts/podman/run-tier12.sh` | Non-privileged container: Tier 1 + Tier 2 |
+| `scripts/podman/run-tier3.sh` | Privileged container: Tier 3 |
+| `scripts/podman/e2e-root-only.sh` | Root-only install sanity check (runs inside container) |
+| `scripts/podman/e2e-capability.sh` | Capability install sanity check (runs inside container) |
+
+---
+
+## 3. Container Image (`Containerfile.test`)
+
+Base: `ubuntu:22.04` (matches WORKSPACE-VM `Dockerfile.vm.j2`).
+
+Packages (mirrors Linux `make init`):
+
+```dockerfile
+build-essential pkg-config git curl ca-certificates
+libcap2-bin e2fsprogs file dpkg-dev ripgrep
+bats-core v1.13.0 (install.sh /usr/local; apt bats on 22.04 is too old)
+```
+
+Rust: rustup stable minimal profile; components `clippy`, `rustfmt`.
+
+Default tag: `workspace-guard-test:ubuntu-22.04` (overridable via
+`WORKSPACE_GUARD_TEST_IMAGE`).
+
+Build command (from repo root):
+
+```bash
+podman build -f Containerfile.test -t workspace-guard-test:ubuntu-22.04 .
+```
+
+---
+
+## 4. Volume Mount
+
+```text
+Host:  <workspace>/projects/          -->  Container: /projects/
+       ├── CI/
+       └── WORKSPACE-GUARD/            -->  workdir: /projects/WORKSPACE-GUARD
+```
+
+`PROJECTS_ROOT` resolves to `$(cd "$REPO_ROOT/.." && pwd)`.
+
+Mount flag: `-v "${PROJECTS_ROOT}:/projects:rw"`
+
+Precondition: `test -d "${PROJECTS_ROOT}/CI/scripts/bootstrap-workspace-guard"`.
+
+---
+
+## 5. Podman Binary Resolution
+
+Harness scripts resolve Podman in this order:
+
+1. `real-podman` on `PATH` (WORKSPACE-CI boot dir wrapper bypass)
+2. `podman` on `PATH` (Homebrew on Darwin, system on Linux)
+
+Destructive commands blocked by `podman-guard` (`system reset`, `rm -a`, etc.)
+are not used by this harness.
+
+---
+
+## 6. Tier 0 :  Darwin Host
+
+When `uname -s` is `Darwin`, before building the image:
+
+```bash
+make test-shell
+```
+
+On Linux hosts, Tier 0 is skipped.
+
+---
+
+## 7. Tier 1 :  Quality Gate (Inside Container)
+
+`scripts/podman/run-tier12.sh` runs:
+
+```bash
+podman run --rm \
+  -v "${PROJECTS_ROOT}:/projects:rw" \
+  -w /projects/WORKSPACE-GUARD \
+  "${IMAGE}" \
+  bash -c 'set -euo pipefail; bash scripts/podman/tier1-test.sh; bash scripts/podman/e2e-root-only.sh'
+```
+
+`tier1-test.sh` runs unit tests for both feature combinations, then:
+
+- **Capability-mode integration** as non-root `testagent` (uid 1002)
+- **Root-only integration** as container root
+- **`make test-shell`** as `testagent` (shell tests assume non-root owner semantics)
+
+Tier 1 does **not** prove capability-mode install properties (`setcap`,
+`0700 git.original`); those are Tier 3 only.
+
+Then invokes `e2e-root-only.sh` in the same container session (second
+`podman run` is avoided by chaining in one `bash -c`).
+
+---
+
+## 8. Tier 2 :  Root-Only E2E
+
+`scripts/podman/e2e-root-only.sh` (container root required):
+
+Environment:
+
+```bash
+export BUILD_MODE=root-only
+export FORCE_ROOT_ONLY=1
+export GUARD_NONINTERACTIVE=1
+```
+
+Install:
+
+```bash
+bash /projects/CI/scripts/bootstrap-workspace-guard install
+```
+
+sanity check (fresh repo). Sudo-gated identity keys (`user.email`, `user.name`) **must**
+be set via `sudo git config` (AT_SECURE on the guard wrapper). Env-var injection
+(`GIT_AUTHOR_*`, etc.) and plain `git config` without sudo are never valid in
+harness or production sanity check paths.
+
+```bash
+tmpdir=$(mktemp -d)
+cd "$tmpdir"
+git init -q
+sudo git config user.email "podman@test.local"
+sudo git config user.name "Podman Test"
+echo test > file.txt && git add file.txt && git commit -q -m "init"
+git status          # expect success
+git reset --hard    # expect failure (blocked)
+```
+
+Cleanup:
+
+```bash
+bash /projects/CI/scripts/bootstrap-workspace-guard uninstall
+```
+
+---
+
+## 9. Tier 3 :  Capability E2E
+
+`scripts/podman/run-tier3.sh`:
+
+```bash
+podman run --rm --privileged \
+  -v "${PROJECTS_ROOT}:/projects:rw" \
+  -w /projects/WORKSPACE-GUARD \
+  "${IMAGE}" \
+  bash scripts/podman/e2e-capability.sh
+```
+
+`scripts/podman/e2e-capability.sh`:
+
+1. Create `agent` user (uid 1001) if missing.
+2. `export GUARD_NONINTERACTIVE=1`; default capability build.
+3. `bash /projects/CI/scripts/bootstrap-workspace-guard install`
+4. Verify `getcap /usr/bin/git` includes `cap_setpcap`, `cap_chown`,
+   `cap_dac_override`, `cap_fowner`, `cap_fsetid`.
+5. Verify `/usr/bin/git.original` is `0700 root:root`.
+6. As `agent`: same sanity check repo as Tier 2 (`git status` pass,
+   `git reset --hard` blocked).
+7. As `agent`: `/usr/bin/git.original` must fail (not executable).
+8. `bash /projects/CI/scripts/bootstrap-workspace-guard uninstall`
+
+`--privileged` is required so `setcap` and `chattr` behave like bare metal.
+
+---
+
+## 10. Darwin Podman Machine (`ensure-machine.sh`)
+
+On Darwin:
+
+1. Fail if `podman` is not on `PATH` (hint: `make init`).
+2. If `podman info` fails, run `podman machine init` (if no machine exists)
+   then `podman machine start`.
+3. `podman pull docker.io/library/ubuntu:22.04`
+
+On Linux: verify `podman` exists; pull base image.
+
+---
+
+## 11. Makefile Targets
+
+```makefile
+init:           bootstrap-homebrew + install-system-deps --install
+                + bootstrap-rust + gitleaks + bootstrap-podman + ensure-machine.sh
+init-check:     install-system-deps --check (config/system-deps.yaml)
+test-podman:    init-check + scripts/test-in-podman.sh (all tiers)
+test-podman-quick: init-check + TEST_PODMAN_QUICK=1 + scripts/test-in-podman.sh
+
+build-guard:      bash ../CI/scripts/bootstrap-workspace-guard build-only
+install-guard:    sudo bash ../CI/scripts/bootstrap-workspace-guard install-only
+uninstall-guard:  sudo bash ../CI/scripts/bootstrap-workspace-guard uninstall
+check-guard:      bash ../CI/scripts/bootstrap-workspace-guard check
+```
+
+`scripts/test-in-podman.sh` calls `ensure-machine.sh` at startup (machine
+ready + base image pull) before Tier 0.
+
+---
+
+## 12. Pre-commit Integration
+
+| Hook | Darwin behaviour |
+|------|------------------|
+| `cargo-fmt` | SKIP (Tier 1 covers) |
+| `cargo-clippy` | SKIP (Tier 1 covers) |
+| `ci-check-push` | `make test-podman` |
+| `verify-coverage` | SKIP (Tier 1 `make test`; coverage disabled in thresholds) |
+
+---
+
+## 13. `GUARD_NONINTERACTIVE` Patch
+
+In `../CI/scripts/bootstrap-workspace-guard`, the install prompt:
+
+```bash
+if [[ -t 0 ]] && [[ "${GUARD_NONINTERACTIVE:-0}" != "1" ]]; then
+    # read -r response ...
+fi
+```
+
+When `GUARD_NONINTERACTIVE=1`, installation proceeds without prompting.
+
+---
+
+## 14. Environment Variables
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `WORKSPACE_GUARD_TEST_IMAGE` | `workspace-guard-test:ubuntu-22.04` | Image tag |
+| `TEST_PODMAN_QUICK` | `0` | `1` skips Tier 3 |
+| `GUARD_NONINTERACTIVE` | unset | `1` skips install prompt |
+| `BUILD_MODE` | unset (capability) | `root-only` for Tier 2 |
+| `FORCE_ROOT_ONLY` | unset | `1` allows root-only on multi-user |
+
+---
+
+## 15. Failure Modes
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `WORKSPACE-CI not found` | Missing `../CI` sibling | Clone/sync workspace repos |
+| `podman: command not found` | Podman not bootstrapped | `make init` |
+| `podman machine` errors (Darwin) | VM not running | `podman machine start` |
+| Tier 3 `setcap` failure | Container not privileged | Ensure `run-tier3.sh` uses `--privileged` |
+| Root-only refused | Non-root users in container | Set `FORCE_ROOT_ONLY=1` |

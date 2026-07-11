@@ -8,7 +8,10 @@
 load lib/harness
 
 setup()    { guard_setup; load_fake_repo; }
-teardown() { guard_teardown; }
+teardown() {
+    rm -rf "$GUARD_ROOT/target/.bats-sync-live"
+    guard_teardown
+}
 
 # Build a fake repo with real scripts + config + fake reference HTML
 # + stubbed live SUID/CAP surface. Sets FAKE_REPO in the current shell
@@ -38,12 +41,23 @@ _setup_sync_repo() {
         "passwd" \
         "MOUNT"
 
-    # Stub live SUID surface: sudo + passwd on this fake host.
-    printf '%s\n' /usr/bin/sudo /usr/bin/passwd > "$TEST_TMPDIR/suid.lst"
+    # Readable fake SUID/CAP binaries outside /tmp (decode-caps excludes /tmp).
+    # Real host SUID paths are unreadable on Darwin; fixtures must be
+    # world-readable so stat/sha256sum exercise real file I/O.
+    SYNC_LIVE_ROOT="$GUARD_ROOT/target/.bats-sync-live"
+    rm -rf "$SYNC_LIVE_ROOT"
+    SYNC_SUDO="$SYNC_LIVE_ROOT/usr/bin/sudo"
+    SYNC_PASSWD="$SYNC_LIVE_ROOT/usr/bin/passwd"
+    SYNC_GIT="$SYNC_LIVE_ROOT/usr/bin/git"
+    make_fake_suid "$SYNC_LIVE_ROOT" "$SYNC_SUDO" "$SYNC_PASSWD"
+    mkdir -p "$(dirname "$SYNC_GIT")"
+    echo 'fake-git-cap-surface' > "$SYNC_GIT"
+    chmod 0644 "$SYNC_GIT"
+
+    printf '%s\n' "$SYNC_SUDO" "$SYNC_PASSWD" > "$TEST_TMPDIR/suid.lst"
     export GUARD_FIND_FIXTURE="$TEST_TMPDIR/suid.lst"
 
-    # Stub live CAP surface: git with cap_chown.
-    printf '%s\n' '/usr/bin/git cap_chown,cap_dac_override=ep' > "$TEST_TMPDIR/caps.lst"
+    printf '%s\n' "$SYNC_GIT cap_chown,cap_dac_override=ep" > "$TEST_TMPDIR/caps.lst"
     export GUARD_GETCAP_FIXTURE="$TEST_TMPDIR/caps.lst"
 }
 
@@ -64,8 +78,8 @@ _run_sync() { run bash "$FAKE_REPO/scripts/sync-gtfobins" "$@"; }
     _run_sync --dry-run
     assert_success
     assert_output --partial "DRY RUN"
-    assert_output --partial "/usr/bin/sudo"
-    assert_output --partial "/usr/bin/passwd"
+    assert_output --partial "$SYNC_SUDO"
+    assert_output --partial "$SYNC_PASSWD"
     assert_output --partial "res/binary-lock.yaml"
     # No baseline files should have been written.
     [ ! -f "$FAKE_REPO/res/suid-baseline.yaml" ]
@@ -112,8 +126,8 @@ _stage_all_refs() {
     assert_success
     # suid-baseline.yaml should contain sudo and passwd (live SUID).
     [ -f "$FAKE_REPO/res/suid-baseline.yaml" ]
-    grep -q '/usr/bin/sudo' "$FAKE_REPO/res/suid-baseline.yaml"
-    grep -q '/usr/bin/passwd' "$FAKE_REPO/res/suid-baseline.yaml"
+    grep -q "$SYNC_SUDO" "$FAKE_REPO/res/suid-baseline.yaml"
+    grep -q "$SYNC_PASSWD" "$FAKE_REPO/res/suid-baseline.yaml"
 }
 
 @test "sync-gtfobins: suid-baseline.yaml has correct YAML shape" {
@@ -130,6 +144,18 @@ _stage_all_refs() {
     grep -q '    contained:' "$bl"
 }
 
+@test "sync-gtfobins: suid-baseline sha256 is real file digest (not fallback)" {
+    _setup_sync_repo
+    _run_sync
+    assert_success
+    local bl="$FAKE_REPO/res/suid-baseline.yaml" expected
+    expected="$(sha256sum "$SYNC_SUDO" | awk '{print $1}')"
+    awk -v p="$SYNC_SUDO" -v want="$expected" \
+        '$0 ~ "path: \"" p "\"" {c=1} c && /sha256:/{gsub(/.*sha256: "/, ""); gsub(/".*/, ""); print; exit}' "$bl" \
+        | grep -q "$expected"
+    refute_line 'sha256: "?"'
+}
+
 @test "sync-gtfobins: suid-baseline marks gtfobins=true for GTFOBins-listed binaries" {
     _setup_sync_repo
     _run_sync
@@ -137,7 +163,7 @@ _stage_all_refs() {
     # sudo is in the fake GTFOBins SUID list -> gtfobins: true
     local bl="$FAKE_REPO/res/suid-baseline.yaml"
     # Extract the sudo block and check gtfobins: true.
-    awk '/path: "\/usr\/bin\/sudo"/{c=1} c && /gtfobins:/{print; exit}' "$bl" | grep -q 'true'
+    awk -v p="$SYNC_SUDO" '$0 ~ "path: \"" p "\"" {c=1} c && /gtfobins:/{print; exit}' "$bl" | grep -q 'true'
 }
 
 @test "sync-gtfobins: fcap-baseline.yaml has correct YAML shape" {
@@ -159,7 +185,7 @@ _stage_all_refs() {
     assert_success
     local fb="$FAKE_REPO/res/fcap-baseline.yaml"
     # git path should have recommended: "throttle"
-    awk '/path: "\/usr\/bin\/git"/{c=1} c && /recommended:/{print; exit}' "$fb" | grep -q 'throttle'
+    awk -v p="$SYNC_GIT" '$0 ~ "path: \"" p "\"" {c=1} c && /recommended:/{print; exit}' "$fb" | grep -q 'throttle'
 }
 
 @test "sync-gtfobins: cve-catalog.yaml is static with expected CVE IDs" {
@@ -188,9 +214,8 @@ _stage_all_refs() {
     _run_sync
     assert_success
     local lk="$FAKE_REPO/res/binary-lock.yaml"
-    # sudo and passwd are live SUID -> should have path: "/usr/bin/sudo"
-    grep -q 'path: "/usr/bin/sudo"' "$lk"
-    grep -q 'path: "/usr/bin/passwd"' "$lk"
+    grep -q "path: \"$SYNC_SUDO\"" "$lk"
+    grep -q "path: \"$SYNC_PASSWD\"" "$lk"
 }
 
 @test "sync-gtfobins: binary-lock.yaml folds live-surface-only binaries" {
@@ -203,7 +228,7 @@ _stage_all_refs() {
     mkdir -p "$(dirname "$custom_path")"
     echo '#!/usr/bin/env bash' > "$custom_path"
     chmod 4755 "$custom_path"
-    printf '%s\n' /usr/bin/sudo /usr/bin/passwd "$custom_path" \
+    printf '%s\n' "$SYNC_SUDO" "$SYNC_PASSWD" "$custom_path" \
         > "$TEST_TMPDIR/suid.lst"
     _run_sync
     assert_success
@@ -221,7 +246,7 @@ _stage_all_refs() {
     # These should show up as konstruktoid: true in suid-baseline.
     local bl="$FAKE_REPO/res/suid-baseline.yaml"
     # passwd is live + in konstruktoid -> konstruktoid: true
-    awk '/path: "\/usr\/bin\/passwd"/{c=1} c && /konstruktoid:/{print; exit}' "$bl" | grep -q 'true'
+    awk -v p="$SYNC_PASSWD" '$0 ~ "path: \"" p "\"" {c=1} c && /konstruktoid:/{print; exit}' "$bl" | grep -q 'true'
 }
 
 @test "sync-gtfobins: fetch_url returns 0 even when curl fails" {

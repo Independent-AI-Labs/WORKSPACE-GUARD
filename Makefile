@@ -21,12 +21,15 @@
 _OS := $(shell uname -s)
 _HB_PREFIX := $(if $(wildcard /opt/homebrew),/opt/homebrew,$(if $(wildcard /usr/local),/usr/local))
 SHELL := $(if $(wildcard $(_HB_PREFIX)/bin/bash),$(_HB_PREFIX)/bin/bash,/bin/bash)
-export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-sed/libexec/gnubin:$(_HB_PREFIX)/opt/findutils/libexec/gnubin:$(_HB_PREFIX)/bin:$(PATH)
+export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-sed/libexec/gnubin:$(_HB_PREFIX)/opt/findutils/libexec/gnubin:$(_HB_PREFIX)/opt/grep/libexec/gnubin:$(_HB_PREFIX)/bin:$(PATH)
 
 .DEFAULT_GOAL := help
 
 REPO_ROOT := $(shell if [ -d .git ]; then git rev-parse --show-toplevel; else pwd; fi)
 CI_DIR := $(abspath $(REPO_ROOT)/../CI)
+CI_BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
+CI_BOOT_BIN := $(CI_DIR)/$(CI_BOOT_NAME)/bin
+export PATH := $(CI_BOOT_BIN):$(PATH)
 
 -include $(CI_DIR)/lib/makefile_contract.mk
 
@@ -55,48 +58,28 @@ help: ## Show this help
 	@echo ""
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+.PHONY: init-check
+init-check: ## Check system dependencies (via CI resolver + config/system-deps.yaml)
+	bash "$(CI_DIR)/scripts/install-system-deps" --check --boot-dir "$(CI_BOOT_BIN)"
+
 .PHONY: init
-init: ## Install system-level dependencies (platform-aware: brew on macOS, apt on Linux + Rust toolchain)
-ifeq ($(_OS),Darwin)
-	@echo "==> Installing Homebrew + GNU tools (macOS)..."
+init: ## Install system-level dependencies (platform-aware via config/system-deps.yaml)
+	@echo "==> Installing Homebrew + GNU tools (macOS only)..."
 	@bash "$(CI_DIR)/scripts/bootstrap-homebrew"
-	@echo "==> Installing bats-core (macOS)..."
-	@if ! command -v bats > /dev/null 2>&1; then \
-		brew install bats-core; \
-	else \
-		echo "bats already installed: $$(bats --version)"; \
-	fi
+	@echo "==> Installing system packages (from config/system-deps.yaml)..."
+	bash "$(CI_DIR)/scripts/install-system-deps" --install --boot-dir "$(CI_BOOT_BIN)"
 	@echo "==> Installing Rust toolchain (if missing)..."
 	@if ! command -v cargo > /dev/null 2>&1; then \
 		bash "$(CI_DIR)/scripts/bootstrap-rust"; \
-	else \
-		echo "cargo already installed: $$(cargo --version)"; \
 	fi
 	@echo "==> Installing Rust components (clippy, rustfmt)..."
 	@rustup component add clippy rustfmt
 	@echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
 	@$(MAKE) install-gitleaks
-	@echo "==> macOS system dependencies installed."
-else
-	@echo "==> Installing system packages (Linux)..."
-	$(SUDO) apt-get update -qq
-	$(SUDO) apt-get install -y --no-install-recommends \
-		curl tar ca-certificates \
-		libcap2-bin e2fsprogs file \
-		build-essential pkg-config \
-		bats bats-assert bats-support bats-file
-	@echo "==> Installing Rust toolchain (if missing)..."
-	@if ! command -v cargo > /dev/null 2>&1; then \
-		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal; \
-	else \
-		echo "cargo already installed: $$(cargo --version)"; \
-	fi
-	@echo "==> Installing Rust components (clippy, rustfmt)..."
-	@rustup component add clippy rustfmt
-	@echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
-	@$(MAKE) install-gitleaks
-	@echo "==> Linux system dependencies installed."
-endif
+	@echo "==> Bootstrapping Podman (Linux VM test harness)..."
+	@bash "$(CI_DIR)/scripts/bootstrap-podman"
+	@bash scripts/podman/ensure-machine.sh
+	@echo "==> System dependencies installed."
 
 .PHONY: preflight
 preflight: ## Verify required tooling is present
@@ -153,10 +136,37 @@ lint: ## Run cargo fmt --check + clippy
 type-check: ## Rust has no separate type-check; run cargo check
 	cargo check --workspace
 
-.PHONY: test
-test: ## Run cargo test (all feature combinations)
-	cargo test --workspace
-	cargo test --no-default-features --features root-only
+.PHONY: test test-unit test-integration-cap test-integration-root
+test: ## Run cargo test (all feature combinations; integration gated by euid)
+	@$(MAKE) test-unit
+	@if [ "$(_OS)" = "Darwin" ]; then \
+		echo "SKIP: integration tests on Darwin (Linux-only; use make test-podman)"; \
+	elif [ "$$(id -u)" -ne 0 ]; then \
+		$(MAKE) test-integration-cap; \
+	else \
+		echo "SKIP: capability integration tests (require non-root; use scripts/podman/tier1-test.sh in container)"; \
+	fi
+	@if [ "$(_OS)" = "Darwin" ]; then \
+		: ; \
+	elif [ "$$(id -u)" -eq 0 ]; then \
+		$(MAKE) test-integration-root; \
+	else \
+		echo "SKIP: root-only integration tests (require root)"; \
+	fi
+
+test-unit: ## Unit/binary tests only (both feature combinations)
+	@if [ "$(_OS)" != "Darwin" ]; then \
+		cargo test --workspace --bins; \
+		cargo test --no-default-features --features root-only --bins; \
+	else \
+		echo "SKIP: cargo unit tests on Darwin (Linux-only; use make test-podman)"; \
+	fi
+
+test-integration-cap: ## Capability-mode integration tests (non-root)
+	cargo test --test integration_test
+
+test-integration-root: ## Root-only integration tests (root)
+	cargo test --no-default-features --features root-only --test integration_test
 
 .PHONY: test-shell
 test-shell: ## Run the bats shell test suite (NOT gated in check-push).
@@ -171,6 +181,32 @@ check-push: ## Pre-push quality gate: fmt + clippy + check (both feature combos)
 	@$(MAKE) lint
 	@$(MAKE) check
 	@$(MAKE) test
+
+# ═══════════════════════════════════════════════════════════════════════
+# Podman test harness (macOS + Linux hosts without native Linux kernel)
+# See docs/specifications/SPEC-PODMAN-TESTING.md
+# ═══════════════════════════════════════════════════════════════════════
+
+.PHONY: test-podman test-podman-quick
+.PHONY: build-guard install-guard uninstall-guard check-guard
+
+test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
+	bash scripts/test-in-podman.sh
+
+test-podman-quick: init-check ## Podman harness Tiers 0-2 only (skip capability E2E)
+	TEST_PODMAN_QUICK=1 bash scripts/test-in-podman.sh
+
+build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
+	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+
+install-guard: ## Install git-guard to /usr/bin/git (requires root, binary pre-built)
+	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-only
+
+uninstall-guard: ## Uninstall git-guard, restore original /usr/bin/git (requires root)
+	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
+
+check-guard: ## Check git-guard installation status
+	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check
 
 .PHONY: build
 build: ## Build release binary (default + root-only)
@@ -214,9 +250,21 @@ DEVNULL := /dev/null
 #   make uninstall-lock  -> rollback containment (ROOT)
 # ═══════════════════════════════════════════════════════════════════════
 
-.PHONY: sync-gtfobins
+.PHONY: sync-gtfobins sync-gtfobins-linux
 sync-gtfobins: ## Fetch GTFOBins + konstruktoid, scan live SUID/CAP, write res/ baselines + refresh .gitleaksignore
 	bash scripts/sync-gtfobins
+	@$(MAKE) --no-print-directory gitleaks-ignore-regen
+
+sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not sync on Darwin for commit)
+	@_podman=""; \
+	if command -v real-podman >/dev/null 2>&1; then _podman=real-podman; \
+	elif command -v podman >/dev/null 2>&1; then _podman=podman; \
+	else echo "ERROR: podman not found. Run: make init"; exit 1; fi; \
+	$$_podman run --rm \
+		-v "$(abspath $(REPO_ROOT)/..):/projects:rw" \
+		-w /projects/WORKSPACE-GUARD \
+		$${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04} \
+		bash scripts/sync-gtfobins
 	@$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 .PHONY: gitleaks-ignore-regen
