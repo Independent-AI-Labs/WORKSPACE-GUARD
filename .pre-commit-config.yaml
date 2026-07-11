@@ -101,7 +101,7 @@ repos:
 
       - id: verify-coverage
         name: Verify Test Coverage
-        entry: "bash -c 'source ../CI/lib/checks.sh && ci_verify_coverage'"
+        entry: "bash -c 'if [ \"$(uname -s)\" = Darwin ]; then echo \"SKIP: Linux-only project\"; exit 0; fi; source ../CI/lib/checks.sh && ci_verify_coverage'"
         language: system
         stages: [pre-push]
         pass_filenames: false
