@@ -63,7 +63,7 @@ tasks:
   check:
     # Aggregator: deps run lint+type-check+test through moon's task DAG;
     # the command itself is a no-op so we don't re-invoke `make check`
-    # which would recurse back through the public shim.
+    # which would recurse back through the public guard wrapper.
     command: 'true'
     deps:
       - '~:lint'

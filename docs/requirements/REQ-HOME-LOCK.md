@@ -20,7 +20,7 @@ During a real CI incident in WORKSPACE-CI, a **rootless** agent wrote
 opening the file with a text-editor subprocess, bypassing both the `git
 config` command intercept and the per-repo `.git/config` lock. Because
 `~/.gitconfig` is read by EVERY git invocation on the host, the hook
-silently compromised every repository for that user. The injection
+compromised every repository for that user without raising an alert. The injection
 persisted across reboots and produced no drift alert because no
 baseline covers files outside `.git/`.
 
@@ -66,7 +66,7 @@ binary lock this complements is in
 - **REQ-HL-004**: The protected set MUST be data-driven from
   `config/guard_locked_paths.yaml` (the `absolute_file_paths:` block),
   not hardcoded in the scripts. New entries are added by editing the
-  YAML and rerunning `make install-home-lock` -- no script change
+  YAML and rerunning `make install-home-lock`: no script change
   required.
 
 - **REQ-HL-005**: The `~` prefix in YAML expands to `$HOME` at runtime
@@ -197,12 +197,12 @@ binary lock this complements is in
 - **REQ-HL-500**: Install, uninstall, and drift-check shall each have
   a bats suite covering: `--help`, unknown arg, missing config/empty
   entries, `--dry-run`, the create-missing branch, the idempotent
-  branch (using a `stat` stub), the `--quiet` branch, and the report
+  branch (using a fake `stat` executable), the `--quiet` branch, and the report
   YAML emissions.
 
 - **REQ-HL-501**: Tests shall run as a non-root bats user. The
-  root-only `chown` code path is exercised via a `chown` stub.
-  The idempotency branch is exercised via a `stat` stub that
+  root-only `chown` code path is exercised via a fake `chown` executable.
+  The idempotency branch is exercised via a fake `stat` executable that
   reports `uid=0`, `gid=0`, `mode=$expected` (built per-test via
   `make_stub`).
 

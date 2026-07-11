@@ -241,7 +241,7 @@ The threat model and CVE catalog that these requirements defend against are in
   - `personality` (personality flags can disable ASLR).
   - `kexec_load`, `kexec_file_load` (kernel replacement).
   - `init_module`, `finit_module`, `delete_module` (kernel modules).
-  - `create_module` (legacy module syscall).
+  - `create_module` (deprecated module syscall).
   - `settimeofday`, `clock_settime` (time manipulation).
 - **REQ-SBX-112**: The rootless profile shall block `socket(AF_ALG, ...)`
   by filtering the `socket` syscall with seccomp: if `domain == AF_ALG`
@@ -413,11 +413,12 @@ The threat model and CVE catalog that these requirements defend against are in
   every canonical source HTML and emits a SHA-256 manifest at
   `res/canonical-sources.sha256` so drift between the cached copy and the
   canonical URL is detectable.
-- **REQ-SYNC-208**: The script shall NOT use bare `python3` or `python`
-  invocations. It is a bash script. All text processing uses standard tools
+- **REQ-SYNC-208**: The script shall NOT use bare interpreter invocations
+  outside `uv run`. It is a bash script. All text processing uses standard tools
   (`grep`, `awk`, `find`, `sha256sum`, `stat`) available on the target
-  host. (Exception: the script may invoke `uv run python` if YAML
-  generation needs a library, but the fetch and parse logic is bash.)
+  host. (Exception: the script may invoke `uv run` with the venv
+  interpreter if YAML generation needs a library, but the fetch and parse
+  logic is bash.)
 
 ---
 
@@ -468,9 +469,9 @@ The threat model and CVE catalog that these requirements defend against are in
 - **No purge**: No binary is ever removed. The disposition is always
   contain-via-guard + audit. Purging breaks system updates and package
   management.
-- **No bare interpreter**: Scripts use bash only. No `python3` or `python`
-  invocations outside a venv (`uv run`). YAML generation may use `uv run
-  python` if needed.
+- **No bare interpreter**: Scripts use bash only. No bare interpreter
+  invocations outside a venv (`uv run`). YAML generation may use `uv run`
+  with the venv interpreter if needed.
 - **File length**: All `.sh` scripts are under 512 lines. All `.md`
   documents are not subject to file length limits but should be concise.
 - **Banned words**: All documents follow the repo banned words policy. No

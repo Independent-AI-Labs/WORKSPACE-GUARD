@@ -39,13 +39,13 @@ that editor shell if the operator tries to set a dangerous value.
 The protected set is data-driven from
 `config/guard_locked_paths.yaml` (the `absolute_file_paths:` block),
 so new entries are added by editing the YAML and rerunning
-`make install-home-lock` -- no script or binary rebuild required.
+`make install-home-lock`: no script or binary rebuild required.
 
 There are three scripts:
 
-1. `scripts/install-home-lock` -- chown to root, set mode, write state.
-2. `scripts/uninstall-home-lock` -- restore original owner/mode, clear state.
-3. `scripts/home-drift-check` -- read-only compare against the state file.
+1. `scripts/install-home-lock`: chown to root, set mode, write state.
+2. `scripts/uninstall-home-lock`: restore original owner/mode, clear state.
+3. `scripts/home-drift-check`: read-only compare against the state file.
 
 State lives in `res/home-lock-state.yaml`; the drift report lives in
 `res/home-drift-report.yaml`. Both are committed to the repo (the
@@ -58,8 +58,8 @@ state is the baseline; the report is the latest audit).
 The threat this defends against, taken from the CI incident:
 
 1. A non-root AI agent (uid 1000, no capabilities) runs on the host.
-2. The agent invokes a text editor: `vim ~/.gitconfig` (or
-   `python3 -c "open('~/.gitconfig','w').write(...)"`).
+2. The agent invokes a text editor: `vim ~/.gitconfig` (or any
+   subprocess that can open the file for write).
 3. The editor writes `core.hooksPath = /tmp/opencode/githooks` and
    `[include] path = /tmp/evil.inc` to `~/.gitconfig`.
 4. On the next `git` invocation (any repo for that user), git reads
@@ -130,7 +130,7 @@ All three scripts share:
 - A single `trap ... EXIT` cleanup for temp files (each script
   registers its temps as they are created).
 - `DEVNULL=/dev/null` indirection so the source never embeds the
-  literal `2>/dev/null` idiom the silent-swallow checker flags.
+  literal `2>/dev/null` idiom the error-swallow checker flags.
 - Root-only assertion for install/uninstall (`id -u` must equal 0);
   drift-check runs as any user.
 - Awk-based parsing of both the YAML config and the YAML state file
@@ -197,8 +197,8 @@ Flow:
    f. Idempotency check: if `orig_uid == 0 AND orig_gid == 0 AND
       orig_mode == <mode>`, print `ALREADY LOCKED (skip)` and
       continue.
-   g. `chown root:root <path>` (the test harness injects a `chown`
-      stub so non-root bats runs do not abort).
+   g. `chown root:root <path>` (the test harness injects a fake `chown`
+      executable so non-root bats runs do not abort).
    h. `chmod <mode> <path>`.
    i. Append a state entry: `path`, `original_owner_uid`,
       `original_owner_gid`, `original_mode`, `expected_mode`,
@@ -341,10 +341,10 @@ this table directly.
 
 `src/config_consistency_tests.rs` adds three tests:
 
-1. `home_lock_paths_parses` -- the YAML loads without error.
-2. `home_lock_paths_are_absolute_or_tilde_prefixed` -- every key is
+1. `home_lock_paths_parses`: the YAML loads without error.
+2. `home_lock_paths_are_absolute_or_tilde_prefixed`: every key is
    either `/...` or `~...`.
-3. `home_lock_modes_are_in_valid_range` -- every value is in
+3. `home_lock_modes_are_in_valid_range`: every value is in
    `[0o400, 0o777]`.
 
 ---
@@ -354,23 +354,23 @@ this table directly.
 The suite (34 tests) is structured in three sections mirroring the
 three scripts. Helpers:
 
-- `_setup_home` -- builds a fake repo with real scripts, a fake home
+- `_setup_home`: builds a fake repo with real scripts, a fake home
   at `$TEST_TMPDIR/fakehome`, and an empty `absolute_file_paths`
   block.
-- `_write_locked_paths dir <path> <mode> ...` -- (re)writes the
+- `_write_locked_paths dir <path> <mode> ...`: (re)writes the
   `absolute_file_paths:` block with the given `~/path: 0o<mode>`
   pairs.
-- `_make_home_files <path> <content> ...` -- materialises the listed
+- `_make_home_files <path> <content> ...`: materialises the listed
   fake-home files with content, expanding `~` against `$FAKE_HOME`.
-- `_tilde <path>` -- resolves a `~`-prefixed path against
+- `_tilde <path>`: resolves a `~`-prefixed path against
   `$FAKE_HOME` (used by assertions).
-- `_stub_stat_root <mode>` -- builds a `stat` stub that always reports
+- `_stub_stat_root <mode>`: builds a fake `stat` executable that always reports
   `uid=0`, `gid=0`, `mode=<mode>`, used to exercise the idempotency
   branch and the no-drift path of `home-drift-check`.
 
 Stub pattern: the test uses `run env HOME="$FAKE_HOME" bash <script>`
 so bats' `run` helper captures the output of `env` (which sets HOME
-for the bash subprocess). NOTE: the order matters -- `env HOME=... run
+for the bash subprocess). NOTE: the order matters: `env HOME=... run
 bash ...` does NOT call the bats `run` function (env would exec the
 non-existent `run` binary and `run` would never set `$status`/`$output`,
 producing the cryptic `[: : integer expression expected` error from
@@ -380,9 +380,9 @@ Test coverage matrix:
 
 | script             | test classes |
 |--------------------|--------------|
-| install-home-lock  | `--help`, unknown arg, missing config, no entries, `--dry-run`, create-missing (`touch`), create parent (`mkdir -p`), state-file write, state-field capture (orig owner + orig mode + expected mode + locked_at), mode 0644 (gitconfig), mode 0600 (authorized_keys), chown invoked, `~` expands to HOME at runtime, `/root/` absolute path, multiple entries, idempotent (stat stub) |
+| install-home-lock  | `--help`, unknown arg, missing config, no entries, `--dry-run`, create-missing (`touch`), create parent (`mkdir -p`), state-file write, state-field capture (orig owner + orig mode + expected mode + locked_at), mode 0644 (gitconfig), mode 0600 (authorized_keys), chown invoked, `~` expands to HOME at runtime, `/root/` absolute path, multiple entries, idempotent (fake stat) |
 | uninstall-home-lock| `--help`, unknown arg, state missing (exit 0 nothing-to-roll-back), state empty, `--dry-run`, restore original mode, clear state, multiple entries |
-| home-drift-check   | `--help`, unknown arg, baseline missing, baseline empty, no drift (stat stub), missing file CRITICAL, owner-changed CRITICAL, mode-changed CRITICAL, `--quiet`, writes report YAML |
+| home-drift-check   | `--help`, unknown arg, baseline missing, baseline empty, no drift (fake stat), missing file CRITICAL, owner-changed CRITICAL, mode-changed CRITICAL, `--quiet`, writes report YAML |
 
 ---
 

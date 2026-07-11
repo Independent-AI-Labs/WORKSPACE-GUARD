@@ -13,7 +13,7 @@ features that do not exist on Darwin: file capabilities (`setcap`/`getcap`),
 `chattr +i`, `dpkg-divert`, and `getauxval(AT_SECURE)`. Developers on macOS
 cannot run `cargo test`, `cargo clippy`, or real guard installation natively.
 
-Today, macOS developers get stubbed bats tests (`make test-shell`) and
+Today, macOS developers get PATH-faked bats tests (`make test-shell`) and
 pre-commit hooks that **skip** Rust fmt/clippy/test/coverage. Linux CI runs
 the full gate, but local macOS feedback is incomplete.
 
@@ -71,7 +71,7 @@ model exercised in Tier 2.
 
 - **REQ-POD-030**: On Darwin only, `make test-podman` shall run `make
   test-shell` on the host **before** any Podman tiers. This exercises bats
-  stubs that do not require a Linux kernel.
+  PATH fakes that do not require a Linux kernel.
 - **REQ-POD-031**: On Linux hosts, Tier 0 is skipped; shell tests run inside
   Tier 1.
 

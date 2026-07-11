@@ -1,8 +1,8 @@
 # Compiled Privilege Enforcement for the Linux SUID & Capability Surface
 
 WORKSPACE-GUARD is a framework that replaces exploitable SUID and
-file-capability binaries on a Linux host with a compiled, policy-gating shim.
-The shim validates arguments, configuration keys, and environment before
+file-capability binaries on a Linux host with a compiled, policy-gating guard.
+The guard validates arguments, configuration keys, and environment before
 `execve()`-ing the real binary, which has been relocated to a mode-0700
 `root:root` location the untrusted user can neither read nor execute directly.
 The same pattern applies to every privileged entry point on the box, not just
@@ -27,12 +27,12 @@ Every instance of the framework applies the same five steps:
 1. **Relocate.** Move the real binary from its public path to
    `<path>.original` (git guard) or `<path>.real` (system-binary lockdown),
    mode 0700 `root:root`: unreadable and unexecutable by non-root.
-2. **Install.** Place a compiled Rust shim (git guard, ~1,600 lines, 5
+2. **Install.** Place a compiled Rust guard binary (git guard, ~1,600 lines, 5
    modules) or a single generic Rust guard binary (system-binary lockdown:
    one binary compiled once, copied to every contained path, dispatching by
    `basename(argv[0])` at runtime) at the
    public path, with a minimal set of Linux file capabilities.
-3. **Gate.** Before `execve()` of the real binary, the shim validates the
+3. **Gate.** Before `execve()` of the real binary, the guard validates the
    full argument vector, intercepted `-c`/`--config` keys, and the
    environment. Anything matching a deny rule is blocked and audited.
 4. **Contain.** For authorized invocations, the real binary runs under a
@@ -43,7 +43,7 @@ Every instance of the framework applies the same five steps:
    UID, not spoofable `$HOME`) and to `/dev/tty` for visibility.
 
 File capabilities are granular, safe under `NO_NEW_PRIVS`, and simple to
-audit. `dpkg-divert` protects the shim from `apt` overwrites; `chattr +i`
+audit. `dpkg-divert` protects the guard from `apt` overwrites; `chattr +i`
 makes the relocated real binary immutable.
 
 ## Program I: Git Guard
@@ -258,7 +258,7 @@ lock inside each repo closes the per-repo vector. NEITHER covers the
 **file-write** vector: a non-root agent can open `~/.gitconfig` with a
 text-editor subprocess and write `core.hooksPath = /tmp/evil`
 directly. Because every git invocation for that user reads
-`~/.gitconfig`, this silently compromises every repo on the host.
+`~/.gitconfig`, this compromises every repo on the host without raising an alert.
 This exact attack happened in WORKSPACE-CI; it persisted across
 reboots and produced no drift alert.
 
@@ -272,11 +272,11 @@ editor shell).
 Three scripts, all data-driven from
 `config/guard_locked_paths.yaml` (the `absolute_file_paths:` block):
 
-- `scripts/install-home-lock` -- root-only chown + chmod, create-missing,
+- `scripts/install-home-lock`: root-only chown + chmod, create-missing,
   idempotent, writes `res/home-lock-state.yaml`.
-- `scripts/uninstall-home-lock` -- root-only restore-from-state, clears
+- `scripts/uninstall-home-lock`: root-only restore-from-state, clears
   state on completion.
-- `scripts/home-drift-check` -- report-only (no auto-repair, audit
+- `scripts/home-drift-check`: report-only (no auto-repair, audit
   trail preserved); exits 1 on CRITICAL.
 
 `make install-home-lock` / `make uninstall-home-lock` / `make home-drift-check`.
@@ -338,8 +338,7 @@ cargo build --release                                    # Release (opt-level=z,
 make test                                                # Unit + integration (integration gated by euid)
 make test-podman-quick                                   # Podman Tiers 0-2 (Linux gate on Darwin)
 make sync-gtfobins-linux                                 # Regenerate res/ baselines (Linux container)
-cargo fmt --all -- --check                               # Format check
-cargo clippy --workspace --all-targets -- -D warnings    # Strict lint
+make lint                                                # Format check + strict clippy (both feature combos)
 make test                                                # Full workspace test suite
 ```
 
@@ -370,7 +369,7 @@ See [docs/specifications/SPEC-PODMAN-TESTING.md](docs/specifications/SPEC-PODMAN
    Policy-check sub-calls get no caps (least-privilege). The authorized child
    raises `CAP_DAC_OVERRIDE` into Ambient before exec'ing the real binary;
    the cap dies with the child on exit.
-4. **`dpkg-divert` protected** (git guard): `apt` cannot overwrite the shim.
+4. **`dpkg-divert` protected** (git guard): `apt` cannot overwrite the guard.
 5. **Allow-list environment**: closed surface, future variables cannot sneak
    through. `PATH` hardcoded; `safe.directory=*` injected (git guard).
 6. **Resource limits**: `RLIMIT_NOFILE=256` prevents fd exhaustion;

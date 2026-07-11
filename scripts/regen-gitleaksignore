@@ -29,7 +29,7 @@ if ! command -v gitleaks >/dev/null 2>&1; then
 fi
 
 # Use uv-managed interpreter for hermetic execution (no bare calls).
-shim=(uv run --quiet python)
+uvpy=(uv run --quiet python)
 
 tmpf=$(mktemp)
 trap 'rm -f "$tmpf"' EXIT
@@ -46,7 +46,7 @@ fi
 
 # Merge fingerprints: keep non-references entries already on disk, append
 # (dedup) the freshly-scanned docs/references/ fingerprints.
-"${shim[@]}" -c '
+"${uvpy[@]}" -c '
 import json, os, sys
 report_path, ignore_path = sys.argv[1], sys.argv[2]
 PREFIX = "docs/references/"

@@ -16,7 +16,7 @@ macOS developers to get Linux-kernel fidelity without a dedicated Linux VM.
 ```
 Host (Darwin or Linux)
   |
-  |-- Tier 0 (Darwin only): make test-shell (bats + stubs)
+  |-- Tier 0 (Darwin only): make test-shell (bats + PATH fakes)
   |
   |-- Tier 1+2 (podman run, ubuntu:22.04, non-privileged, root inside)
   |     make lint / check / test / test-shell / build-binary-guard
