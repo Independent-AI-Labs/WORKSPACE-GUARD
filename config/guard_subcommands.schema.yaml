@@ -25,7 +25,13 @@ fields:
   - path: blocked
     type: list<string>
     required: true
-    description: "Git subcommands that are unconditionally denied (e.g. reset, checkout, clean)."
+    description: "Git subcommands unconditionally denied for all users (e.g. reset, clean, update-ref plumbing)."
+
+  - path: sudo_gated
+    type: list<string>
+    required: false
+    default: []
+    description: "Git subcommands denied for non-root, allowed in sudo/AT_SECURE context (e.g. checkout, switch, submodule)."
 
   - path: partial
     type: list<string>

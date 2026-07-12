@@ -105,6 +105,9 @@ rm -f "$_agent_check"
 rm -rf "$tmpdir"
 cd /projects/WORKSPACE-GUARD
 
+echo "==> Tier 3: policy-matrix E2E..."
+bash scripts/podman/e2e-policy-matrix.sh
+
 echo "==> Tier 3: uninstalling guard..."
 bash "$_CI_ROOT/scripts/bootstrap-workspace-guard" uninstall
 

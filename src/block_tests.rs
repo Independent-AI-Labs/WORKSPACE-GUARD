@@ -26,6 +26,38 @@ fn argv(args: &[&str]) -> Vec<OsString> {
 }
 
 #[test]
+fn blocked_subcommands_in_config() {
+    for sub in [
+        "reset", "clean", "restore", "update-ref", "read-tree", "symbolic-ref",
+    ] {
+        assert!(
+            BLOCKED_SUBCOMMANDS.contains(&sub),
+            "{sub} should be unconditionally blocked"
+        );
+    }
+}
+
+#[test]
+fn switch_is_sudo_gated_not_blocked() {
+    assert!(!BLOCKED_SUBCOMMANDS.contains(&"switch"));
+    assert!(SUDO_GATED_SUBCOMMANDS.contains(&"switch"));
+}
+
+#[test]
+fn plumbing_subcommands_blocked_for_root() {
+    for sub in ["update-ref", "read-tree", "symbolic-ref", "write-tree", "commit-tree"] {
+        let state = empty_state(sub);
+        let argv_os = argv(&["git", sub]);
+        let result = check_blocked(&state, sub, &argv_os, "/nonexistent-git", None);
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "{sub} should be blocked even for root: {:?}",
+            result
+        );
+    }
+}
+
+#[test]
 fn sudo_gated_submodule_allowed_for_root() {
     let state = empty_state("submodule");
     let argv_os = argv(&["git", "submodule", "update", "--init"]);
@@ -55,7 +87,7 @@ fn blocked_still_blocked_for_root() {
 #[test]
 fn sudo_gated_checkout_allowed_for_root() {
     let state = empty_state("checkout");
-    let argv_os = argv(&["git", "checkout", "--", "."]);
+    let argv_os = argv(&["git", "checkout", "main"]);
     let sudo = crate::is_sudo();
     let result = check_blocked(&state, "checkout", &argv_os, "/nonexistent-git", None);
     if sudo {
@@ -66,9 +98,89 @@ fn sudo_gated_checkout_allowed_for_root() {
 }
 
 #[test]
+fn checkout_discard_blocked_even_for_root() {
+    let state = empty_state("checkout");
+    let argv_os = argv(&["git", "checkout", "--", "."]);
+    let result = check_blocked(&state, "checkout", &argv_os, "/nonexistent-git", None);
+    if crate::is_sudo() {
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "destructive checkout should be blocked for root: {:?}",
+            result
+        );
+    }
+}
+
+#[test]
+fn switch_discard_changes_blocked() {
+    let state = empty_state("switch");
+    let argv_os = argv(&["git", "switch", "--discard-changes"]);
+    let result = check_blocked(&state, "switch", &argv_os, "/nonexistent-git", None);
+    if crate::is_sudo() {
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "switch --discard-changes should be blocked: {:?}",
+            result
+        );
+    }
+}
+
+#[test]
 fn checkout_not_in_blocked_list() {
     assert!(!BLOCKED_SUBCOMMANDS.contains(&"checkout"));
     assert!(SUDO_GATED_SUBCOMMANDS.contains(&"checkout"));
+}
+
+#[test]
+fn push_force_blocked() {
+    let mut state = empty_state("push");
+    state.has_force_flag = true;
+    let argv_os = argv(&["git", "push", "--force", "origin", "main"]);
+    let result = check_blocked(&state, "push", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn commit_amend_blocked() {
+    let mut state = empty_state("commit");
+    state.has_amend = true;
+    let argv_os = argv(&["git", "commit", "--amend"]);
+    let result = check_blocked(&state, "commit", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn rm_without_cached_blocked() {
+    let state = empty_state("rm");
+    let argv_os = argv(&["git", "rm", "file.txt"]);
+    let result = check_blocked(&state, "rm", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn rm_cached_allowed() {
+    let mut state = empty_state("rm");
+    state.has_cached = true;
+    let argv_os = argv(&["git", "rm", "--cached", "file.txt"]);
+    let result = check_blocked(&state, "rm", &argv_os, "/nonexistent-git", None);
+    assert!(result.is_ok(), "rm --cached should be allowed: {:?}", result);
+}
+
+#[test]
+fn rebase_without_safe_flag_blocked() {
+    let state = empty_state("rebase");
+    let argv_os = argv(&["git", "rebase", "main"]);
+    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn rebase_continue_allowed() {
+    let mut state = empty_state("rebase");
+    state.has_rebase_safe_flag = true;
+    let argv_os = argv(&["git", "rebase", "--continue"]);
+    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
+    assert!(result.is_ok(), "rebase --continue should be allowed: {:?}", result);
 }
 
 #[test]
@@ -98,3 +210,100 @@ fn sudo_gated_stash_clear() {
         assert!(matches!(result, Err(GuardError::Blocked { .. })));
     }
 }
+
+#[test]
+fn destructive_checkout_or_switch_detects_pathspec_dot() {
+    let os = argv(&["git", "checkout", "--", "."]);
+    assert_eq!(
+        destructive_checkout_or_switch("checkout", &os),
+        Some("pathspec discard")
+    );
+}
+
+#[test]
+fn destructive_checkout_or_switch_detects_force() {
+    let os = argv(&["git", "checkout", "-f", "main"]);
+    assert_eq!(
+        destructive_checkout_or_switch("checkout", &os),
+        Some("force discard")
+    );
+}
+
+#[test]
+fn destructive_checkout_or_switch_detects_force_create() {
+    let os = argv(&["git", "checkout", "-B", "newbranch"]);
+    assert_eq!(
+        destructive_checkout_or_switch("checkout", &os),
+        Some("force branch switch")
+    );
+}
+
+#[test]
+fn destructive_checkout_or_switch_detects_switch_force_recreate() {
+    let os = argv(&["git", "switch", "-B", "newbranch"]);
+    assert_eq!(
+        destructive_checkout_or_switch("switch", &os),
+        Some("discard-changes / force-create")
+    );
+}
+
+#[test]
+fn branch_force_rename_blocked() {
+    let mut state = empty_state("branch");
+    state.has_branch_force_rename = true;
+    let argv_os = argv(&["git", "branch", "-M", "old", "new"]);
+    let result = check_blocked(&state, "branch", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn push_force_with_lease_blocked() {
+    let mut state = empty_state("push");
+    state.has_force_with_lease_flag = true;
+    let argv_os = argv(&["git", "push", "--force-with-lease", "origin", "main"]);
+    let result = check_blocked(&state, "push", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn tag_delete_uppercase_blocked() {
+    let mut state = empty_state("tag");
+    state.has_branch_d = true;
+    let argv_os = argv(&["git", "tag", "-D", "v1"]);
+    let result = check_blocked(&state, "tag", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn config_dangerous_key_blocked() {
+    let mut state = empty_state("config");
+    state
+        .dangerous_config_keys
+        .push("core.hooksPath".to_string());
+    let argv_os = argv(&["git", "config", "core.hooksPath", "/evil"]);
+    let result = check_blocked(&state, "config", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn bypass_env_skip_blocked() {
+    std::env::set_var("SKIP", "1");
+    let state = empty_state("status");
+    let argv_os = argv(&["git", "status"]);
+    let result = check_blocked(&state, "status", &argv_os, "/nonexistent-git", None);
+    std::env::remove_var("SKIP");
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn bypass_env_pre_commit_allow_no_config_blocked() {
+    std::env::set_var("PRE_COMMIT_ALLOW_NO_CONFIG", "1");
+    let state = empty_state("commit");
+    let argv_os = argv(&["git", "commit", "-m", "x"]);
+    let result = check_blocked(&state, "commit", &argv_os, "/nonexistent-git", None);
+    std::env::remove_var("PRE_COMMIT_ALLOW_NO_CONFIG");
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[path = "block_protected_branch_tests.rs"]
+mod protected_branch_tests;

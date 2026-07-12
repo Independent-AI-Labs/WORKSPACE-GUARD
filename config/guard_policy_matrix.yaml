@@ -1,0 +1,371 @@
+# Expected block/allow outcomes for git-guard policy tests.
+# Consumed by src/policy_matrix_tests.rs at test time and validated
+# at build time (every blocked/sudo_gated subcommand has >=1 row).
+#
+# Schema:
+#   version : schema version (currently 1)
+#   cases   : list of { id, argv, expect, reason_contains?, sudo_only? }
+#     expect: blocked | allowed
+#     sudo_only: when true, case applies only when is_sudo() is true
+
+version: 1
+
+cases:
+  # --- unconditionally blocked subcommands ---
+  - id: reset-hard
+    argv: [git, reset, --hard]
+    expect: blocked
+    reason_contains: --hard
+
+  - id: reset-soft
+    argv: [git, reset, --soft]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: clean-force
+    argv: [git, clean, -fd]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: restore-worktree
+    argv: [git, restore, .]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: gc-aggressive
+    argv: [git, gc, --prune=now]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: prune
+    argv: [git, prune]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: bisect
+    argv: [git, bisect, start]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: filter-branch
+    argv: [git, filter-branch, --all]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: filter-repo
+    argv: [git, filter-repo, --force]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: worktree-add
+    argv: [git, worktree, add, ../wt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: reflog-expire
+    argv: [git, reflog, expire, --all]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: replace
+    argv: [git, replace, -d, HEAD]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: lfs
+    argv: [git, lfs, prune]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: daemon
+    argv: [git, daemon, --reuseaddr]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: fast-import
+    argv: [git, fast-import]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- plumbing bypass vectors (must never reach git.original) ---
+  - id: plumbing-update-ref
+    argv: [git, update-ref, refs/heads/main, deadbeef]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-read-tree
+    argv: [git, read-tree, -u, --reset, HEAD]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-symbolic-ref
+    argv: [git, symbolic-ref, HEAD, refs/heads/other]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-write-tree
+    argv: [git, write-tree]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-commit-tree
+    argv: [git, commit-tree, deadbeef, -m, msg]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- sudo-gated subcommands ---
+  - id: checkout-non-root
+    argv: [git, checkout, main]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: checkout-root-allowed
+    argv: [git, checkout, main]
+    expect: allowed
+    sudo_only: true
+
+  - id: switch-non-root
+    argv: [git, switch, main]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: switch-root-allowed
+    argv: [git, switch, main]
+    expect: allowed
+    sudo_only: true
+
+  - id: submodule-non-root
+    argv: [git, submodule, update, --init]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: submodule-root-allowed
+    argv: [git, submodule, update, --init]
+    expect: allowed
+    sudo_only: true
+
+  # --- destructive checkout/switch (blocked even for root) ---
+  - id: checkout-discard-dot
+    argv: [git, checkout, --, .]
+    expect: blocked
+    reason_contains: checkout
+
+  - id: checkout-discard-force
+    argv: [git, checkout, -f, main]
+    expect: blocked
+    reason_contains: checkout
+
+  - id: switch-discard-changes
+    argv: [git, switch, --discard-changes]
+    expect: blocked
+    reason_contains: switch
+
+  - id: switch-force-create
+    argv: [git, switch, -C, newbranch]
+    expect: blocked
+    reason_contains: switch
+
+  # --- global destructive flags ---
+  - id: hard-flag-global
+    argv: [git, reset, --hard]
+    expect: blocked
+
+  - id: hard-bypass-after-separator
+    argv: [git, --, --hard]
+    expect: blocked
+    reason_contains: --hard
+
+  - id: no-verify-blocked
+    argv: [git, commit, --no-verify, -m, x]
+    expect: blocked
+    reason_contains: --no-verify
+
+  # --- partial rules ---
+  - id: rm-without-cached
+    argv: [git, rm, file.txt]
+    expect: blocked
+    reason_contains: git rm
+
+  - id: rm-cached-allowed
+    argv: [git, rm, --cached, file.txt]
+    expect: allowed
+
+  - id: stash-drop-non-root
+    argv: [git, stash, drop]
+    expect: blocked
+    reason_contains: stash
+
+  - id: stash-list-allowed
+    argv: [git, stash, list]
+    expect: allowed
+
+  - id: branch-force-delete
+    argv: [git, branch, -D, feature]
+    expect: blocked
+    reason_contains: branch -D
+
+  - id: branch-safe-delete-allowed
+    argv: [git, branch, -d, feature]
+    expect: allowed
+
+  - id: push-force
+    argv: [git, push, --force, origin, main]
+    expect: blocked
+    reason_contains: push --force
+
+  - id: push-delete
+    argv: [git, push, --delete, origin, feature]
+    expect: blocked
+    reason_contains: push --delete
+
+  - id: push-normal-allowed
+    argv: [git, push, origin, main]
+    expect: allowed
+
+  - id: commit-amend
+    argv: [git, commit, --amend]
+    expect: blocked
+    reason_contains: amend
+
+  - id: rebase-destructive
+    argv: [git, rebase, main]
+    expect: blocked
+    reason_contains: rebase
+
+  - id: rebase-continue-allowed
+    argv: [git, rebase, --continue]
+    expect: allowed
+
+  - id: tag-force
+    argv: [git, tag, -f, v1]
+    expect: blocked
+    reason_contains: tag -f
+
+  - id: tag-delete
+    argv: [git, tag, -d, v1]
+    expect: blocked
+    reason_contains: tag -d
+
+  - id: tag-delete-uppercase
+    argv: [git, tag, -D, v1]
+    expect: blocked
+    reason_contains: tag
+
+  - id: stash-clear-non-root
+    argv: [git, stash, clear]
+    expect: blocked
+    reason_contains: stash
+
+  - id: stash-clear-root-allowed
+    argv: [git, stash, clear]
+    expect: allowed
+    sudo_only: true
+
+  - id: branch-force-rename
+    argv: [git, branch, -M, old, new]
+    expect: blocked
+    reason_contains: branch -M
+
+  - id: push-force-with-lease
+    argv: [git, push, --force-with-lease, origin, main]
+    expect: blocked
+    reason_contains: push --force
+
+  - id: checkout-force-create
+    argv: [git, checkout, -B, newbranch]
+    expect: blocked
+    reason_contains: checkout
+
+  - id: switch-force-recreate
+    argv: [git, switch, -B, newbranch]
+    expect: blocked
+    reason_contains: switch
+
+  - id: config-dangerous-key
+    argv: [git, config, core.hooksPath, /evil]
+    expect: blocked
+    reason_contains: dangerous config
+
+  - id: config-safe-allowed
+    argv: [git, config, user.name]
+    expect: allowed
+
+  - id: upload-pack-blocked
+    argv: [git, --upload-pack, /bin/sh, clone, url]
+    expect: blocked
+    reason_contains: upload-pack
+
+  - id: exec-flag-blocked
+    argv: [git, --exec, /tmp/evil, fetch]
+    expect: blocked
+    reason_contains: exec
+
+  - id: rebase-abort-allowed
+    argv: [git, rebase, --abort]
+    expect: allowed
+
+  - id: merge-abort-allowed
+    argv: [git, merge, --abort]
+    expect: allowed
+
+  - id: cherry-pick-allowed
+    argv: [git, cherry-pick, abc1234]
+    expect: allowed
+
+  - id: revert-allowed
+    argv: [git, revert, HEAD]
+    expect: allowed
+
+  - id: apply-allowed
+    argv: [git, apply, patch.diff]
+    expect: allowed
+
+  - id: am-allowed
+    argv: [git, am, patch.mbox]
+    expect: allowed
+
+  - id: pull-ff-only-allowed
+    argv: [git, pull, --ff-only]
+    expect: allowed
+
+  - id: pull-rebase-allowed
+    argv: [git, pull, --rebase]
+    expect: allowed
+
+  - id: merge-ff-only-allowed
+    argv: [git, merge, --ff-only, feature]
+    expect: allowed
+
+  - id: abbrev-commit-allowed
+    argv: [git, com, -m, msg]
+    expect: allowed
+
+  - id: fetch-hard-after-separator
+    argv: [git, fetch, --, --hard]
+    expect: blocked
+    reason_contains: --hard
+
+  # --- safe pass-through ---
+  - id: status-allowed
+    argv: [git, status]
+    expect: allowed
+
+  - id: log-allowed
+    argv: [git, log, --oneline]
+    expect: allowed
+
+  - id: diff-allowed
+    argv: [git, diff]
+    expect: allowed
+
+  - id: fetch-allowed
+    argv: [git, fetch, origin]
+    expect: allowed
+
+  - id: add-allowed
+    argv: [git, add, file.txt]
+    expect: allowed
+
+  - id: commit-normal-allowed
+    argv: [git, commit, -m, msg]
+    expect: allowed

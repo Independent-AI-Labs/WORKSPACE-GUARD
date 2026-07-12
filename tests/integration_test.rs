@@ -38,8 +38,20 @@ fn guard_compiles_release() {
 mod capability_mode {
     use super::guard_cmd;
 
+    /// Capability integration tests require a non-root process without file
+    /// caps on the guard binary (Tier 1 `testagent` in Podman). Plain
+    /// `cargo test` as root in a dev container passes the cap check but
+    /// then fails with GitOriginalMissing; skip that environment.
+    fn capability_integration_enabled() -> bool {
+        unsafe { libc::geteuid() != 0 }
+    }
+
     #[test]
     fn guard_exits_missing_cap() {
+        if !capability_integration_enabled() {
+            eprintln!("SKIP: capability integration (requires non-root euid)");
+            return;
+        }
         let output = guard_cmd()
             .arg("status")
             .output()
@@ -57,6 +69,10 @@ mod capability_mode {
 
     #[test]
     fn guard_exits_missing_cap_on_blocked_cmd() {
+        if !capability_integration_enabled() {
+            eprintln!("SKIP: capability integration (requires non-root euid)");
+            return;
+        }
         let output = guard_cmd()
             .arg("reset")
             .arg("--hard")
@@ -93,23 +109,46 @@ mod root_only {
 
     #[test]
     fn guard_blocks_reset_before_exec() {
-        let output = guard_cmd()
-            .arg("reset")
-            .arg("--hard")
-            .output()
-            .expect("failed to execute guard");
+        assert_guard_blocks(&["reset", "--hard"], "reset --hard");
+    }
+
+    #[test]
+    fn guard_blocks_plumbing_and_bypass_vectors() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["update-ref", "refs/heads/main", "deadbeef"], "update-ref"),
+            (&["read-tree", "-u", "--reset", "HEAD"], "read-tree --reset"),
+            (&["write-tree"], "write-tree"),
+            (&["switch", "--discard-changes"], "switch --discard-changes"),
+            (&["checkout", "-f", "main"], "checkout -f"),
+        ];
+        for (argv, label) in cases {
+            assert_guard_blocks(argv, label);
+        }
+    }
+
+    #[test]
+    fn guard_blocks_hard_after_separator() {
+        assert_guard_blocks(&["--", "--hard"], "git separator hard");
+    }
+
+    fn assert_guard_blocks(argv: &[&str], label: &str) {
+        let mut cmd = guard_cmd();
+        for arg in argv {
+            cmd.arg(arg);
+        }
+        let output = cmd.output().expect("failed to execute guard");
         assert!(
             !output.status.success(),
-            "guard should exit non-zero when blocking reset --hard"
+            "guard should block {label}"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains("BLOCKED"),
-            "stderr should report blocked command: {stderr}"
+            "stderr should report blocked {label}: {stderr}"
         );
         assert!(
             !stderr.contains("missing file capabilities"),
-            "root-only guard should not fail cap check as root: {stderr}"
+            "root-only guard should not fail cap check as root for {label}: {stderr}"
         );
     }
 }

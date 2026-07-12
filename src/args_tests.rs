@@ -251,6 +251,12 @@ fn parse_args_hard_flag_blocked() {
 }
 
 #[test]
+fn parse_args_hard_after_separator_blocked() {
+    let args = bytes(&["git", "fetch", "--", "--hard"]);
+    assert!(parse_args(&args).is_err());
+}
+
+#[test]
 fn parse_args_commit_amend() {
     let args = bytes(&["git", "commit", "--amend"]);
     let state = parse_args(&args).unwrap();

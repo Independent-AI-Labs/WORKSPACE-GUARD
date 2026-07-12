@@ -40,6 +40,21 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
     if matches.len() == 1 {
         return matches[0].to_string();
     }
+    // Prefer porcelain (partial/sudo_gated) over plumbing (blocked) when a
+    // prefix is ambiguous (e.g. "com" → commit, not commit-tree).
+    if matches.len() > 1 {
+        let preferred: Vec<&&str> = matches
+            .iter()
+            .filter(|c| {
+                SUBCOMMANDS_WITH_PARTIAL_BLOCKS.contains(c)
+                    || SUDO_GATED_SUBCOMMANDS.contains(c)
+            })
+            .copied()
+            .collect();
+        if preferred.len() == 1 {
+            return preferred[0].to_string();
+        }
+    }
     raw.to_string()
 }
 
@@ -363,6 +378,16 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         }
 
         i += 1;
+    }
+
+    // --hard must never pass, including after `--` (pathspec bypass).
+    for arg in argv.iter().skip(1) {
+        if arg == b"--hard" {
+            return Err(GuardError::Blocked {
+                reason: "--hard flag".into(),
+                hint: "Remove --hard from the command".into(),
+            });
+        }
     }
 
     Ok(state)

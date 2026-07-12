@@ -69,6 +69,12 @@ pub fn check_blocked(
                 ),
             });
         }
+        if let Some(kind) = destructive_checkout_or_switch(subcommand, argv_os) {
+            return Err(GuardError::Blocked {
+                reason: format!("git {} ({})", subcommand, kind),
+                hint: "Destructive checkout/switch is forbidden for all users".into(),
+            });
+        }
     } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
         return Err(GuardError::Blocked {
             reason: format!("destructive subcommand: git {}", subcommand),
@@ -120,7 +126,7 @@ pub fn check_blocked(
         });
     }
 
-    if subcommand == "tag" && state.has_branch_d {
+    if subcommand == "tag" && (state.has_branch_d || state.has_delete_flag) {
         return Err(GuardError::Blocked {
             reason: "git tag -d / -D (delete tag)".into(),
             hint: "Tags are immutable: archive rather than delete".into(),
@@ -283,6 +289,59 @@ fn is_protected_branch(git_path: &str, cwd: Option<&str>) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Detect checkout/switch variants that discard worktree state. Blocked even
+/// for root: sudo-gating covers branch switches, not reset-equivalent discards.
+fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Option<&'static str> {
+    if subcommand != "checkout" && subcommand != "switch" {
+        return None;
+    }
+    let args: Vec<String> = argv_os
+        .iter()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let mut past_sep = false;
+    let mut seen_sub = false;
+    for s in &args {
+        if s == "git" {
+            continue;
+        }
+        if s == subcommand {
+            seen_sub = true;
+            continue;
+        }
+        if !seen_sub {
+            continue;
+        }
+        if s == "--" {
+            past_sep = true;
+            continue;
+        }
+        if !past_sep {
+            if s == "-f" || s == "--force" {
+                return Some("force discard");
+            }
+            if subcommand == "switch"
+                && (s == "-C"
+                    || s == "-B"
+                    || s == "--discard-changes"
+                    || s.starts_with("--discard-changes="))
+            {
+                return Some("discard-changes / force-create");
+            }
+            if subcommand == "checkout" && (s == "-B" || s.starts_with("-B")) {
+                return Some("force branch switch");
+            }
+            if !s.starts_with('-') && (s == "." || s == "*") {
+                return Some("pathspec discard");
+            }
+        } else if s == "." || s == "*" || s.ends_with("/*") {
+            return Some("pathspec discard");
+        }
+    }
+    None
 }
 
 fn extract_revert_target(argv_os: &[OsString]) -> String {

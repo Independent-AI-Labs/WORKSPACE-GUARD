@@ -28,10 +28,17 @@ blocked:
   - lfs
   - daemon
   - fast-import
+  # Plumbing commands that bypass porcelain subcommand blocks (reset-equivalent).
+  - update-ref
+  - read-tree
+  - symbolic-ref
+  - write-tree
+  - commit-tree
 
 sudo_gated:
   - submodule
   - checkout
+  - switch
 
 partial:
   - rm

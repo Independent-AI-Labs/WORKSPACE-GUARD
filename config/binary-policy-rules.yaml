@@ -97,6 +97,14 @@ rules:
     validate: subordinate_gid_range
     env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]
 
+  # git guard bypass vectors: only /usr/bin/git (the guard) may be invoked by
+  # non-root agents. Alternate installs are locked at bootstrap (chmod 000 /
+  # dpkg-divert). If a host still exposes them, deny non-root exec.
+  - name: git
+    tags: [git-bypass]
+    policy: deny-all-non-root
+    env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH, GIT_EXEC_PATH]
+
   # --- tag-level catch-all: every suid-tagged binary without an explicit
   # --- name rule above gets deny-non-root. Covers ~320 GTFOBins SUID entries.
   - tags: [suid]

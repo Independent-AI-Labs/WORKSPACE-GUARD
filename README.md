@@ -12,7 +12,7 @@ Three programs ship in this repo today:
 
 | Program | Target surface | State |
 |---------|----------------|-------|
-| **Git Guard** (Program I) | `/usr/bin/git` only | Built, deployed, tested (90 unit + 3 integration tests) |
+| **Git Guard** (Program I) | `/usr/bin/git` only | Built, deployed, tested (220+ Rust unit tests, 7 integration tests, 75-case policy matrix, Podman + QEMU E2E) |
 | **System-Binary Lockdown + Sandbox + Audit** (Program II) | Full GTFOBins SUID + file-capability catalog | Baselines, specs, sync + drift scripts, config artifacts; runtime install pending |
 | **Home-Dir Lock** (Program III) | `~/.gitconfig`, `~/.config/git/config`, `~/.ssh/config`, `~/.ssh/authorized_keys`, `/root/*` | Scripts + bats suite (34 tests) + 3 Rust consistency tests; runtime install pending |
 
@@ -348,11 +348,22 @@ then use the Podman harness:
 
 ```bash
 make init               # system deps + Rust + Podman (yaml-driven)
-make test-podman        # Tiers 0-3 (full gate + root-only + capability E2E)
+make test-podman        # Tiers 0-3 (dev sanity check; Podman container)
 make test-podman-quick  # Tiers 0-2 (skip privileged capability E2E)
 ```
 
-See [docs/specifications/SPEC-PODMAN-TESTING.md](docs/specifications/SPEC-PODMAN-TESTING.md).
+**Authoritative cap/kernel sign-off** runs inside a WORKSPACE-VM QEMU guest, not Podman:
+
+```bash
+# From WORKSPACE-VM root (after make install-qemu):
+make test-vm-guard
+
+# Or inside an already-provisioned QEMU guest:
+sudo bash /opt/workspace/projects/WORKSPACE-GUARD/scripts/qemu/e2e-guest.sh
+```
+
+See [docs/specifications/SPEC-PODMAN-TESTING.md](docs/specifications/SPEC-PODMAN-TESTING.md) (dev harness)
+and [WORKSPACE-VM REQ-VM-HYPERVISOR](../../docs/REQ-VM-HYPERVISOR.md) §FR-7 (authoritative gate).
 
 ## Security Properties
 

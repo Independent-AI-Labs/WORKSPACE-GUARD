@@ -10,6 +10,20 @@ fn default_version() -> u32 {
 }
 
 #[derive(Deserialize)]
+struct PolicyMatrixCase {
+    id: String,
+    argv: Vec<String>,
+    expect: String,
+}
+
+#[derive(Deserialize)]
+struct PolicyMatrixConfig {
+    #[serde(default = "default_version")]
+    _version: u32,
+    cases: Vec<PolicyMatrixCase>,
+}
+
+#[derive(Deserialize)]
 struct SubcommandsConfig {
     #[serde(default = "default_version")]
     _version: u32,
@@ -170,11 +184,51 @@ fn emit_u64(buf: &mut String, name: &str, val: u64) {
     buf.push_str(&format!("pub const {}: u64 = {};\n", name, val));
 }
 
+fn validate_policy_matrix(subcommands: &SubcommandsConfig, matrix: &PolicyMatrixConfig) {
+    let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for case in &matrix.cases {
+        assert!(
+            case.expect == "blocked" || case.expect == "allowed",
+            "build.rs: policy matrix case {:?} has invalid expect {:?}",
+            case.id,
+            case.expect
+        );
+        if case.argv.is_empty() || case.argv[0] != "git" {
+            panic!(
+                "build.rs: policy matrix case {:?} argv must start with 'git'",
+                case.id
+            );
+        }
+        if let Some(sub) = case.argv.get(1) {
+            if !sub.starts_with('-') {
+                covered.insert(sub.clone());
+            }
+        }
+    }
+
+    for sub in subcommands
+        .blocked
+        .iter()
+        .chain(subcommands.sudo_gated.iter())
+        .chain(subcommands.partial.iter())
+    {
+        if !covered.contains(sub) {
+            panic!(
+                "build.rs: guard_policy_matrix.yaml missing case for subcommand {:?}",
+                sub
+            );
+        }
+    }
+}
+
 fn main() {
     let manifest = env::var("CARGO_MANIFEST_DIR").unwrap();
     let config_dir = Path::new(&manifest).join("config");
 
     let subcommands: SubcommandsConfig = read_yaml(&config_dir, "guard_subcommands.yaml");
+    let policy_matrix: PolicyMatrixConfig =
+        read_yaml(&config_dir, "guard_policy_matrix.yaml");
+    validate_policy_matrix(&subcommands, &policy_matrix);
     let config_keys: ConfigKeysConfig = read_yaml(&config_dir, "guard_config_keys.yaml");
     let protected: ProtectedBranchesConfig =
         read_yaml(&config_dir, "guard_protected_branches.yaml");
@@ -284,6 +338,7 @@ fn main() {
 
     let config_files = [
         "guard_subcommands.yaml",
+        "guard_policy_matrix.yaml",
         "guard_config_keys.yaml",
         "guard_protected_branches.yaml",
         "guard_environment.yaml",

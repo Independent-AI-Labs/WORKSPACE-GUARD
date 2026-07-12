@@ -187,7 +187,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check (both feature combos)
 # See docs/specifications/SPEC-PODMAN-TESTING.md
 # ═══════════════════════════════════════════════════════════════════════
 
-.PHONY: test-podman test-podman-quick
+.PHONY: test-podman test-podman-quick test-qemu-guest
 .PHONY: build-guard install-guard uninstall-guard check-guard
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
@@ -195,6 +195,9 @@ test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
 
 test-podman-quick: init-check ## Podman harness Tiers 0-2 only (skip capability E2E)
 	TEST_PODMAN_QUICK=1 bash scripts/test-in-podman.sh
+
+test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in guest)
+	bash scripts/qemu/e2e-guest.sh
 
 build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only

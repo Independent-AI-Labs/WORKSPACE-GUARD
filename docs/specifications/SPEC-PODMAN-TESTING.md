@@ -9,9 +9,13 @@
 
 ## 1. Overview
 
-This spec defines the authoritative layout for running WORKSPACE-GUARD's full
-Linux quality gate and guard-install E2E sanity check tests via Podman. It enables
-macOS developers to get Linux-kernel fidelity without a dedicated Linux VM.
+This spec defines the **dev sanity check** layout for running WORKSPACE-GUARD's
+Linux quality gate and guard-install E2E via Podman. It enables macOS developers
+to iterate quickly without a dedicated Linux box.
+
+**Authoritative** capability and policy-matrix E2E on real guest `/` runs inside
+WORKSPACE-VM QEMU guests only (`make test-vm-guard`). See
+[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../../docs/REQ-VM-HYPERVISOR.md) §FR-7.
 
 ```
 Host (Darwin or Linux)
@@ -42,6 +46,8 @@ Orchestrator: `scripts/test-in-podman.sh`
 | `scripts/podman/run-tier3.sh` | Privileged container: Tier 3 |
 | `scripts/podman/e2e-root-only.sh` | Root-only install sanity check (runs inside container) |
 | `scripts/podman/e2e-capability.sh` | Capability install sanity check (runs inside container) |
+| `scripts/podman/e2e-policy-matrix.sh` | Policy-matrix live vectors (Tier 3, after capability install) |
+| `scripts/qemu/e2e-guest.sh` | Authoritative gate orchestrator (bare QEMU guest, not container) |
 
 ---
 
@@ -201,9 +207,11 @@ podman run --rm --privileged \
 6. As `agent`: same sanity check repo as Tier 2 (`git status` pass,
    `git reset --hard` blocked).
 7. As `agent`: `/usr/bin/git.original` must fail (not executable).
-8. `bash /projects/CI/scripts/bootstrap-workspace-guard uninstall`
+8. `bash scripts/podman/e2e-policy-matrix.sh` (plumbing, switch, bypass vectors).
+9. `bash /projects/CI/scripts/bootstrap-workspace-guard uninstall`
 
 `--privileged` is required so `setcap` and `chattr` behave like bare metal.
+This tier is a **dev sanity check**; release sign-off uses QEMU (`scripts/qemu/e2e-guest.sh`).
 
 ---
 

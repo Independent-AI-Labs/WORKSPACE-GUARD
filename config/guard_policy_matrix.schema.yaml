@@ -1,0 +1,40 @@
+# Schema for guard_policy_matrix.yaml
+config: guard_policy_matrix
+description: "Table-driven expected outcomes for git-guard policy enforcement tests."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version."
+
+  - path: cases
+    type: list<object>
+    required: true
+    description: "Policy test cases: argv vectors with expected block/allow outcome."
+
+  - path: cases[].id
+    type: string
+    required: true
+    description: "Stable case identifier for test output."
+
+  - path: cases[].argv
+    type: list<string>
+    required: true
+    description: "Full argv vector starting with 'git'."
+
+  - path: cases[].expect
+    type: string
+    required: true
+    description: "Expected outcome: blocked or allowed."
+
+  - path: cases[].reason_contains
+    type: string
+    required: false
+    description: "Substring expected in block reason (blocked cases only)."
+
+  - path: cases[].sudo_only
+    type: boolean
+    required: false
+    default: false
+    description: "When true, case runs only when guard detects sudo/AT_SECURE context."

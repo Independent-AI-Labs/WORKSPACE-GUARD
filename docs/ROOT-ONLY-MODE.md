@@ -120,3 +120,22 @@ When built with `root-only`, the guard:
 Root-only mode is a **soft barrier**: it prevents accidental damage and
 raises the bar for adversarial agents, but it is NOT a security boundary.
 For production environments with non-root users, always use capability mode.
+
+## Authoritative E2E (capability mode)
+
+Capability-mode install and policy-matrix E2E on **real** guest `/usr/bin/git`
+(with `setcap`, mode-0700 `git.original`) is the release sign-off path. It runs
+inside WORKSPACE-VM QEMU guests only:
+
+```bash
+# WORKSPACE-VM root:
+make test-vm-guard
+
+# Inside provisioned guest:
+sudo bash /opt/workspace/projects/WORKSPACE-GUARD/scripts/qemu/e2e-guest.sh
+```
+
+Podman Tier 3 (`make test-podman`) is a faster dev sanity check in a privileged
+container; it does not replace the QEMU gate. See
+[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../docs/REQ-VM-HYPERVISOR.md) §FR-7 and
+[SPEC-VM-HYPERVISOR](../../../docs/SPEC-VM-HYPERVISOR.md) §12.

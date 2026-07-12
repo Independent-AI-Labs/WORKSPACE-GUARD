@@ -208,3 +208,11 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 #[cfg(test)]
 #[path = "config_consistency_tests.rs"]
 mod config_consistency;
+
+#[cfg(test)]
+#[path = "config_consistency_catalog_tests.rs"]
+mod config_consistency_catalog;
+
+#[cfg(test)]
+#[path = "policy_matrix_tests.rs"]
+mod policy_matrix_tests;
