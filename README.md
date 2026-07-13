@@ -1,12 +1,12 @@
 # Compiled Privilege Enforcement for the Linux SUID & Capability Surface
 
-WORKSPACE-GUARD is a framework that replaces exploitable SUID and
-file-capability binaries on a Linux host with a compiled, policy-gating guard.
-The guard validates arguments, configuration keys, and environment before
-`execve()`-ing the real binary, which has been relocated to a mode-0700
-`root:root` location the untrusted user can neither read nor execute directly.
-The same pattern applies to every privileged entry point on the box, not just
-one tool.
+dpkg-divert-installed Rust guards replace public SUID and file-capability
+binaries: policy checks argv, `-c`/`--config` keys, and environment before
+`execve()` of the relocated real binary (mode-0700 `root:root`, unreadable to
+callers). Three programs share one pattern: deployed **Git Guard** (18 deny
+rules, `--no-verify`/`--force` blocks at the syscall boundary);
+**System-Binary Lockdown** for the GTFOBins catalog; **Home-Dir Lock** for
+`~/.gitconfig`, `~/.ssh`, and `/root/*`.
 
 Three programs ship in this repo today:
 
