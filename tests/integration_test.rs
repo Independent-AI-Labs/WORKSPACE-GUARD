@@ -137,10 +137,7 @@ mod root_only {
             cmd.arg(arg);
         }
         let output = cmd.output().expect("failed to execute guard");
-        assert!(
-            !output.status.success(),
-            "guard should block {label}"
-        );
+        assert!(!output.status.success(), "guard should block {label}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains("BLOCKED"),

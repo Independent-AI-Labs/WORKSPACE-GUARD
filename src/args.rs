@@ -46,8 +46,7 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
         let preferred: Vec<&&str> = matches
             .iter()
             .filter(|c| {
-                SUBCOMMANDS_WITH_PARTIAL_BLOCKS.contains(c)
-                    || SUDO_GATED_SUBCOMMANDS.contains(c)
+                SUBCOMMANDS_WITH_PARTIAL_BLOCKS.contains(c) || SUDO_GATED_SUBCOMMANDS.contains(c)
             })
             .copied()
             .collect();

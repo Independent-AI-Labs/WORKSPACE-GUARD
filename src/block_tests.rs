@@ -28,7 +28,12 @@ fn argv(args: &[&str]) -> Vec<OsString> {
 #[test]
 fn blocked_subcommands_in_config() {
     for sub in [
-        "reset", "clean", "restore", "update-ref", "read-tree", "symbolic-ref",
+        "reset",
+        "clean",
+        "restore",
+        "update-ref",
+        "read-tree",
+        "symbolic-ref",
     ] {
         assert!(
             BLOCKED_SUBCOMMANDS.contains(&sub),
@@ -45,7 +50,13 @@ fn switch_is_sudo_gated_not_blocked() {
 
 #[test]
 fn plumbing_subcommands_blocked_for_root() {
-    for sub in ["update-ref", "read-tree", "symbolic-ref", "write-tree", "commit-tree"] {
+    for sub in [
+        "update-ref",
+        "read-tree",
+        "symbolic-ref",
+        "write-tree",
+        "commit-tree",
+    ] {
         let state = empty_state(sub);
         let argv_os = argv(&["git", sub]);
         let result = check_blocked(&state, sub, &argv_os, "/nonexistent-git", None);
@@ -163,7 +174,11 @@ fn rm_cached_allowed() {
     state.has_cached = true;
     let argv_os = argv(&["git", "rm", "--cached", "file.txt"]);
     let result = check_blocked(&state, "rm", &argv_os, "/nonexistent-git", None);
-    assert!(result.is_ok(), "rm --cached should be allowed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "rm --cached should be allowed: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -180,7 +195,11 @@ fn rebase_continue_allowed() {
     state.has_rebase_safe_flag = true;
     let argv_os = argv(&["git", "rebase", "--continue"]);
     let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
-    assert!(result.is_ok(), "rebase --continue should be allowed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "rebase --continue should be allowed: {:?}",
+        result
+    );
 }
 
 #[test]

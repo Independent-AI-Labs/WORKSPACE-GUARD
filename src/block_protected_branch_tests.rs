@@ -79,7 +79,11 @@ fn protected_branch_pull_ff_only_allowed() {
     }
     let cwd = dir.path().to_string_lossy().to_string();
     let result = evaluate(&["git", "pull", "--ff-only"], &git, &cwd);
-    assert!(result.is_ok(), "pull --ff-only on main should be allowed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "pull --ff-only on main should be allowed: {:?}",
+        result
+    );
 }
 
 #[test]

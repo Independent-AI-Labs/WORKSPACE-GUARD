@@ -14,7 +14,6 @@
 use serde_yaml::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
 
 /// Resolve a repo-relative path under the crate manifest dir.
 fn repo_path(rel: &str) -> String {
@@ -138,7 +137,11 @@ fn guard_policy_matrix_parses_with_cases() {
         .get("cases")
         .and_then(|c| c.as_sequence())
         .expect("cases is a sequence");
-    assert!(cases.len() >= 70, "policy matrix too small: {}", cases.len());
+    assert!(
+        cases.len() >= 70,
+        "policy matrix too small: {}",
+        cases.len()
+    );
 }
 
 #[test]
@@ -165,7 +168,7 @@ fn guard_policy_matrix_covers_partial_subcommands() {
         .collect();
     for sub in &partial {
         assert!(
-            covered.contains(&sub.to_string()),
+            covered.contains(*sub),
             "policy matrix missing partial subcommand case: {sub}"
         );
     }

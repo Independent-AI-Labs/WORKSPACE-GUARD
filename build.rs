@@ -226,8 +226,7 @@ fn main() {
     let config_dir = Path::new(&manifest).join("config");
 
     let subcommands: SubcommandsConfig = read_yaml(&config_dir, "guard_subcommands.yaml");
-    let policy_matrix: PolicyMatrixConfig =
-        read_yaml(&config_dir, "guard_policy_matrix.yaml");
+    let policy_matrix: PolicyMatrixConfig = read_yaml(&config_dir, "guard_policy_matrix.yaml");
     validate_policy_matrix(&subcommands, &policy_matrix);
     let config_keys: ConfigKeysConfig = read_yaml(&config_dir, "guard_config_keys.yaml");
     let protected: ProtectedBranchesConfig =
