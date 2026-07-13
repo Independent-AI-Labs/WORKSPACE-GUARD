@@ -287,7 +287,7 @@ cases:
     reason_contains: dangerous config
 
   - id: config-safe-allowed
-    argv: [git, config, user.name]
+    argv: [git, config, core.bare]
     expect: allowed
 
   - id: upload-pack-blocked
