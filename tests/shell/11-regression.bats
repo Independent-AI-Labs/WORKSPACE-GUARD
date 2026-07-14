@@ -12,6 +12,7 @@
 #      register_temp + cleanup_temps.
 #   5. config/binary-lock.yaml: obsolete 13-binary hand-curated file
 #      superseded by generated res/binary-lock.yaml.
+#   6. guard-refresh: .PHONY guard-refresh shadowed guard-% (Nothing to be done).
 
 load lib/harness
 
