@@ -25,6 +25,15 @@ fn argv(args: &[&str]) -> Vec<OsString> {
     args.iter().map(OsString::from).collect()
 }
 
+/// Pre-commit exposes `SKIP` (and similar vars) so operators can skip hooks.
+/// The guard must reject git when any hook-cheat env is set; tests clear them
+/// so parallel `cargo test` does not leak state between cases.
+fn clear_hook_cheat_env_vars() {
+    for &var in crate::BLOCKED_BYPASS_VARS {
+        std::env::remove_var(var);
+    }
+}
+
 #[test]
 fn blocked_subcommands_in_config() {
     for sub in [
@@ -191,7 +200,7 @@ fn rebase_without_safe_flag_blocked() {
 
 #[test]
 fn rebase_continue_allowed() {
-    std::env::remove_var("SKIP");
+    clear_hook_cheat_env_vars();
     let mut state = empty_state("rebase");
     state.has_rebase_safe_flag = true;
     let argv_os = argv(&["git", "rebase", "--continue"]);
@@ -306,24 +315,27 @@ fn config_dangerous_key_blocked() {
 }
 
 #[test]
-fn bypass_env_skip_blocked() {
+fn blocks_pre_commit_skip_env() {
+    // `SKIP` is pre-commit's "run git without hooks" cheat; guard must reject it.
     std::env::set_var("SKIP", "1");
     let result = {
         let state = empty_state("status");
         let argv_os = argv(&["git", "status"]);
         check_blocked(&state, "status", &argv_os, "/nonexistent-git", None)
     };
-    std::env::remove_var("SKIP");
+    clear_hook_cheat_env_vars();
     assert!(matches!(result, Err(GuardError::Blocked { .. })));
 }
 
 #[test]
-fn bypass_env_pre_commit_allow_no_config_blocked() {
+fn blocks_pre_commit_allow_no_config_env() {
     std::env::set_var("PRE_COMMIT_ALLOW_NO_CONFIG", "1");
-    let state = empty_state("commit");
-    let argv_os = argv(&["git", "commit", "-m", "x"]);
-    let result = check_blocked(&state, "commit", &argv_os, "/nonexistent-git", None);
-    std::env::remove_var("PRE_COMMIT_ALLOW_NO_CONFIG");
+    let result = {
+        let state = empty_state("commit");
+        let argv_os = argv(&["git", "commit", "-m", "x"]);
+        check_blocked(&state, "commit", &argv_os, "/nonexistent-git", None)
+    };
+    clear_hook_cheat_env_vars();
     assert!(matches!(result, Err(GuardError::Blocked { .. })));
 }
 

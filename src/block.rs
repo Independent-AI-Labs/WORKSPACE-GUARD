@@ -243,8 +243,10 @@ pub fn check_blocked(
         if let Ok(val) = std::env::var(var) {
             if !val.is_empty() {
                 return Err(GuardError::Blocked {
-                    reason: format!("{} environment variable set (hook bypass)", var),
-                    hint: format!("Unset {} before running git commands", var),
+                    reason: format!(
+                        "{var} is set (forbidden: pre-commit hook-cheat environment variable)"
+                    ),
+                    hint: format!("Unset {var} before running git commands"),
                 });
             }
         }
