@@ -54,8 +54,35 @@ EOF
     assert_equal "testadmin" "$output"
 }
 
-@test "provision-host dry-run exits 0 without root when skipped" {
-    skip "provision-host requires root for full run"
+@test "provision-host refuses non-root invocation" {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        skip "non-root test requires unprivileged user"
+    fi
+    _write_host_config "$TEST_TMPDIR"
+    export WORKSPACE_HOST_PROVISION_FILE="$TEST_TMPDIR/config/host-provision.yaml"
+    run bash "$GUARD_ROOT/scripts/provision-host" --preflight
+    assert_failure
+    assert_output --partial "needs root"
+}
+
+@test "hp_admin_break_glass_ready false when admin missing" {
+    HP_SUDOERS_ADMIN="$TEST_TMPDIR/90-workspace-guard-admin"
+    HP_STATE_DIR="$TEST_TMPDIR/state"
+    export HP_SUDOERS_ADMIN HP_STATE_DIR
+    # shellcheck source=scripts/lib/host-provision-admin.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-admin.sh"
+    run hp_admin_break_glass_ready nonexistent-admin-user-xyz
+    assert_failure
+}
+
+@test "hp_phase2_token gates phase 3 without write" {
+    HP_STATE_DIR="$TEST_TMPDIR/state"
+    mkdir -p "$HP_STATE_DIR"
+    export HP_STATE_DIR
+    # shellcheck source=scripts/lib/host-provision-admin.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-admin.sh"
+    run hp_phase2_token_valid_for testadmin
+    assert_failure
 }
 
 @test "provision-host dry-run phase 1 as root or skip" {
@@ -71,6 +98,86 @@ EOF
     run bash "$GUARD_ROOT/scripts/provision-host" --dry-run --phase 1
     assert_success
     assert_output --partial "Phase 1"
+}
+
+@test "hp_sudo detects NOPASSWD direct root grant in sudoers text" {
+    HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
+    export HP_SUDOERS_DIR WORKSPACE_SUDOERS_DIR="$HP_SUDOERS_DIR"
+    # shellcheck source=scripts/lib/host-provision-users.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-users.sh"
+    # shellcheck source=scripts/lib/host-provision-sudo.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    run hp_sudo_user_has_direct_root_grant_in_text agent $'agent ALL=(ALL) NOPASSWD:ALL\n'
+    assert_success
+}
+
+@test "hp_sudo user in sudoers file counts as effective sudo" {
+    HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
+    mkdir -p "$HP_SUDOERS_DIR"
+    echo 'agent ALL=(ALL) NOPASSWD:ALL' > "$HP_SUDOERS_DIR/99-test-grant"
+    export HP_SUDOERS_DIR WORKSPACE_SUDOERS_DIR="$HP_SUDOERS_DIR"
+    # shellcheck source=scripts/lib/host-provision-users.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-users.sh"
+    # shellcheck source=scripts/lib/host-provision-sudo.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    run hp_sudo_user_has_effective_sudo agent
+    assert_success
+}
+
+@test "hp_sudo detects direct root grant in sudoers text" {
+    HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
+    mkdir -p "$HP_SUDOERS_DIR"
+    export HP_SUDOERS_DIR WORKSPACE_SUDOERS_DIR="$HP_SUDOERS_DIR"
+    # shellcheck source=scripts/lib/host-provision-users.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-users.sh"
+    # shellcheck source=scripts/lib/host-provision-sudo.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    run hp_sudo_user_has_direct_root_grant_in_text agent $'agent ALL=(ALL:ALL) ALL\n'
+    assert_success
+    run hp_sudo_user_has_direct_root_grant_in_text agent $'# agent ALL=(ALL) ALL\n'
+    assert_failure
+}
+
+@test "hp_sudo foreign direct root detected outside managed allowlist" {
+    HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
+    mkdir -p "$HP_SUDOERS_DIR"
+    echo 'agent ALL=(ALL:ALL) ALL' > "$HP_SUDOERS_DIR/99-foreign-operator"
+    chmod 0444 "$HP_SUDOERS_DIR/99-foreign-operator"
+    export HP_SUDOERS_DIR WORKSPACE_SUDOERS_DIR="$HP_SUDOERS_DIR"
+    # shellcheck source=scripts/lib/host-provision-users.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-users.sh"
+    # shellcheck source=scripts/lib/host-provision-sudo.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    run hp_sudo_user_has_foreign_direct_root agent
+    assert_success
+}
+
+@test "hp_sudo managed cloud-init direct root is not foreign" {
+    HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
+    mkdir -p "$HP_SUDOERS_DIR"
+    echo 'agent ALL=(ALL:ALL) ALL' > "$HP_SUDOERS_DIR/90-cloud-init-users"
+    export HP_SUDOERS_DIR WORKSPACE_SUDOERS_DIR="$HP_SUDOERS_DIR"
+    # shellcheck source=scripts/lib/host-provision-users.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-users.sh"
+    # shellcheck source=scripts/lib/host-provision-sudo.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    run hp_sudo_user_has_foreign_direct_root agent
+    assert_failure
+    run hp_sudo_user_has_direct_root_grant_in_file agent "$HP_SUDOERS_DIR/90-cloud-init-users"
+    assert_success
+}
+
+@test "hp_sudo_strip_user_from_dropin removes fleet line" {
+    HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
+    mkdir -p "$HP_SUDOERS_DIR"
+    printf '%s\n' 'agent ALL=(ALL:ALL) ALL' > "$HP_SUDOERS_DIR/90-cloud-init-users"
+    export HP_SUDOERS_DIR WORKSPACE_SUDOERS_DIR="$HP_SUDOERS_DIR"
+    # shellcheck source=scripts/lib/host-provision-users.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-users.sh"
+    # shellcheck source=scripts/lib/host-provision-sudo.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    hp_sudo_strip_user_from_dropin agent "$HP_SUDOERS_DIR/90-cloud-init-users"
+    [[ ! -f "$HP_SUDOERS_DIR/90-cloud-init-users" ]]
 }
 
 @test "admin sudoers drop-in contains managed markers" {

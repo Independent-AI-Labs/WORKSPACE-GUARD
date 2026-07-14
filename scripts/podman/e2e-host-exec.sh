@@ -70,11 +70,17 @@ if [[ ! -f /usr/lib/workspace-guard/deployment-class ]] \
 fi
 echo "PASS: deployment-class is host-exec"
 
-if hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: $HP_E2E_AGENT_USER must not be in group sudo after provision-host" >&2
+if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
+    echo "ERROR: $HP_E2E_AGENT_USER should retain group sudo (warn-only default)" >&2
     exit 1
 fi
-echo "PASS: agent not in group sudo"
+echo "PASS: agent retained group sudo (warn-only default)"
+
+if ! hp_e2e_agent_has_effective_sudo; then
+    echo "ERROR: $HP_E2E_AGENT_USER should retain effective sudo (warn-only default)" >&2
+    exit 1
+fi
+echo "PASS: agent retained effective sudo (warn-only default)"
 
 _marker="$(hp_e2e_marker_path)"
 if [[ ! -f "$_marker" ]]; then

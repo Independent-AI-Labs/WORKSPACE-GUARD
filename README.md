@@ -39,13 +39,21 @@ cp config/home-lock-users.yaml.example config/home-lock-users.yaml
 # edit locally ,  live files are gitignored
 
 sudo make install-host-stack   # provision-host + full guard stack
+# Or with a chosen admin password:
+#   export WORKSPACE_ADMIN_PASSWORD='...' && sudo -E make install-host-stack
+# Preflight (read-only): sudo make provision-host-preflight
 make check-guard-host-exec
 sudo make install-hooks        # after git install, via WORKSPACE-CI
 ```
 
 Phase 1 prints a one-time **admin** password; phase 2 prompts for it before
-`agent` is removed from `sudo`. Use the `admin` account (not `agent`) for
-operator `sudo` after provision.
+phase 3 fleet hardening. **By default**, if fleet users (e.g. `agent`) already
+have sudo, provision **prints CRITICAL warnings and retains sudo** (warn-only).
+Pass `DEMOTE_FLEET_SUDO=1` or `--demote-fleet-sudo` to strip group `sudo` and
+managed cloud-init drop-ins. Persistent grants (group/sudoers) and cached sudo
+tickets are reported separately in the mandatory audit. Unmanaged direct-root
+sudoers grants still block phase 3 with a **CRITICAL** banner until removed or
+acknowledged.
 
 Manual steps (when `user_management.enabled: false` or partial install):
 
@@ -110,7 +118,7 @@ flowchart TB
 | **II-C - Audit** | Guarded exec paths, baselines | auditd, AIDE, drift reports | `make install-auditd` |
 | **II-D - Inventory** | Live host vs catalog | GTFOBins sync → `res/*-baseline.yaml` | `make sync-gtfobins` |
 | **III - Home lock** | `~user/.gitconfig`, `~user/.ssh/*` (fleet list) | Root-owned paths; non-root cannot write | `make install-host-stack` or `provision-git-identities` + `install-home-lock` |
-| **Host provision** | Admin account, sudo policy, fleet UNIX users | Break-glass admin; agents ∉ `sudo` | `make provision-host` / `make install-host-stack` |
+| **Host provision** | Admin account, sudo policy, fleet UNIX users | Break-glass admin; fleet sudo warn-only (demote opt-in) | `make provision-host` / `make install-host-stack` |
 
 Programs compose on one host. Each has its own install target, spec, and
 operational lifecycle.

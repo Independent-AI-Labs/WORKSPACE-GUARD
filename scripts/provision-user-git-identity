@@ -106,7 +106,7 @@ provision_one_user() {
     if [[ ! -f "$key_path" ]]; then
         ssh-keygen -t ed25519 -N "" -C "$git_email" -f "$key_path" </dev/null
     else
-        echo "  SKIP: key exists $key_path"
+        echo "  OK: SSH key already exists at $key_path (unchanged)"
     fi
     chmod 600 "$key_path"
     chown root:root "$key_path" "$pub_path" 2>"$DEVNULL" || chown root:root "$key_path"

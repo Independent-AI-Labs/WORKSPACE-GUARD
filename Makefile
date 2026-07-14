@@ -206,11 +206,39 @@ test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in g
 build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 
+build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
+
+.PHONY: install-host-stack-phase5 _install-host-stack-phase5-build
+INSTALL_LOCK ?= false
+INSTALL_AUDITD ?= false
+
+_install-host-stack-phase5-build:
+	@_skip=0; \
+	if [ -x target/release/workspace-guard ] && [ -x target/release/workspace-binary-guard ]; then \
+		if [ target/release/workspace-guard -nt Cargo.lock ] \
+			&& [ target/release/workspace-binary-guard -nt Cargo.lock ]; then \
+			_skip=1; \
+		fi; \
+	fi; \
+	if [ "$$_skip" -eq 1 ]; then \
+		echo "==> Release binaries fresh; skipping cargo build"; \
+	elif [ "$(INSTALL_LOCK)" = "true" ]; then \
+		$(MAKE) build-host-stack; \
+	else \
+		$(MAKE) build-guard; \
+	fi
+
+install-host-stack-phase5: _install-host-stack-phase5-build ## Build (if needed) + install guard + optional lock/auditd
+	GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
+	@if [ "$(INSTALL_LOCK)" = "true" ]; then GUARD_SKIP_BUILD=1 $(MAKE) install-lock; fi
+	@if [ "$(INSTALL_AUDITD)" = "true" ]; then $(MAKE) install-auditd; fi
+
 install-guard: ## REMOVED - use install-guard-host-exec
 	@echo "ERROR: make install-guard is removed. Use: make install-guard-host-exec" >&2
 	@exit 1
 
-install-guard-host-exec: build-guard ## Install git-guard (host-exec class; requires root)
+_INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
+install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
 	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
 
 uninstall-guard: ## Uninstall git-guard, restore original /usr/bin/git (requires root)
@@ -299,7 +327,8 @@ drift-check-quiet: ## Same as drift-check but stdout only on CRITICAL; res/drift
 	bash scripts/suid-drift-check --quiet
 
 .PHONY: install-lock
-install-lock: build-binary-guard ## Contain-via-guard every SUID binary per res/binary-lock.yaml (ROOT)
+_INSTALL_LOCK_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-binary-guard)
+install-lock: $(_INSTALL_LOCK_DEPS) ## Contain-via-guard every SUID binary per res/binary-lock.yaml (ROOT)
 	@if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-lock needs root: sudo make install-lock" >&2; exit 1; \
 	fi
@@ -321,14 +350,28 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: provision-host install-host-stack
-provision-host: ## Full host bootstrap: admin, sudo strip, identities, guard stack (ROOT)
+provision-host: ## Full host bootstrap: admin, fleet sudo audit, identities, guard stack (ROOT)
 	@if [ "$$(id -u)" -ne 0 ]; then \
 		echo "ERROR: provision-host needs root: sudo make provision-host" >&2; exit 1; \
 	fi
-	@test -x scripts/provision-host && bash scripts/provision-host \
-		|| { echo "ERROR: scripts/provision-host missing" >&2; exit 1; }
+	@if [ ! -x scripts/provision-host ]; then \
+		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
+	fi
+	@_demote=''; \
+	if [ "$(DEMOTE_FLEET_SUDO)" = "1" ]; then _demote='--demote-fleet-sudo'; fi; \
+	DEMOTE_FLEET_SUDO="$(DEMOTE_FLEET_SUDO)" bash scripts/provision-host $$_demote
 
 install-host-stack: provision-host ## Alias: provision-host (recommended fleet install)
+
+.PHONY: provision-host-preflight
+provision-host-preflight: ## Read-only host provision state report (ROOT)
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "ERROR: provision-host-preflight needs root: sudo make provision-host-preflight" >&2; exit 1; \
+	fi
+	@if [ ! -x scripts/provision-host ]; then \
+		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
+	fi
+	@bash scripts/provision-host --preflight
 
 .PHONY: provision-git-identities
 provision-git-identities: ## Provision per-user gitconfig + SSH keys from config/home-lock-users.yaml (ROOT)

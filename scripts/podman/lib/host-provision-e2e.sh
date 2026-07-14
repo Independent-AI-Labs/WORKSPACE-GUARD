@@ -43,7 +43,7 @@ hp_e2e_prepare_cargo_env() {
 }
 
 hp_e2e_init_state_dir() {
-    if [[ -z "${HP_E2E_STATE_DIR:-}" ]]; then
+    if [[ -z "${HP_E2E_STATE_DIR:-}" || ! -d "${HP_E2E_STATE_DIR:-}" ]]; then
         HP_E2E_STATE_DIR="$(mktemp -d)"
         HP_E2E_STATE_DIR_OWNED=1
     fi
@@ -140,13 +140,17 @@ hp_e2e_assert_install_gate_blocks() {
 }
 
 hp_e2e_run_phases_1_through_4() {
-    local guard_root
+    local guard_root demote_flag="${1:-}"
     guard_root="$(hp_e2e_guard_root)"
-    bash "$guard_root/scripts/provision-host" --skip-phase5
+    if [[ "$demote_flag" == "--demote-fleet-sudo" ]]; then
+        bash "$guard_root/scripts/provision-host" --skip-phase5 --demote-fleet-sudo
+    else
+        bash "$guard_root/scripts/provision-host" --skip-phase5
+    fi
 }
 
 hp_e2e_assert_post_phase4() {
-    local marker ssh_key
+    local marker ssh_key expect_demote="${1:-0}"
     marker="$(hp_e2e_marker_path)"
 
     if ! id "$HP_E2E_ADMIN_NAME" >/dev/null 2>&1; then
@@ -162,11 +166,31 @@ hp_e2e_assert_post_phase4() {
     fi
     echo "PASS: admin sudoers drop-in installed"
 
-    if hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-        echo "ERROR: $HP_E2E_AGENT_USER still in group sudo after phase 3" >&2
-        return 1
+    if [[ "$expect_demote" -eq 1 ]]; then
+        if hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
+            echo "ERROR: $HP_E2E_AGENT_USER still in group sudo after demotion" >&2
+            return 1
+        fi
+        echo "PASS: fleet user not in group sudo (demoted)"
+
+        if hp_e2e_agent_has_effective_sudo; then
+            echo "ERROR: $HP_E2E_AGENT_USER still has effective sudo after demotion" >&2
+            return 1
+        fi
+        echo "PASS: fleet user has no effective sudo (demoted)"
+    else
+        if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
+            echo "ERROR: $HP_E2E_AGENT_USER should retain group sudo (warn-only default)" >&2
+            return 1
+        fi
+        echo "PASS: fleet user retained group sudo (warn-only default)"
+
+        if ! hp_e2e_agent_has_effective_sudo; then
+            echo "ERROR: $HP_E2E_AGENT_USER should retain effective sudo (warn-only default)" >&2
+            return 1
+        fi
+        echo "PASS: fleet user retained effective sudo (warn-only default)"
     fi
-    echo "PASS: fleet user not in group sudo"
 
     if [[ ! -f "$HP_E2E_FOREIGN_SUDOERS" ]] \
         || ! grep -q 'foreigntest ALL=(ALL) NOPASSWD: /bin/true' "$HP_E2E_FOREIGN_SUDOERS"; then
@@ -199,8 +223,32 @@ hp_e2e_user_in_group() {
     printf '%s\n' "$groups" | tr ' ' '\n' | grep -qx "$group"
 }
 
+hp_e2e_agent_has_effective_sudo() {
+    local listing=""
+    if ! listing="$(sudo -l -U "$HP_E2E_AGENT_USER" 2>"$DEVNULL")"; then
+        return 1
+    fi
+    if printf '%s\n' "$listing" | grep -q 'is not allowed to run sudo'; then
+        return 1
+    fi
+    if printf '%s\n' "$listing" | grep -qE '\(ALL[[:space:]]*:[[:space:]]*ALL\)|\(ALL\)[[:space:]]+ALL|may run the following'; then
+        return 0
+    fi
+    return 1
+}
+
+hp_e2e_seed_direct_root_cloud_init() {
+    cat > /etc/sudoers.d/90-cloud-init-users <<EOF
+# cloud-init managed
+${HP_E2E_AGENT_USER} ALL=(ALL:ALL) ALL
+EOF
+    chmod 0440 /etc/sudoers.d/90-cloud-init-users
+}
+
 hp_e2e_cleanup() {
     if [[ "${HP_E2E_STATE_DIR_OWNED:-0}" == "1" && -n "${HP_E2E_STATE_DIR:-}" ]]; then
         rm -rf "$HP_E2E_STATE_DIR"
     fi
+    HP_E2E_STATE_DIR=""
+    HP_E2E_STATE_DIR_OWNED=0
 }

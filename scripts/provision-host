@@ -9,25 +9,39 @@ LIB_DIR="$SCRIPT_DIR/lib"
 HP_CONFIG="${WORKSPACE_HOST_PROVISION_FILE:-$REPO_ROOT/config/host-provision.yaml}"
 HP_STATE_DIR="${WORKSPACE_GUARD_STATE_DIR:-/usr/lib/workspace-guard}"
 HP_MARKER="$HP_STATE_DIR/host-provision.ok"
-DEVNULL=/dev/null
 
 usage() {
     cat <<EOF
-Usage: $0 [--dry-run] [--phase N] [--skip-phase5]
+Usage: $0 [--dry-run] [--preflight] [--phase N] [--skip-phase5]
+       [--acknowledge-direct-root-agent] [--demote-fleet-sudo]
 Root-only host bootstrap: admin, sudo policy, identities, guard stack.
+Default: warn when fleet users have sudo; use --demote-fleet-sudo to strip.
 Config: config/host-provision.yaml (copy from .example)
 Make: sudo make provision-host | sudo make install-host-stack
 EOF
 }
 
 DRY_RUN=0
+PREFLIGHT=0
 PHASE_ONLY=""
 SKIP_PHASE5=0
+ACK_DIRECT_ROOT=0
+DEMOTE_FLEET_SUDO=0
+if [[ "${DEMOTE_FLEET_SUDO:-}" == "1" ]]; then
+    DEMOTE_FLEET_SUDO=1
+fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run|-n) DRY_RUN=1; shift ;;
+        --preflight) PREFLIGHT=1; shift ;;
         --phase) PHASE_ONLY="${2:?}"; shift 2 ;;
         --skip-phase5) SKIP_PHASE5=1; shift ;;
+        --acknowledge-direct-root-agent) ACK_DIRECT_ROOT=1; shift ;;
+        --demote-fleet-sudo) DEMOTE_FLEET_SUDO=1; shift ;;
+        --best-effort-phase5)
+            echo "ERROR: --best-effort-phase5 removed (phase 5 fails closed on any error)" >&2
+            exit 2
+            ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; exit 2 ;;
     esac
@@ -43,7 +57,7 @@ if [[ ! -f "$HP_CONFIG" ]]; then
     exit 2
 fi
 
-export HP_CONFIG HP_REPO_ROOT="$REPO_ROOT"
+export HP_CONFIG HP_REPO_ROOT="$REPO_ROOT" HP_STATE_DIR
 # shellcheck source=scripts/lib/host-provision-parse.sh
 source "$LIB_DIR/host-provision-parse.sh" || exit 1
 # shellcheck source=scripts/lib/host-provision-users.sh
@@ -52,6 +66,8 @@ source "$LIB_DIR/host-provision-users.sh" || exit 1
 source "$LIB_DIR/host-provision-admin.sh" || exit 1
 # shellcheck source=scripts/lib/host-provision-sudo.sh
 source "$LIB_DIR/host-provision-sudo.sh" || exit 1
+# shellcheck source=scripts/lib/host-provision-operator.sh
+source "$LIB_DIR/host-provision-operator.sh" || exit 1
 
 hp_should_run_phase() {
     local n="$1"
@@ -70,6 +86,41 @@ hp_write_marker() {
     chmod 0644 "$HP_MARKER"
 }
 
+hp_run_preflight() {
+    local fleet_user token_path
+    echo "==> Host provision preflight (read-only)"
+    echo "    config: $HP_CONFIG"
+    echo "    admin.name: $ADMIN_NAME"
+    echo "    fleet file: $FLEET_FILE"
+    if hp_admin_exists "$ADMIN_NAME"; then
+        echo "    admin account: present"
+    else
+        echo "    admin account: MISSING"
+    fi
+    if hp_admin_has_sudo "$ADMIN_NAME"; then
+        echo "    admin sudo: ready (group or managed drop-in)"
+    else
+        echo "    admin sudo: not ready"
+    fi
+    token_path="$(hp_phase2_token_path)"
+    if [[ -f "$token_path" ]]; then
+        echo "    phase-2 token: present ($token_path)"
+    else
+        echo "    phase-2 token: absent (phase 3 will refuse until phase 2 passes)"
+    fi
+    if [[ -f "$FLEET_FILE" ]]; then
+        while IFS= read -r fleet_user; do
+            [[ -z "$fleet_user" ]] && continue
+            hp_sudo_preflight_fleet_user "$fleet_user"
+        done < <(hp_users_list_fleet_names "$FLEET_FILE")
+    fi
+    if [[ -n "${WORKSPACE_ADMIN_PASSWORD:-}" ]]; then
+        echo "    WORKSPACE_ADMIN_PASSWORD: set (phase 2 will use it)"
+    else
+        echo "    WORKSPACE_ADMIN_PASSWORD: unset (phase 2 will prompt)"
+    fi
+}
+
 ADMIN_NAME="$(hp_admin_name)"
 [[ -z "$ADMIN_NAME" ]] && ADMIN_NAME="admin"
 ADMIN_SHELL="$(hp_parse_field admin.shell)"
@@ -77,9 +128,26 @@ ADMIN_SHELL="$(hp_parse_field admin.shell)"
 ADMIN_CREATE_HOME="$(hp_parse_field admin.create_home)"
 [[ -z "$ADMIN_CREATE_HOME" ]] && ADMIN_CREATE_HOME="true"
 FLEET_FILE="$(hp_fleet_users_file)"
-FLEET_SHA="$(hp_users_fleet_sha256 "$FLEET_FILE")"
+FLEET_SHA=""
+if [[ -f "$FLEET_FILE" ]]; then
+    FLEET_SHA="$(hp_users_fleet_sha256 "$FLEET_FILE")"
+fi
 USER_MGMT=0
 if hp_user_mgmt_enabled; then USER_MGMT=1; fi
+
+if [[ "$PREFLIGHT" -eq 1 ]]; then
+    hp_run_preflight
+    exit 0
+fi
+
+if [[ "$USER_MGMT" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
+    hp_operator_mandatory_fleet_report "$FLEET_FILE" "$ADMIN_NAME"
+fi
+
+# Fresh full run or phase 1: drop stale phase-2 token so old tokens cannot authorize phase 3 alone.
+if [[ -z "$PHASE_ONLY" || "$PHASE_ONLY" == "1" ]]; then
+    hp_phase2_token_clear
+fi
 
 ADMIN_NEW=0
 ADMIN_PASSWORD=""
@@ -107,8 +175,10 @@ if hp_should_run_phase 1 && [[ "$USER_MGMT" -eq 1 ]]; then
             hp_admin_install_sudoers_dropin "$ADMIN_NAME"
             echo "  Installed $HP_SUDOERS_ADMIN"
         else
-            echo "  SKIP: admin $ADMIN_NAME already has sudo"
+            echo "  OK: admin $ADMIN_NAME already exists with managed sudo (unchanged)"
+            echo "  NOTE: re-run still requires phase 2 (existing admin password)"
         fi
+        hp_admin_assert_sudo_ready "$ADMIN_NAME"
     fi
 fi
 
@@ -118,16 +188,16 @@ if hp_should_run_phase 2 && [[ "$USER_MGMT" -eq 1 ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "  DRY-RUN: would verify admin password"
     else
-        entered=""
-        if [[ -n "$ADMIN_PASSWORD" && "${GUARD_NONINTERACTIVE:-}" == "1" ]]; then
-            entered="$ADMIN_PASSWORD"
-        else
-            entered="$(hp_admin_prompt_password "Enter password for $ADMIN_NAME: ")" || exit 1
+        if ! hp_admin_exists "$ADMIN_NAME"; then
+            echo "ERROR: phase 2 refused: admin $ADMIN_NAME does not exist (run phase 1 first)" >&2
+            exit 1
         fi
+        entered="$(hp_admin_resolve_phase2_password "$ADMIN_NAME" "Enter password for $ADMIN_NAME: ")" || exit 1
         if ! hp_admin_verify_password "$ADMIN_NAME" "$entered"; then
             echo "ERROR: admin password verification failed" >&2
             exit 1
         fi
+        hp_phase2_token_write "$ADMIN_NAME"
         echo "  PASS: admin password verified"
     fi
 fi
@@ -135,21 +205,39 @@ fi
 # --- Phase 3: fleet hardening ---
 if hp_should_run_phase 3 && [[ "$USER_MGMT" -eq 1 ]]; then
     echo "==> Phase 3: fleet user hardening"
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo "  DRY-RUN: would ensure fleet users and strip sudo"
+    if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
+        echo "    mode: demote fleet sudo (--demote-fleet-sudo)"
     else
-        if [[ -f "$FLEET_FILE" ]]; then
-            hp_users_ensure_fleet_accounts "$FLEET_FILE"
-            local_user=""
-            while IFS= read -r local_user; do
-                [[ -z "$local_user" ]] && continue
-                [[ "$local_user" == "$ADMIN_NAME" ]] && continue
-                hp_sudo_strip_fleet_from_group "$local_user"
-            done < <(hp_users_list_fleet_names "$FLEET_FILE")
-            hp_sudo_remove_managed_agent_dropin
-            hp_sudo_scan_foreign_grants "$FLEET_FILE"
+        echo "    mode: warn-only (fleet sudo retained unless --demote-fleet-sudo)"
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
+            echo "  DRY-RUN: would ensure fleet users and strip sudo"
         else
-            echo "WARN: fleet file missing: $FLEET_FILE" >&2
+            echo "  DRY-RUN: would ensure fleet users and audit sudo (no demotion)"
+        fi
+    else
+        hp_phase2_token_consume "$ADMIN_NAME"
+        hp_admin_assert_sudo_ready "$ADMIN_NAME"
+        if [[ ! -f "$FLEET_FILE" ]]; then
+            echo "ERROR: fleet file missing: $FLEET_FILE" >&2
+            exit 1
+        fi
+        hp_operator_gate_direct_root_before_phase3 "$FLEET_FILE" "$ADMIN_NAME" "$ACK_DIRECT_ROOT"
+        hp_users_ensure_fleet_accounts "$FLEET_FILE"
+        local_user=""
+        while IFS= read -r local_user; do
+            [[ -z "$local_user" ]] && continue
+            [[ "$local_user" == "$ADMIN_NAME" ]] && continue
+            if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
+                hp_sudo_demote_fleet_user "$local_user"
+            else
+                hp_sudo_warn_only_fleet_user "$local_user"
+            fi
+        done < <(hp_users_list_fleet_names "$FLEET_FILE")
+        if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
+            hp_sudo_assert_no_foreign_grants "$FLEET_FILE"
+            hp_sudo_assert_fleet_demoted "$FLEET_FILE"
         fi
     fi
 fi
@@ -175,33 +263,17 @@ if hp_should_run_phase 5 && [[ "$SKIP_PHASE5" -eq 0 ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "  DRY-RUN: would build/install guard stack"
     else
-        if [[ "$USER_MGMT" -eq 1 ]]; then
-            if [[ -f "$FLEET_FILE" ]] && hp_sudo_fleet_user_still_privileged "$FLEET_FILE"; then
-                echo "ERROR: fleet user still in group sudo after phase 3" >&2
-                exit 1
-            fi
-            hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
-        fi
         if [[ ! -f "$REPO_ROOT/config/agent-git-identity" ]] \
             && [[ -f "$REPO_ROOT/config/agent-git-identity.example" ]]; then
             cp "$REPO_ROOT/config/agent-git-identity.example" "$REPO_ROOT/config/agent-git-identity"
         fi
-        make -C "$REPO_ROOT" build-guard
-        make -C "$REPO_ROOT" install-guard-host-exec
         install_lock="$(hp_parse_field guard_stack.install_lock)"
         install_auditd="$(hp_parse_field guard_stack.install_auditd)"
-        if [[ "${install_lock:-true}" == "true" ]]; then
-            if ! make -C "$REPO_ROOT" install-lock; then
-                echo "WARN: install-lock skipped or failed" >&2
-            fi
-        fi
-        if [[ "${install_auditd:-true}" == "true" ]]; then
-            if ! make -C "$REPO_ROOT" install-auditd; then
-                echo "WARN: install-auditd skipped or failed" >&2
-            fi
-        fi
+        INSTALL_LOCK="${install_lock:-false}" INSTALL_AUDITD="${install_auditd:-false}" \
+            make -C "$REPO_ROOT" install-host-stack-phase5
         if [[ "$USER_MGMT" -eq 1 ]]; then
             hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
+            hp_operator_print_completion_banner "$FLEET_FILE" "$DEMOTE_FLEET_SUDO"
         fi
         echo "==> Host provision complete"
         [[ -f "$HP_MARKER" ]] && echo "    marker: $HP_MARKER"

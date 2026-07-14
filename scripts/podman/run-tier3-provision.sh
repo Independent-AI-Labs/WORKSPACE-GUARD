@@ -40,4 +40,12 @@ echo "==> Host provision E2E in $_IMAGE"
     "$_IMAGE" \
     bash scripts/podman/e2e-host-provision.sh
 
+echo "==> Host provision safety E2E in $_IMAGE"
+
+"$PODMAN" run --rm --privileged \
+    -v "${_PROJECTS_ROOT}:/projects:rw" \
+    -w /projects/WORKSPACE-GUARD \
+    "$_IMAGE" \
+    bash scripts/podman/e2e-host-provision-safety.sh
+
 echo "==> Host provision E2E complete"

@@ -18,5 +18,5 @@ admin:
 fleet_users_file: config/home-lock-users.yaml
 
 guard_stack:
-  install_lock: true
-  install_auditd: true
+  install_lock: false
+  install_auditd: false
