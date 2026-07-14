@@ -28,4 +28,4 @@ fields:
   - path: blocked_bypass
     type: list<string>
     required: true
-    description: "Pre-commit hook-cheat env vars blocked when non-empty (e.g. SKIP, PRE_COMMIT_ALLOW_NO_CONFIG)."
+    description: "Hook-bypass env vars that are blocked when set to a non-empty value (e.g. SKIP, PRE_COMMIT_ALLOW_NO_CONFIG)."
