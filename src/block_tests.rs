@@ -191,6 +191,7 @@ fn rebase_without_safe_flag_blocked() {
 
 #[test]
 fn rebase_continue_allowed() {
+    std::env::remove_var("SKIP");
     let mut state = empty_state("rebase");
     state.has_rebase_safe_flag = true;
     let argv_os = argv(&["git", "rebase", "--continue"]);
@@ -307,9 +308,11 @@ fn config_dangerous_key_blocked() {
 #[test]
 fn bypass_env_skip_blocked() {
     std::env::set_var("SKIP", "1");
-    let state = empty_state("status");
-    let argv_os = argv(&["git", "status"]);
-    let result = check_blocked(&state, "status", &argv_os, "/nonexistent-git", None);
+    let result = {
+        let state = empty_state("status");
+        let argv_os = argv(&["git", "status"]);
+        check_blocked(&state, "status", &argv_os, "/nonexistent-git", None)
+    };
     std::env::remove_var("SKIP");
     assert!(matches!(result, Err(GuardError::Blocked { .. })));
 }
