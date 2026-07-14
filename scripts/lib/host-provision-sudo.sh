@@ -65,9 +65,8 @@ hp_sudo_revoke_cached_ticket() {
     fi
 }
 
-# privilege_state: none | privileged | ticket_active | verify_failed
-#   privileged     — persistent grant (group sudo, sudoers line, sudo -l -U policy)
-#   ticket_active  — no persistent grant; cached sudo timestamp still valid
+# privilege_state: none | privileged | verify_failed
+#   privileged — group sudo, sudoers line, or sudo -l -U policy shows grants
 hp_sudo_privilege_state() {
     local user="${1:?user}" listing="" rc=0
 
@@ -107,20 +106,7 @@ hp_sudo_privilege_state() {
         return 0
     fi
 
-    if hp_sudo_has_cached_ticket "$user"; then
-        printf 'ticket_active\n'
-        return 0
-    fi
-
     printf 'none\n'
-}
-
-hp_sudo_state_is_elevated() {
-    local state="${1:?state}"
-    case "$state" in
-        privileged|ticket_active) return 0 ;;
-        *) return 1 ;;
-    esac
 }
 
 hp_user_in_group() {
@@ -189,7 +175,7 @@ hp_sudo_user_has_effective_sudo() {
     local user="${1:?user}" state
     state="$(hp_sudo_privilege_state "$user")"
     case "$state" in
-        privileged|ticket_active) return 0 ;;
+        privileged) return 0 ;;
         none) return 1 ;;
         verify_failed) return 0 ;;
     esac
@@ -204,7 +190,7 @@ hp_sudo_require_no_effective_sudo() {
             echo "  VERIFIED: $user has no effective sudo"
             return 0
             ;;
-        privileged|ticket_active)
+        privileged)
             echo "ERROR: fleet user $user still has effective sudo (state=$state)" >&2
             return 1
             ;;
@@ -464,55 +450,6 @@ hp_sudo_strip_fleet_from_group() {
     echo "  VERIFIED: $user removed from group sudo"
 }
 
-hp_sudo_warn_only_fleet_user() {
-    local user="${1:?user}" state
-
-    state="$(hp_sudo_privilege_state "$user")"
-    case "$state" in
-        privileged)
-            hp_operator_print_fleet_sudo_warning "$user" "$state"
-            echo "  WARN: fleet user '$user' retains persistent sudo (demotion skipped — default warn-only policy)" >&2
-            ;;
-        ticket_active)
-            hp_operator_print_fleet_sudo_warning "$user" "$state"
-            echo "  WARN: fleet user '$user' retains cached sudo ticket (demotion skipped — default warn-only policy)" >&2
-            ;;
-        none)
-            echo "  OK: $user has no effective sudo (see audit above)"
-            ;;
-        verify_failed)
-            echo "ERROR: cannot verify sudo state for $user (fail-closed)" >&2
-            return 1
-            ;;
-    esac
-    return 0
-}
-
-hp_sudo_demote_fleet_user() {
-    local user="${1:?user}" state
-
-    state="$(hp_sudo_privilege_state "$user")"
-    case "$state" in
-        privileged|ticket_active)
-            hp_operator_bold_red "ACTION: fleet user '$user' has sudo ($state) — demoting now"
-            ;;
-        verify_failed)
-            echo "ERROR: cannot demote $user — sudo verification failed (fail-closed)" >&2
-            return 1
-            ;;
-        none)
-            echo "  OK: $user already has no effective sudo (see audit above)"
-            return 0
-            ;;
-    esac
-
-    hp_sudo_strip_fleet_from_group "$user" || return 1
-    hp_sudo_strip_managed_dropins_for_user "$user" || return 1
-    hp_sudo_remove_managed_agent_dropin
-    hp_sudo_revoke_cached_ticket "$user"
-    hp_sudo_require_no_effective_sudo "$user"
-}
-
 hp_sudo_assert_no_foreign_grants() {
     local fleet_file="${1:?fleet_file}"
     local user found=0
@@ -554,28 +491,6 @@ hp_sudo_assert_no_foreign_grants() {
     return 0
 }
 
-hp_sudo_fleet_user_still_privileged() {
-    local fleet_file="$1"
-    local user state
-    while IFS= read -r user; do
-        [[ -z "$user" ]] && continue
-        state="$(hp_sudo_privilege_state "$user")"
-        if hp_sudo_state_is_elevated "$state"; then
-            return 0
-        fi
-    done < <(hp_users_list_fleet_names "$fleet_file")
-    return 1
-}
-
-hp_sudo_assert_fleet_demoted() {
-    local fleet_file="${1:?fleet_file}"
-    local user
-    while IFS= read -r user; do
-        [[ -z "$user" ]] && continue
-        hp_sudo_require_no_effective_sudo "$user" || return 1
-    done < <(hp_users_list_fleet_names "$fleet_file")
-}
-
 hp_sudo_preflight_fleet_user() {
     local user="${1:?user}" state
     state="$(hp_sudo_privilege_state "$user")"
@@ -588,9 +503,6 @@ hp_sudo_preflight_fleet_user() {
             else
                 echo "    fleet user $user: PRIVILEGED (sudoers file or sudo -l policy)"
             fi
-            ;;
-        ticket_active)
-            echo "    fleet user $user: TICKET ACTIVE (cached sudo; no persistent grant)"
             ;;
         verify_failed)
             echo "    fleet user $user: VERIFY FAILED (sudo -l or id check failed)"

@@ -47,13 +47,10 @@ sudo make install-hooks        # after git install, via WORKSPACE-CI
 ```
 
 Phase 1 prints a one-time **admin** password; phase 2 prompts for it before
-phase 3 fleet hardening. **By default**, if fleet users (e.g. `agent`) already
-have sudo, provision **prints CRITICAL warnings and retains sudo** (warn-only).
-Pass `DEMOTE_FLEET_SUDO=1` or `--demote-fleet-sudo` to strip group `sudo` and
-managed cloud-init drop-ins. Persistent grants (group/sudoers) and cached sudo
-tickets are reported separately in the mandatory audit. Unmanaged direct-root
-sudoers grants still block phase 3 with a **CRITICAL** banner until removed or
-acknowledged.
+phase 3 fleet account setup. Fleet **sudo is never modified**. Mandatory audit:
+**RED CRITICAL** if a provisioned fleet user exists and has sudo (group, sudoers,
+or `sudo -l`); **YELLOW WARN** if the user exists without sudo. Unmanaged
+direct-root sudoers grants block phase 3 until removed or acknowledged.
 
 Manual steps (when `user_management.enabled: false` or partial install):
 
@@ -118,7 +115,7 @@ flowchart TB
 | **II-C - Audit** | Guarded exec paths, baselines | auditd, AIDE, drift reports | `make install-auditd` |
 | **II-D - Inventory** | Live host vs catalog | GTFOBins sync → `res/*-baseline.yaml` | `make sync-gtfobins` |
 | **III - Home lock** | `~user/.gitconfig`, `~user/.ssh/*` (fleet list) | Root-owned paths; non-root cannot write | `make install-host-stack` or `provision-git-identities` + `install-home-lock` |
-| **Host provision** | Admin account, sudo policy, fleet UNIX users | Break-glass admin; fleet sudo warn-only (demote opt-in) | `make provision-host` / `make install-host-stack` |
+| **Host provision** | Admin account, fleet sudo audit, fleet UNIX users | Break-glass admin; RED/YELLOW fleet audit (no demotion) | `make provision-host` / `make install-host-stack` |
 
 Programs compose on one host. Each has its own install target, spec, and
 operational lifecycle.

@@ -71,16 +71,16 @@ fi
 echo "PASS: deployment-class is host-exec"
 
 if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: $HP_E2E_AGENT_USER should retain group sudo (warn-only default)" >&2
+    echo "ERROR: $HP_E2E_AGENT_USER should retain group sudo (audit-only)" >&2
     exit 1
 fi
-echo "PASS: agent retained group sudo (warn-only default)"
+echo "PASS: agent retained group sudo (no demotion)"
 
 if ! hp_e2e_agent_has_effective_sudo; then
-    echo "ERROR: $HP_E2E_AGENT_USER should retain effective sudo (warn-only default)" >&2
+    echo "ERROR: $HP_E2E_AGENT_USER should retain effective sudo (audit-only)" >&2
     exit 1
 fi
-echo "PASS: agent retained effective sudo (warn-only default)"
+echo "PASS: agent retained effective sudo (no demotion)"
 
 _marker="$(hp_e2e_marker_path)"
 if [[ ! -f "$_marker" ]]; then

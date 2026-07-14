@@ -41,7 +41,7 @@ hp_users_ensure_fleet_accounts() {
 hp_users_fleet_sha256() {
     local fleet_file="$1"
     if [[ ! -f "$fleet_file" ]]; then
-        echo "ERROR: fleet users file missing: $fleet_file" >&2
+        hp_config_error_missing_fleet_file "$fleet_file" "completion marker fleet_sha256"
         return 1
     fi
     sha256sum "$fleet_file" | awk '{print $1}'

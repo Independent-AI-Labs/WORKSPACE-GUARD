@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# provision-host: admin break-glass, fleet sudo strip, git/SSH, guard stack.
+# provision-host: admin break-glass, fleet sudo audit, git/SSH, guard stack.
 # See docs/specifications/SPEC-HOST-PROVISION.md
 set -euo pipefail
 
@@ -13,9 +13,9 @@ HP_MARKER="$HP_STATE_DIR/host-provision.ok"
 usage() {
     cat <<EOF
 Usage: $0 [--dry-run] [--preflight] [--phase N] [--skip-phase5]
-       [--acknowledge-direct-root-agent] [--demote-fleet-sudo]
-Root-only host bootstrap: admin, sudo policy, identities, guard stack.
-Default: warn when fleet users have sudo; use --demote-fleet-sudo to strip.
+       [--acknowledge-direct-root-agent]
+Root-only host bootstrap: admin, fleet sudo audit, identities, guard stack.
+Fleet sudo is never modified (RED=sudo, YELLOW=no sudo).
 Config: config/host-provision.yaml (copy from .example)
 Make: sudo make provision-host | sudo make install-host-stack
 EOF
@@ -26,10 +26,6 @@ PREFLIGHT=0
 PHASE_ONLY=""
 SKIP_PHASE5=0
 ACK_DIRECT_ROOT=0
-DEMOTE_FLEET_SUDO=0
-if [[ "${DEMOTE_FLEET_SUDO:-}" == "1" ]]; then
-    DEMOTE_FLEET_SUDO=1
-fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run|-n) DRY_RUN=1; shift ;;
@@ -37,7 +33,10 @@ while [[ $# -gt 0 ]]; do
         --phase) PHASE_ONLY="${2:?}"; shift 2 ;;
         --skip-phase5) SKIP_PHASE5=1; shift ;;
         --acknowledge-direct-root-agent) ACK_DIRECT_ROOT=1; shift ;;
-        --demote-fleet-sudo) DEMOTE_FLEET_SUDO=1; shift ;;
+        --demote-fleet-sudo)
+            echo "ERROR: --demote-fleet-sudo removed (fleet sudo is never modified)" >&2
+            exit 2
+            ;;
         --best-effort-phase5)
             echo "ERROR: --best-effort-phase5 removed (phase 5 fails closed on any error)" >&2
             exit 2
@@ -51,15 +50,14 @@ if [[ "$(id -u)" != "0" ]]; then
     echo "ERROR: provision-host needs root" >&2
     exit 2
 fi
-if [[ ! -f "$HP_CONFIG" ]]; then
-    echo "ERROR: $HP_CONFIG missing" >&2
-    echo "       cp config/host-provision.yaml.example config/host-provision.yaml" >&2
-    exit 2
-fi
 
 export HP_CONFIG HP_REPO_ROOT="$REPO_ROOT" HP_STATE_DIR
 # shellcheck source=scripts/lib/host-provision-parse.sh
 source "$LIB_DIR/host-provision-parse.sh" || exit 1
+
+if [[ ! -f "$HP_CONFIG" ]]; then
+    hp_config_error_missing_host_provision "$HP_CONFIG" || exit 2
+fi
 # shellcheck source=scripts/lib/host-provision-users.sh
 source "$LIB_DIR/host-provision-users.sh" || exit 1
 # shellcheck source=scripts/lib/host-provision-admin.sh
@@ -91,7 +89,7 @@ hp_run_preflight() {
     echo "==> Host provision preflight (read-only)"
     echo "    config: $HP_CONFIG"
     echo "    admin.name: $ADMIN_NAME"
-    echo "    fleet file: $FLEET_FILE"
+    echo "    user_management.enabled: $([[ "$USER_MGMT" -eq 1 ]] && echo true || echo false)"
     if hp_admin_exists "$ADMIN_NAME"; then
         echo "    admin account: present"
     else
@@ -109,10 +107,17 @@ hp_run_preflight() {
         echo "    phase-2 token: absent (phase 3 will refuse until phase 2 passes)"
     fi
     if [[ -f "$FLEET_FILE" ]]; then
+        echo "    fleet file: present ($FLEET_FILE)"
         while IFS= read -r fleet_user; do
             [[ -z "$fleet_user" ]] && continue
             hp_sudo_preflight_fleet_user "$fleet_user"
         done < <(hp_users_list_fleet_names "$FLEET_FILE")
+    elif [[ "$USER_MGMT" -eq 1 ]]; then
+        echo "    fleet file: MISSING ($FLEET_FILE)"
+        hp_config_error_missing_fleet_file "$FLEET_FILE" "preflight (user_management enabled)"
+        return 1
+    else
+        echo "    fleet file: optional (user_management disabled)"
     fi
     if [[ -n "${WORKSPACE_ADMIN_PASSWORD:-}" ]]; then
         echo "    WORKSPACE_ADMIN_PASSWORD: set (phase 2 will use it)"
@@ -136,12 +141,15 @@ USER_MGMT=0
 if hp_user_mgmt_enabled; then USER_MGMT=1; fi
 
 if [[ "$PREFLIGHT" -eq 1 ]]; then
-    hp_run_preflight
+    hp_run_preflight || exit 1
     exit 0
 fi
 
-if [[ "$USER_MGMT" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
-    hp_operator_mandatory_fleet_report "$FLEET_FILE" "$ADMIN_NAME"
+if [[ "$USER_MGMT" -eq 1 ]]; then
+    hp_config_require_fleet_file "$FLEET_FILE" 1 "before host provision phases" || exit 1
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        hp_operator_mandatory_fleet_report "$FLEET_FILE" "$ADMIN_NAME"
+    fi
 fi
 
 # Fresh full run or phase 1: drop stale phase-2 token so old tokens cannot authorize phase 3 alone.
@@ -204,41 +212,21 @@ fi
 
 # --- Phase 3: fleet hardening ---
 if hp_should_run_phase 3 && [[ "$USER_MGMT" -eq 1 ]]; then
-    echo "==> Phase 3: fleet user hardening"
-    if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
-        echo "    mode: demote fleet sudo (--demote-fleet-sudo)"
-    else
-        echo "    mode: warn-only (fleet sudo retained unless --demote-fleet-sudo)"
-    fi
+    echo "==> Phase 3: fleet user accounts (audit only — sudo never modified)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
-            echo "  DRY-RUN: would ensure fleet users and strip sudo"
-        else
-            echo "  DRY-RUN: would ensure fleet users and audit sudo (no demotion)"
-        fi
+        echo "  DRY-RUN: would ensure fleet users and print sudo audit"
     else
         hp_phase2_token_consume "$ADMIN_NAME"
         hp_admin_assert_sudo_ready "$ADMIN_NAME"
-        if [[ ! -f "$FLEET_FILE" ]]; then
-            echo "ERROR: fleet file missing: $FLEET_FILE" >&2
-            exit 1
-        fi
+        hp_config_require_fleet_file "$FLEET_FILE" 1 "phase 3 fleet accounts" || exit 1
         hp_operator_gate_direct_root_before_phase3 "$FLEET_FILE" "$ADMIN_NAME" "$ACK_DIRECT_ROOT"
         hp_users_ensure_fleet_accounts "$FLEET_FILE"
         local_user=""
         while IFS= read -r local_user; do
             [[ -z "$local_user" ]] && continue
             [[ "$local_user" == "$ADMIN_NAME" ]] && continue
-            if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
-                hp_sudo_demote_fleet_user "$local_user"
-            else
-                hp_sudo_warn_only_fleet_user "$local_user"
-            fi
+            hp_operator_phase3_fleet_line "$local_user"
         done < <(hp_users_list_fleet_names "$FLEET_FILE")
-        if [[ "$DEMOTE_FLEET_SUDO" -eq 1 ]]; then
-            hp_sudo_assert_no_foreign_grants "$FLEET_FILE"
-            hp_sudo_assert_fleet_demoted "$FLEET_FILE"
-        fi
     fi
 fi
 
@@ -248,10 +236,13 @@ if hp_should_run_phase 4; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "  DRY-RUN: would provision identities and install-home-lock"
     else
-        if [[ -f "$FLEET_FILE" ]]; then
-            bash "$SCRIPT_DIR/provision-user-git-identity" --admin-from "$HP_CONFIG"
+        if [[ "$USER_MGMT" -eq 1 ]]; then
+            hp_config_require_fleet_file "$FLEET_FILE" 1 "phase 4 git/SSH identity" || exit 1
+            bash "$SCRIPT_DIR/provision-user-git-identity" \
+                --admin-from "$HP_CONFIG" --users-file "$FLEET_FILE"
         else
-            bash "$SCRIPT_DIR/provision-user-git-identity" --admin-from "$HP_CONFIG" --users-file /dev/null
+            bash "$SCRIPT_DIR/provision-user-git-identity" \
+                --admin-from "$HP_CONFIG" --users-file /dev/null
         fi
         bash "$SCRIPT_DIR/install-home-lock"
     fi
@@ -273,7 +264,7 @@ if hp_should_run_phase 5 && [[ "$SKIP_PHASE5" -eq 0 ]]; then
             make -C "$REPO_ROOT" install-host-stack-phase5
         if [[ "$USER_MGMT" -eq 1 ]]; then
             hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
-            hp_operator_print_completion_banner "$FLEET_FILE" "$DEMOTE_FLEET_SUDO"
+            hp_operator_print_completion_banner "$FLEET_FILE" "$ADMIN_NAME"
         fi
         echo "==> Host provision complete"
         [[ -f "$HP_MARKER" ]] && echo "    marker: $HP_MARKER"

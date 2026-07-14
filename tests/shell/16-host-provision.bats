@@ -180,6 +180,43 @@ EOF
     [[ ! -f "$HP_SUDOERS_DIR/90-cloud-init-users" ]]
 }
 
+@test "hp_config_error_missing_host_provision prints remediation" {
+    export HP_REPO_ROOT="$GUARD_ROOT"
+    # shellcheck source=scripts/lib/host-provision-parse.sh
+    source "$GUARD_ROOT/scripts/lib/host-provision-parse.sh"
+    run bash -c "
+        export HP_REPO_ROOT='$GUARD_ROOT'
+        source '$GUARD_ROOT/scripts/lib/host-provision-parse.sh'
+        hp_config_error_missing_host_provision '$TEST_TMPDIR/missing-host-provision.yaml' 2>&1
+    "
+    assert_failure
+    assert_output --partial "host provision config missing"
+    assert_output --partial "cp config/host-provision.yaml.example config/host-provision.yaml"
+    assert_output --partial "SPEC-HOST-PROVISION.md"
+}
+
+@test "hp_config_error_missing_fleet_file prints remediation" {
+    run bash -c "
+        export HP_REPO_ROOT='$GUARD_ROOT'
+        source '$GUARD_ROOT/scripts/lib/host-provision-parse.sh'
+        hp_config_error_missing_fleet_file '$TEST_TMPDIR/missing-fleet.yaml' 'unit test' 2>&1
+    "
+    assert_failure
+    assert_output --partial "fleet users file missing"
+    assert_output --partial "user_management.enabled is true"
+    assert_output --partial "home-lock-users.yaml.example"
+    assert_output --partial "SPEC-GIT-IDENTITY.md"
+}
+
+@test "hp_config_require_fleet_file skips when user_management disabled" {
+    run bash -c "
+        export HP_REPO_ROOT='$GUARD_ROOT'
+        source '$GUARD_ROOT/scripts/lib/host-provision-parse.sh'
+        hp_config_require_fleet_file '$TEST_TMPDIR/nope.yaml' 0
+    "
+    assert_success
+}
+
 @test "admin sudoers drop-in contains managed markers" {
     _write_host_config "$TEST_TMPDIR"
     HP_SUDOERS_ADMIN="$TEST_TMPDIR/90-workspace-guard-admin"

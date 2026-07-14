@@ -140,17 +140,13 @@ hp_e2e_assert_install_gate_blocks() {
 }
 
 hp_e2e_run_phases_1_through_4() {
-    local guard_root demote_flag="${1:-}"
+    local guard_root
     guard_root="$(hp_e2e_guard_root)"
-    if [[ "$demote_flag" == "--demote-fleet-sudo" ]]; then
-        bash "$guard_root/scripts/provision-host" --skip-phase5 --demote-fleet-sudo
-    else
-        bash "$guard_root/scripts/provision-host" --skip-phase5
-    fi
+    bash "$guard_root/scripts/provision-host" --skip-phase5
 }
 
 hp_e2e_assert_post_phase4() {
-    local marker ssh_key expect_demote="${1:-0}"
+    local marker ssh_key
     marker="$(hp_e2e_marker_path)"
 
     if ! id "$HP_E2E_ADMIN_NAME" >/dev/null 2>&1; then
@@ -166,31 +162,17 @@ hp_e2e_assert_post_phase4() {
     fi
     echo "PASS: admin sudoers drop-in installed"
 
-    if [[ "$expect_demote" -eq 1 ]]; then
-        if hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-            echo "ERROR: $HP_E2E_AGENT_USER still in group sudo after demotion" >&2
-            return 1
-        fi
-        echo "PASS: fleet user not in group sudo (demoted)"
-
-        if hp_e2e_agent_has_effective_sudo; then
-            echo "ERROR: $HP_E2E_AGENT_USER still has effective sudo after demotion" >&2
-            return 1
-        fi
-        echo "PASS: fleet user has no effective sudo (demoted)"
-    else
-        if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-            echo "ERROR: $HP_E2E_AGENT_USER should retain group sudo (warn-only default)" >&2
-            return 1
-        fi
-        echo "PASS: fleet user retained group sudo (warn-only default)"
-
-        if ! hp_e2e_agent_has_effective_sudo; then
-            echo "ERROR: $HP_E2E_AGENT_USER should retain effective sudo (warn-only default)" >&2
-            return 1
-        fi
-        echo "PASS: fleet user retained effective sudo (warn-only default)"
+    if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
+        echo "ERROR: $HP_E2E_AGENT_USER should retain group sudo (audit-only, no demotion)" >&2
+        return 1
     fi
+    echo "PASS: fleet user retained group sudo (no demotion)"
+
+    if ! hp_e2e_agent_has_effective_sudo; then
+        echo "ERROR: $HP_E2E_AGENT_USER should retain effective sudo (audit-only)" >&2
+        return 1
+    fi
+    echo "PASS: fleet user retained effective sudo (audit-only)"
 
     if [[ ! -f "$HP_E2E_FOREIGN_SUDOERS" ]] \
         || ! grep -q 'foreigntest ALL=(ALL) NOPASSWD: /bin/true' "$HP_E2E_FOREIGN_SUDOERS"; then

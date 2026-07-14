@@ -33,7 +33,7 @@ hp_e2e_init_state_dir_operator_path() {
     unset GUARD_NONINTERACTIVE WORKSPACE_ADMIN_PASSWORD_VERIFY
 }
 
-echo "==> Safety: phase 3 alone must not demote fleet user"
+echo "==> Safety: phase 3 alone must not change fleet user"
 hp_e2e_safety_reset
 _agent_uid_before="$(id -u "$HP_E2E_AGENT_USER")"
 _rc=0
@@ -54,9 +54,9 @@ if [[ "$(id -u "$HP_E2E_AGENT_USER")" != "$_agent_uid_before" ]]; then
     echo "ERROR: fleet user uid changed unexpectedly" >&2
     exit 1
 fi
-echo "PASS: phase 3 alone blocked; fleet user still in sudo"
+echo "PASS: phase 3 alone blocked; fleet user unchanged"
 
-echo "==> Safety: bad admin password must abort before demotion"
+echo "==> Safety: bad admin password must abort before phase 3"
 hp_e2e_safety_reset
 export WORKSPACE_ADMIN_PASSWORD="$HP_E2E_ADMIN_PASSWORD"
 bash "$_GUARD_ROOT/scripts/provision-host" --phase 1
@@ -71,15 +71,11 @@ if [[ $_rc -eq 0 ]]; then
     echo "ERROR: provision should fail on bad admin password" >&2
     exit 1
 fi
-if ! id "$HP_E2E_ADMIN_NAME" >/dev/null 2>&1; then
-    echo "ERROR: admin should exist after failed run (phase 1)" >&2
-    exit 1
-fi
 if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: fleet user demoted despite failed password gate" >&2
+    echo "ERROR: fleet user should be unchanged after bad password" >&2
     exit 1
 fi
-echo "PASS: bad password aborted; fleet user still in sudo; admin exists"
+echo "PASS: bad password aborted; fleet user unchanged; admin exists"
 
 echo "==> Safety: phase 3 refused when phase-2 token deleted"
 hp_e2e_safety_reset
@@ -98,12 +94,12 @@ if [[ $_rc -eq 0 ]]; then
     exit 1
 fi
 if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: fleet user demoted without valid phase-2 token" >&2
+    echo "ERROR: fleet user should be unchanged without phase-2 token" >&2
     exit 1
 fi
-echo "PASS: missing phase-2 token blocks demotion"
+echo "PASS: missing phase-2 token blocks phase 3"
 
-echo "==> Safety: operator path warn-only retains fleet sudo"
+echo "==> Safety: full provision prints RED CRITICAL when fleet user has sudo"
 hp_e2e_safety_reset
 export WORKSPACE_ADMIN_PASSWORD="$HP_E2E_ADMIN_PASSWORD"
 _uid_before="$(id -u "$HP_E2E_AGENT_USER")"
@@ -114,89 +110,42 @@ if ! bash "$_GUARD_ROOT/scripts/provision-host" --skip-phase5 >"$_out_file" 2>&1
     echo "ERROR: operator-path provision failed" >&2
     exit 1
 fi
-if ! grep -q 'CRITICAL' "$_out_file"; then
-    echo "ERROR: expected CRITICAL fleet sudo warning in output" >&2
+if ! grep -q 'CRITICAL: fleet user' "$_out_file"; then
+    echo "ERROR: expected RED CRITICAL for fleet user with sudo" >&2
     cat "$_out_file" >&2
     rm -f "$_out_file"
     exit 1
 fi
-if ! grep -q 'warn-only' "$_out_file"; then
-    echo "ERROR: expected warn-only mode in output" >&2
+if ! grep -q 'HAS SUDO' "$_out_file"; then
+    echo "ERROR: expected HAS SUDO in CRITICAL banner" >&2
     cat "$_out_file" >&2
     rm -f "$_out_file"
     exit 1
 fi
 rm -f "$_out_file"
-if ! id "$HP_E2E_ADMIN_NAME" >/dev/null 2>&1; then
-    echo "ERROR: admin missing after operator-path provision" >&2
-    exit 1
-fi
 if ! hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: fleet user should retain group sudo (warn-only default)" >&2
-    exit 1
-fi
-if ! hp_e2e_agent_has_effective_sudo; then
-    echo "ERROR: fleet user should retain effective sudo (warn-only default)" >&2
+    echo "ERROR: fleet user should still be in group sudo (no demotion)" >&2
     exit 1
 fi
 if [[ "$(id -u "$HP_E2E_AGENT_USER")" != "$_uid_before" ]]; then
-    echo "ERROR: pre-existing fleet user uid changed" >&2
+    echo "ERROR: fleet user uid changed" >&2
     exit 1
 fi
-_admin_sudo_rc=0
-if runuser -u "$HP_E2E_ADMIN_NAME" -- sudo -n true 2>"$DEVNULL"; then
-    _admin_sudo_rc=0
+echo "PASS: RED CRITICAL printed; fleet sudo unchanged"
+
+echo "==> Safety: --demote-fleet-sudo rejected"
+hp_e2e_safety_reset
+_rc=0
+if bash "$_GUARD_ROOT/scripts/provision-host" --demote-fleet-sudo --skip-phase5 2>"$DEVNULL"; then
+    _rc=0
 else
-    _admin_sudo_rc=$?
+    _rc=$?
 fi
-if [[ $_admin_sudo_rc -eq 0 ]]; then
-    echo "ERROR: admin sudo must require a password (not NOPASSWD)" >&2
+if [[ $_rc -eq 0 ]]; then
+    echo "ERROR: --demote-fleet-sudo should be rejected" >&2
     exit 1
 fi
-echo "PASS: operator-path warn-only retained fleet sudo"
-
-echo "==> Safety: --demote-fleet-sudo strips group sudo"
-hp_e2e_safety_reset
-export WORKSPACE_ADMIN_PASSWORD="$HP_E2E_ADMIN_PASSWORD"
-bash "$_GUARD_ROOT/scripts/provision-host" --skip-phase5 --demote-fleet-sudo
-if hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: fleet user still in group sudo after --demote-fleet-sudo" >&2
-    exit 1
-fi
-if hp_e2e_agent_has_effective_sudo; then
-    echo "ERROR: fleet user still has effective sudo after --demote-fleet-sudo" >&2
-    exit 1
-fi
-echo "PASS: --demote-fleet-sudo removed fleet sudo"
-
-echo "==> Safety: direct-root cloud-init retained on warn-only; stripped on demote"
-hp_e2e_safety_reset
-hp_e2e_seed_direct_root_cloud_init
-export WORKSPACE_ADMIN_PASSWORD="$HP_E2E_ADMIN_PASSWORD"
-bash "$_GUARD_ROOT/scripts/provision-host" --skip-phase5
-if ! hp_e2e_agent_has_effective_sudo; then
-    echo "ERROR: warn-only should retain cloud-init direct-root grant" >&2
-    exit 1
-fi
-echo "PASS: warn-only retained cloud-init direct-root grant"
-
-hp_e2e_safety_reset
-hp_e2e_seed_direct_root_cloud_init
-export WORKSPACE_ADMIN_PASSWORD="$HP_E2E_ADMIN_PASSWORD"
-bash "$_GUARD_ROOT/scripts/provision-host" --skip-phase5 --demote-fleet-sudo
-if hp_e2e_user_in_group "$HP_E2E_AGENT_USER" sudo; then
-    echo "ERROR: fleet user still in group sudo after demote + cloud-init" >&2
-    exit 1
-fi
-if hp_e2e_agent_has_effective_sudo; then
-    echo "ERROR: fleet user still has effective sudo after demote + cloud-init" >&2
-    exit 1
-fi
-if [[ -f /etc/sudoers.d/90-cloud-init-users ]]; then
-    echo "ERROR: managed cloud-init sudoers drop-in should be removed or stripped" >&2
-    exit 1
-fi
-echo "PASS: --demote-fleet-sudo stripped cloud-init direct-root grant"
+echo "PASS: --demote-fleet-sudo removed"
 
 echo "==> Safety: unmanaged direct-root grant blocks phase 3"
 hp_e2e_safety_reset

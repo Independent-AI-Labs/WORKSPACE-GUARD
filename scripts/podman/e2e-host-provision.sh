@@ -32,16 +32,7 @@ hp_e2e_assert_install_gate_blocks
 echo "==> Host provision E2E: phases 1-4 (skip guard stack)"
 hp_e2e_run_phases_1_through_4
 
-echo "==> Host provision E2E: post phase 4 assertions (warn-only default)"
-hp_e2e_assert_post_phase4 0
-
-echo "==> Host provision E2E: demote opt-in path"
-hp_e2e_cleanup
-hp_e2e_init_state_dir
-hp_e2e_write_configs
-hp_e2e_setup_fleet_user
-hp_e2e_install_foreign_sudoers
-hp_e2e_run_phases_1_through_4 --demote-fleet-sudo
-hp_e2e_assert_post_phase4 1
+echo "==> Host provision E2E: post phase 4 assertions"
+hp_e2e_assert_post_phase4
 
 echo "==> Host provision E2E: ALL PASSED"

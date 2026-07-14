@@ -213,22 +213,13 @@ INSTALL_LOCK ?= false
 INSTALL_AUDITD ?= false
 
 _install-host-stack-phase5-build:
-	@_skip=0; \
-	if [ -x target/release/workspace-guard ] && [ -x target/release/workspace-binary-guard ]; then \
-		if [ target/release/workspace-guard -nt Cargo.lock ] \
-			&& [ target/release/workspace-binary-guard -nt Cargo.lock ]; then \
-			_skip=1; \
-		fi; \
-	fi; \
-	if [ "$$_skip" -eq 1 ]; then \
-		echo "==> Release binaries fresh; skipping cargo build"; \
-	elif [ "$(INSTALL_LOCK)" = "true" ]; then \
+	@if [ "$(INSTALL_LOCK)" = "true" ]; then \
 		$(MAKE) build-host-stack; \
 	else \
 		$(MAKE) build-guard; \
 	fi
 
-install-host-stack-phase5: _install-host-stack-phase5-build ## Build (if needed) + install guard + optional lock/auditd
+install-host-stack-phase5: _install-host-stack-phase5-build ## Build + install guard + optional lock/auditd
 	GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
 	@if [ "$(INSTALL_LOCK)" = "true" ]; then GUARD_SKIP_BUILD=1 $(MAKE) install-lock; fi
 	@if [ "$(INSTALL_AUDITD)" = "true" ]; then $(MAKE) install-auditd; fi
@@ -357,9 +348,7 @@ provision-host: ## Full host bootstrap: admin, fleet sudo audit, identities, gua
 	@if [ ! -x scripts/provision-host ]; then \
 		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
 	fi
-	@_demote=''; \
-	if [ "$(DEMOTE_FLEET_SUDO)" = "1" ]; then _demote='--demote-fleet-sudo'; fi; \
-	DEMOTE_FLEET_SUDO="$(DEMOTE_FLEET_SUDO)" bash scripts/provision-host $$_demote
+	@bash scripts/provision-host
 
 install-host-stack: provision-host ## Alias: provision-host (recommended fleet install)
 
