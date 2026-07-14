@@ -58,7 +58,8 @@ fn base_hardened_entries_includes_identity_when_present() {
     assert!(entries
         .iter()
         .any(|(k, v)| k == "safe.directory" && v == "*"));
-    assert_eq!(entries.len(), 5);
+    assert_eq!(entries.len(), 4);
+    assert!(!entries.iter().any(|(k, _)| k == "core.hooksPath"));
 }
 
 #[test]
@@ -82,13 +83,14 @@ fn hardened_git_env_pairs_non_privileged_nulls_global_and_injects_identity() {
         .any(|(k, v)| k == "GIT_CONFIG_NOSYSTEM" && v == "1"));
     assert!(pairs
         .iter()
-        .any(|(k, v)| k == "GIT_CONFIG_KEY_3" && v == "user.email"));
+        .any(|(k, v)| k == "GIT_CONFIG_KEY_2" && v == "user.email"));
     assert!(pairs
         .iter()
-        .any(|(k, v)| k == "GIT_CONFIG_VALUE_3" && v == "e@test.local"));
+        .any(|(k, v)| k == "GIT_CONFIG_VALUE_2" && v == "e@test.local"));
     assert!(pairs
         .iter()
-        .any(|(k, v)| k == "GIT_CONFIG_COUNT" && v == "5"));
+        .any(|(k, v)| k == "GIT_CONFIG_COUNT" && v == "4"));
+    assert!(!pairs.iter().any(|(k, v)| k == "GIT_CONFIG_KEY_2" && v == "core.hooksPath"));
 }
 
 #[test]
@@ -121,7 +123,8 @@ fn push_agent_hardened_git_env_non_privileged_builds_cstrings() {
         .collect();
     assert!(flat.iter().any(|e| e == "GIT_CONFIG_GLOBAL=/dev/null"));
     assert!(flat.iter().any(|e| e.starts_with("GIT_CONFIG_COUNT=")));
-    assert!(flat.iter().any(|e| e == "GIT_CONFIG_KEY_3=user.email"));
+    assert!(flat.iter().any(|e| e == "GIT_CONFIG_KEY_2=user.email"));
+    assert!(!flat.iter().any(|e| e.contains("core.hooksPath")));
 }
 
 #[test]

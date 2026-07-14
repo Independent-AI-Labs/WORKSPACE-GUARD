@@ -42,10 +42,11 @@
 //!
 //! The guard's own `rev-parse` resolution uses a hardened environment
 //! (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`,
-//! `GIT_CONFIG_SYSTEM=/dev/null`, plus `core.fsmonitor=`,
-//! `core.hooksPath=` via `GIT_CONFIG_*` overrides) so the resolution
-//! call itself cannot be weaponised by a payload already planted in
-//! `.git/config`.
+//! `GIT_CONFIG_SYSTEM=/dev/null`, plus `core.fsmonitor=` via
+//! `GIT_CONFIG_*` overrides) so the resolution call itself cannot be
+//! weaponised by a fsmonitor payload planted in `.git/config`. Agent
+//! commit/push exec does not null `core.hooksPath`; locked `.git/hooks/`
+//! runs normally (see SPEC-GIT-IDENTITY §5.1).
 //!
 //! This module is compiled only in capability mode (`#[cfg(feature =
 //! "capability-mode")]`).  In root-only mode the user IS root, so the

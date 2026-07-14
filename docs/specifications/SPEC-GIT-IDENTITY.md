@@ -143,7 +143,14 @@ On `execve` to `git.original` when `geteuid() != 0`:
 3. Require file `st_uid == 0` (defense-in-depth)
 4. Set `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`
 5. Inject parsed values via `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`
-6. Also inject `safe.directory=*`, `core.fsmonitor=`, `core.hooksPath=`
+6. Also inject `safe.directory=*` and `core.fsmonitor=` (disables fsmonitor RCE
+   vectors from a planted `.git/config`; does **not** set `core.hooksPath`)
+7. **Hook execution:** agent git uses the repository default hook directory
+   (`.git/hooks/`). The guard does **not** inject `core.hooksPath`. Hook
+   hijack is prevented by: (a) blocking `git -c core.hooksPath=...` and
+   `git config core.hooksPath` for non-root; (b) root-owned locked hooks under
+   `.git/hooks/` ([SPEC-GIT-GUARD-HARDENING](SPEC-GIT-GUARD-HARDENING.md) §11.7);
+   (c) home-lock on `~/.gitconfig` so agents cannot redirect hooks globally.
 
 When `geteuid() == 0` (operator `sudo git`): skip nulling global config; inject
 only `safe.directory` (existing privileged branch).

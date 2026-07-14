@@ -182,7 +182,6 @@ pub fn base_hardened_entries(identity: &AgentGitIdentity) -> Vec<(String, String
     let mut entries = vec![
         ("safe.directory".to_string(), "*".to_string()),
         ("core.fsmonitor".to_string(), String::new()),
-        ("core.hooksPath".to_string(), String::new()),
     ];
     if let Some(ref email) = identity.email {
         entries.push(("user.email".to_string(), email.clone()));

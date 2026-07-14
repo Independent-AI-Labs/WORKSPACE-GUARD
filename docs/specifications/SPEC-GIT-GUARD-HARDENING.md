@@ -210,9 +210,11 @@ The lock runs **twice** per invocation:
 1. **Before the policy engine**: resolves `.git` via
    `git.original rev-parse --absolute-git-dir` under a hardened environment
    (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`,
-   `GIT_CONFIG_SYSTEM=/dev/null`, plus injected `core.fsmonitor=`,
-   `core.hooksPath=` via `GIT_CONFIG_*` overrides). Then recursively chowns
-   the entire `.git/` tree to `root:root` (0o755 dirs, 0o644 files, 0o755 hooks).
+   `GIT_CONFIG_SYSTEM=/dev/null`, plus injected `core.fsmonitor=` via
+   `GIT_CONFIG_*` overrides). Does **not** inject `core.hooksPath=`; agent
+   commit/push must run root-locked `.git/hooks/*` ([SPEC-GIT-IDENTITY](SPEC-GIT-IDENTITY.md)
+   §5.1 step 7). Then recursively chowns the entire `.git/` tree to
+   `root:root` (0o755 dirs, 0o644 files, 0o755 hooks).
 2. **After `git.original` exits**: the parent process re-locks `.git/`
    immediately after `waitpid()`, reclaiming any files git.original created
    or modified (which will be owned by the real user's uid) back to
