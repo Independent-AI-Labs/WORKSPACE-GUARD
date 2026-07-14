@@ -90,7 +90,9 @@ fn hardened_git_env_pairs_non_privileged_nulls_global_and_injects_identity() {
     assert!(pairs
         .iter()
         .any(|(k, v)| k == "GIT_CONFIG_COUNT" && v == "4"));
-    assert!(!pairs.iter().any(|(k, v)| k == "GIT_CONFIG_KEY_2" && v == "core.hooksPath"));
+    assert!(!pairs
+        .iter()
+        .any(|(k, v)| k == "GIT_CONFIG_KEY_2" && v == "core.hooksPath"));
 }
 
 #[test]

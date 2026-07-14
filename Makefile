@@ -333,7 +333,7 @@ drift-check: ## Compare live SUID/CAP surface against res/ baselines; exit 1 on 
 	bash scripts/suid-drift-check
 
 .PHONY: drift-check-quiet
-drift-check-quiet: ## Same as drift-check but stdout only on CRITICAL; res/drift-report.yaml still written
+drift-check-quiet: ## Same as drift-check but stdout only on CRITICAL; /usr/lib/workspace-binary-guard/drift-report.yaml still written
 	bash scripts/suid-drift-check --quiet
 
 .PHONY: install-lock
@@ -398,7 +398,7 @@ install-home-lock: ## Lock the absolute_file_paths entries in config/guard_locke
 		|| { echo "NOTICE: scripts/install-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-home-lock
-uninstall-home-lock: ## Rollback home lock: restore original owner/mode per res/home-lock-state.yaml (ROOT)
+uninstall-home-lock: ## Rollback home lock: restore original owner/mode per /usr/lib/workspace-guard/home-lock-state.yaml (ROOT)
 	@if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-home-lock needs root: sudo make uninstall-home-lock" >&2; exit 1; \
 	fi
@@ -406,7 +406,7 @@ uninstall-home-lock: ## Rollback home lock: restore original owner/mode per res/
 		|| { echo "NOTICE: scripts/uninstall-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: home-drift-check
-home-drift-check: ## Compare live home-lock surface against res/home-lock-state.yaml; exit 1 on CRITICAL
+home-drift-check: ## Compare live home-lock surface against /usr/lib/workspace-guard/home-lock-state.yaml; exit 1 on CRITICAL
 	bash scripts/home-drift-check
 
 .PHONY: home-drift-check-quiet

@@ -15,7 +15,7 @@
   (kernel-level)        (file integrity)        (baseline diff)
         |                     |                       |
         v                     v                       v
-  /var/log/audit/       /var/lib/aide/          res/drift-report.yaml
+  /var/log/audit/       /var/lib/aide/          /usr/lib/workspace-binary-guard/drift-report.yaml
   audit.log            aide.db                  (stdout summary)
         |                     |                       |
         +---------------------+-----------------------+
@@ -196,7 +196,7 @@ CRITICAL: immutable flag removed on /usr/bin/sudo.real
 INFO:     file capability removed from /usr/bin/ping
 ```
 
-**res/drift-report.yaml** (machine-readable):
+**/usr/lib/workspace-binary-guard/drift-report.yaml** (machine-readable):
 ```yaml
 drift:
   - path: /usr/local/bin/foo

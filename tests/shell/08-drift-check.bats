@@ -232,9 +232,9 @@ _run_drift() { run bash "$FAKE_REPO/scripts/suid-drift-check" "$@"; }
     unset GUARD_GETCAP_FIXTURE
     _run_drift
     assert_success
-    [ -f "$FAKE_REPO/res/drift-report.yaml" ]
-    grep -q '^summary:' "$FAKE_REPO/res/drift-report.yaml"
-    grep -q 'critical: 0' "$FAKE_REPO/res/drift-report.yaml"
+    [ -f "$WORKSPACE_BINARY_GUARD_STATE_DIR/drift-report.yaml" ]
+    grep -q '^summary:' "$WORKSPACE_BINARY_GUARD_STATE_DIR/drift-report.yaml"
+    grep -q 'critical: 0' "$WORKSPACE_BINARY_GUARD_STATE_DIR/drift-report.yaml"
 }
 
 @test "drift-check: contained binary with no .real -> CRITICAL" {

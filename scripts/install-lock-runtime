@@ -9,7 +9,7 @@
 # rename operation. Records state for uninstall-lock-runtime.
 #
 # Idempotent: re-running on an already-locked host detects completed
-# paths and skips them. State lives in res/lock-state.yaml.
+# paths and skips them. State lives under /usr/lib/workspace-binary-guard/.
 #
 # Usage:
 #   scripts/install-lock-runtime            # apply lock
@@ -27,7 +27,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$REPO_ROOT/res/binary-lock.yaml"
-STATE_FILE="$REPO_ROOT/res/lock-state.yaml"
+source "$SCRIPT_DIR/lib/runtime_state.sh" || exit 1
+init_binary_guard_runtime_state "$REPO_ROOT"
+STATE_FILE="$(binary_lock_state_file)"
 LOG_FILE="/var/log/workspace-binary-guard-install.log"
 GUARD_BIN="$REPO_ROOT/target/release/workspace-binary-guard"
 

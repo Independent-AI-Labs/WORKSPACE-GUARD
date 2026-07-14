@@ -419,7 +419,7 @@ For each <path> in installable rows:
   9. mv <path>.guard_new <path>
      (atomic fill; <path> is the guard, gap was one rename)
   10. Verify: <path> --version or <path> responds (warm check)
-  11. Mark row contained: true in res/lock-state.yaml
+  11. Mark row contained: true in /usr/lib/workspace-binary-guard/lock-state.yaml
 ```
 
 CRITICAL: step 7 stages the guard at `<path>.guard_new` BEFORE step 8
@@ -468,7 +468,7 @@ For each <path> in lock_surface (contained: true rows):
   7. rm <path>.real
   8. dpkg-divert --remove --rename <path>
   9. Verify: <path> works
-  10. Mark row contained: false in res/lock-state.yaml
+  10. Mark row contained: false in /usr/lib/workspace-binary-guard/lock-state.yaml
 ```
 
 ---

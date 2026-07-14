@@ -140,9 +140,9 @@ Skipped when `user_management.enabled: false`.
 
 | State | Audit color |
 |-------|-------------|
-| `privileged` | **RED CRITICAL** — user exists and has sudo in any list |
-| `none` | **YELLOW WARN** — user exists, no sudo in any list |
-| `verify_failed` | **RED CRITICAL** — fail-closed |
+| `privileged` | **RED CRITICAL** - user exists and has sudo in any list |
+| `none` | **YELLOW WARN** - user exists, no sudo in any list |
+| `verify_failed` | **RED CRITICAL** - fail-closed |
 
 Sudo lists checked: group `sudo`, `/etc/sudoers` and `/etc/sudoers.d/*` lines,
 `sudo -l -U <user>` policy. **Fleet sudo is never modified** (no demotion).

@@ -250,6 +250,9 @@ _clear_stub_env() {
 guard_setup() {
     _setup_tmpdir
     _clear_stub_env
+    export WORKSPACE_GUARD_STATE_DIR="$TEST_TMPDIR/guard-state"
+    export WORKSPACE_BINARY_GUARD_STATE_DIR="$TEST_TMPDIR/binary-guard-state"
+    mkdir -p "$WORKSPACE_GUARD_STATE_DIR" "$WORKSPACE_BINARY_GUARD_STATE_DIR"
     export GUARD_STUB_LOG="$TEST_TMPDIR/chattr.log"
     export GUARD_DIVERT_DB="$TEST_TMPDIR/diverts.db"
     # A stderr sink threaded through a variable so test source never

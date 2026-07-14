@@ -4,7 +4,7 @@
 # Implements docs/specifications/SPEC-BINARY-LOCK.md section 4.3 EXCEPT
 # the Rust-guard-removal steps (which were never applied: install-lock-
 # runtime only registers the .real seal and the dpkg-divert). For every
-# entry recorded by install-lock-runtime in res/lock-state.yaml this
+# entry recorded by install-lock-runtime in lock-state.yaml this
 # script: removes the immutable flag, deletes <path>.real, drops the
 # dpkg-divert, and clears the state record.
 #
@@ -16,13 +16,15 @@
 # Exit codes:
 #   0  all recorded entries rolled back (or none recorded)
 #   1  one or more entries failed to roll back
-#   2  not root, missing res/lock-state.yaml, or bad arguments
+#   2  not root, missing lock-state.yaml, or bad arguments
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-STATE_FILE="$REPO_ROOT/res/lock-state.yaml"
+source "$SCRIPT_DIR/lib/runtime_state.sh" || exit 1
+init_binary_guard_runtime_state "$REPO_ROOT"
+STATE_FILE="$(binary_lock_state_file)"
 
 # Stream stderr through a variable so the literal swallow idiom the
 # error-swallow checker flags never appears in source text.
@@ -35,7 +37,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             cat <<EOF
 Usage: $0 [--dry-run]
-Reverse contain-via-guard per res/lock-state.yaml (SPEC-BINARY-LOCK 4.3).
+Reverse contain-via-guard per lock-state.yaml (SPEC-BINARY-LOCK 4.3).
 Root-only. Removes chattr +i, deletes <path>.real, drops dpkg-divert.
 Exit: 0 ok, 1 rollback failure, 2 not root/missing state file.
 EOF

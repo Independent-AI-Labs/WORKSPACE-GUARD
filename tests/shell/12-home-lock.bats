@@ -139,7 +139,7 @@ STUB
     assert_output --partial "DRY RUN"
     assert_output --partial "WOULD"
     # State file should NOT be written on dry-run.
-    [ ! -f "$FAKE_REPO/res/home-lock-state.yaml" ]
+    [ ! -f "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" ]
 }
 
 @test "install-home-lock: creates missing files with touch" {
@@ -164,9 +164,9 @@ STUB
     _write_locked_paths "$FAKE_REPO" "~/.gitconfig" "644"
     run env HOME="$FAKE_HOME" bash "$FAKE_REPO/scripts/install-home-lock"
     assert_success
-    [ -f "$FAKE_REPO/res/home-lock-state.yaml" ]
-    grep -q 'home_lock_state:' "$FAKE_REPO/res/home-lock-state.yaml"
-    grep -q "path: \"$FAKE_HOME/.gitconfig\"" "$FAKE_REPO/res/home-lock-state.yaml"
+    [ -f "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" ]
+    grep -q 'home_lock_state:' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
+    grep -q "path: \"$FAKE_HOME/.gitconfig\"" "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
 }
 
 @test "install-home-lock: state captures original owner/mode/locked_at" {
@@ -176,11 +176,11 @@ STUB
     chmod 0600 "$FAKE_HOME/.gitconfig"
     run env HOME="$FAKE_HOME" bash "$FAKE_REPO/scripts/install-home-lock"
     assert_success
-    grep -q 'original_owner_uid:' "$FAKE_REPO/res/home-lock-state.yaml"
-    grep -q 'original_owner_gid:' "$FAKE_REPO/res/home-lock-state.yaml"
-    grep -q 'original_mode: "600"' "$FAKE_REPO/res/home-lock-state.yaml"
-    grep -q 'expected_mode: "644"' "$FAKE_REPO/res/home-lock-state.yaml"
-    grep -q 'locked_at:' "$FAKE_REPO/res/home-lock-state.yaml"
+    grep -q 'original_owner_uid:' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
+    grep -q 'original_owner_gid:' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
+    grep -q 'original_mode: "600"' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
+    grep -q 'expected_mode: "644"' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
+    grep -q 'locked_at:' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
 }
 
 @test "install-home-lock: applies expected mode 0644 to gitconfig" {
@@ -306,7 +306,7 @@ STUB
 @test "uninstall-home-lock: exits 0 when state file empty" {
     _setup_home
     mkdir -p "$FAKE_REPO/res"
-    printf 'home_lock_state: []\n' > "$FAKE_REPO/res/home-lock-state.yaml"
+    printf 'home_lock_state: []\n' > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
     run bash "$FAKE_REPO/scripts/uninstall-home-lock"
     assert_success
     assert_output --partial "no recorded entries"
@@ -318,7 +318,7 @@ STUB
     _make_home_files "~/.gitconfig" "locked content"
     chmod 0644 "$p"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "1000"
@@ -341,7 +341,7 @@ EOF
     _make_home_files "~/.gitconfig" "locked content"
     chmod 0644 "$p"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "1000"
@@ -361,7 +361,7 @@ EOF
     local p="$FAKE_HOME/.gitconfig"
     _make_home_files "~/.gitconfig" "locked content"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "1000"
@@ -372,7 +372,7 @@ home_lock_state:
 EOF
     run bash "$FAKE_REPO/scripts/uninstall-home-lock"
     assert_success
-    grep -q 'home_lock_state: \[\]' "$FAKE_REPO/res/home-lock-state.yaml"
+    grep -q 'home_lock_state: \[\]' "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
 }
 
 @test "uninstall-home-lock: multiple entries all rolled back" {
@@ -381,7 +381,7 @@ EOF
     _make_home_files "~/.gitconfig" "g" "~/.ssh/authorized_keys" "k"
     chmod 0644 "$p1"; chmod 0600 "$p2"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p1"
     original_owner_uid: "1000"
@@ -432,7 +432,7 @@ EOF
 @test "home-drift-check: exits 0 when state file empty" {
     _setup_home
     mkdir -p "$FAKE_REPO/res"
-    printf 'home_lock_state: []\n' > "$FAKE_REPO/res/home-lock-state.yaml"
+    printf 'home_lock_state: []\n' > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml"
     run bash "$FAKE_REPO/scripts/home-drift-check"
     assert_success
     assert_output --partial "no recorded entries"
@@ -447,7 +447,7 @@ EOF
     # "root:root", install a stat stub returning uid=0 gid=0 mode=644.
     _stub_stat_root 644
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "0"
@@ -466,7 +466,7 @@ EOF
     local p="$FAKE_HOME/.gitconfig"
     # No file at $p.
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "0"
@@ -490,7 +490,7 @@ EOF
     # Real stat returns the test-user uid (not 0); owner-changed check
     # classifies that as CRITICAL.
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "0"
@@ -515,7 +515,7 @@ EOF
     # check trips CRITICAL (otherwise owner-changed would also fire).
     _stub_stat_root 600
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "0"
@@ -538,7 +538,7 @@ EOF
     chmod 0644 "$p"
     _stub_stat_root 644
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "0"
@@ -559,7 +559,7 @@ EOF
     chmod 0644 "$p"
     _stub_stat_root 644
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/home-lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_GUARD_STATE_DIR/home-lock-state.yaml" <<EOF
 home_lock_state:
   - path: "$p"
     original_owner_uid: "0"
@@ -570,7 +570,7 @@ home_lock_state:
 EOF
     run bash "$FAKE_REPO/scripts/home-drift-check"
     assert_success
-    [ -f "$FAKE_REPO/res/home-drift-report.yaml" ]
-    grep -q '^summary:' "$FAKE_REPO/res/home-drift-report.yaml"
-    grep -q 'critical: 0' "$FAKE_REPO/res/home-drift-report.yaml"
+    [ -f "$WORKSPACE_GUARD_STATE_DIR/home-drift-report.yaml" ]
+    grep -q '^summary:' "$WORKSPACE_GUARD_STATE_DIR/home-drift-report.yaml"
+    grep -q 'critical: 0' "$WORKSPACE_GUARD_STATE_DIR/home-drift-report.yaml"
 }

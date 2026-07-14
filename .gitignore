@@ -5,6 +5,3 @@
 config/home-lock-users.yaml
 config/agent-git-identity
 config/host-provision.yaml
-
-# Runtime state from install-home-lock (per-host).
-res/home-lock-state.yaml

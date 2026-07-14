@@ -199,9 +199,9 @@ YEOF
     _setup_paths "$p"
     run bash "$FAKE_REPO/scripts/install-lock-runtime"
     assert_success
-    [ -f "$FAKE_REPO/res/lock-state.yaml" ]
-    grep -q 'lock_state:' "$FAKE_REPO/res/lock-state.yaml"
-    grep -q "path: \"$p\"" "$FAKE_REPO/res/lock-state.yaml"
+    [ -f "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" ]
+    grep -q 'lock_state:' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
+    grep -q "path: \"$p\"" "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
 }
 
 @test "install-lock: idempotent (already-contained path is skipped)" {

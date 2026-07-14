@@ -349,7 +349,7 @@ The threat model and CVE catalog that these requirements defend against are in
 - **REQ-AUD-172**: The drift checker shall exit non-zero if any CRITICAL
   drift is found. CI pipelines call `make drift-check` as a gate.
 - **REQ-AUD-173**: The drift checker shall output a machine-readable YAML
-  report at `res/drift-report.yaml` and a human-readable summary to stdout.
+  report at `/usr/lib/workspace-binary-guard/drift-report.yaml` and a human-readable summary to stdout.
 
 ### 4.4 Remote Syslog (optional)
 

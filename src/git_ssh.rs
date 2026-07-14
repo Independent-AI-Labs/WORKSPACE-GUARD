@@ -7,12 +7,12 @@
 //! runtime dir, then execs ssh against that path.
 
 use std::ffi::{CString, OsString};
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
-use nix::unistd::{chown, execv, getuid, User, Uid};
+use nix::unistd::{chown, execv, getuid, Uid, User};
 
 const SSH_BIN: &str = "/usr/bin/ssh";
 const KEY_ROOT: &str = "/usr/lib/workspace-guard/ssh-keys";
@@ -159,7 +159,10 @@ mod tests {
     #[test]
     fn runtime_base_prefers_xdg_runtime_dir() {
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
-        assert_eq!(runtime_base(Uid::from_raw(1000)), PathBuf::from("/run/user/1000"));
+        assert_eq!(
+            runtime_base(Uid::from_raw(1000)),
+            PathBuf::from("/run/user/1000")
+        );
         std::env::remove_var("XDG_RUNTIME_DIR");
     }
 }

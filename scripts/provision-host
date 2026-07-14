@@ -89,7 +89,11 @@ hp_run_preflight() {
     echo "==> Host provision preflight (read-only)"
     echo "    config: $HP_CONFIG"
     echo "    admin.name: $ADMIN_NAME"
-    echo "    user_management.enabled: $([[ "$USER_MGMT" -eq 1 ]] && echo true || echo false)"
+    if [[ "$USER_MGMT" -eq 1 ]]; then
+        echo "    user_management.enabled: true"
+    else
+        echo "    user_management.enabled: false"
+    fi
     if hp_admin_exists "$ADMIN_NAME"; then
         echo "    admin account: present"
     else
@@ -212,7 +216,7 @@ fi
 
 # --- Phase 3: fleet hardening ---
 if hp_should_run_phase 3 && [[ "$USER_MGMT" -eq 1 ]]; then
-    echo "==> Phase 3: fleet user accounts (audit only — sudo never modified)"
+    echo "==> Phase 3: fleet user accounts (audit only - sudo never modified)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "  DRY-RUN: would ensure fleet users and print sudo audit"
     else

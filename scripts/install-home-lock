@@ -12,7 +12,7 @@
 # cover ~/.gitconfig).
 #
 # Idempotent: re-running on an already-locked file detects the correct
-# owner AND mode and skips. State lives in res/home-lock-state.yaml.
+# owner AND mode and skips. State lives under /usr/lib/workspace-guard/.
 #
 # Private id_* keys are deliberately NOT locked: chowning them to root
 # would break ssh, which needs the user to read its own key. Shell rc
@@ -35,8 +35,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$REPO_ROOT/config/guard_locked_paths.yaml"
-STATE_FILE="$REPO_ROOT/res/home-lock-state.yaml"
 LIB_DIR="$SCRIPT_DIR/lib"
+source "$LIB_DIR/runtime_state.sh" || exit 1
+init_guard_runtime_state "$REPO_ROOT"
+STATE_FILE="$(home_lock_state_file)"
 # Tests inject a fake passwd file via WORKSPACE_PASSWD_FILE so the
 # script can resolve numeric uid/gid for a non-root $HOME without
 # touching the real /etc/passwd.

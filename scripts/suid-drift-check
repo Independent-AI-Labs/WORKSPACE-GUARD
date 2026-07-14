@@ -4,7 +4,7 @@
 # report drift. Also verifies the immutable flag on every *.real file.
 #
 # Usage:
-#   scripts/suid-drift-check             # check + write res/drift-report.yaml
+#   scripts/suid-drift-check             # check + write drift-report.yaml
 #   scripts/suid-drift-check --quiet     # stdout only on CRITICAL/WARNING
 #   scripts/suid-drift-check --help
 #
@@ -16,7 +16,7 @@
 # Drift classes (SPEC-AUDIT.md section 4.2):
 #   new-suid / removed-suid / new-cap / removed-cap / changed-cap /
 #   immutable-flag-removed / mode-change-real.
-# Each drift row carries a class field written to res/drift-report.yaml.
+# Each drift row carries a class field written to drift-report.yaml.
 #
 # This script is read-only and does not require root.
 
@@ -27,7 +27,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RES_DIR="$REPO_ROOT/res"
 SUID_BASELINE="$RES_DIR/suid-baseline.yaml"
 FCAP_BASELINE="$RES_DIR/fcap-baseline.yaml"
-DRIFT_REPORT="$RES_DIR/drift-report.yaml"
+source "$SCRIPT_DIR/lib/runtime_state.sh" || exit 1
+init_binary_guard_runtime_state "$REPO_ROOT"
+DRIFT_REPORT="$(binary_drift_report_file)"
 
 # Canonical helpers sourced from scripts/lib/. See scripts/lib/qc.sh
 # for the DEVNULL + qc rationale (avoid the literal suppress-stderr

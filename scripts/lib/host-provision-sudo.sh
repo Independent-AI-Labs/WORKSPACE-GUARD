@@ -1,4 +1,6 @@
-# host-provision-sudo.sh — fleet sudo audit, optional demotion, effective-sudo checks.
+# host-provision-sudo.sh - fleet sudo audit, optional demotion, effective-sudo checks.
+
+DEVNULL="${DEVNULL:-/dev/null}"
 
 HP_SUDOERS_AGENTS="${HP_SUDOERS_AGENTS:-/etc/sudoers.d/90-workspace-guard-agents}"
 HP_SUDOERS_DIR="${WORKSPACE_SUDOERS_DIR:-/etc/sudoers.d}"
@@ -10,12 +12,23 @@ HP_SUDOERS_MANAGED_STRIP=(
 )
 
 hp_sudo_user_in_sudo_group() {
-    local user="${1:?user}" members=""
+    local user="${1:?user}" members="" _id_err _id_rc=0 _groups="" _ge_err _ge_rc=0
 
-    if id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx sudo; then
+    _id_err="$(mktemp)"
+    _groups="$(id -nG "$user" 2>"$_id_err")" || _id_rc=$?
+    if [[ $_id_rc -eq 0 ]] && printf '%s\n' "$_groups" | tr ' ' '\n' | grep -qx sudo; then
+        rm -f "$_id_err"
         return 0
     fi
-    members="$(getent group sudo 2>/dev/null | cut -d: -f4- || true)"
+    rm -f "$_id_err"
+
+    _ge_err="$(mktemp)"
+    members="$(getent group sudo 2>"$_ge_err" | cut -d: -f4-)" || _ge_rc=$?
+    if [[ $_ge_rc -ne 0 ]]; then
+        rm -f "$_ge_err"
+        return 1
+    fi
+    rm -f "$_ge_err"
     if [[ -n "$members" ]] && printf '%s\n' "$members" | tr ',' '\n' | grep -qx "$user"; then
         return 0
     fi
@@ -45,7 +58,9 @@ hp_sudo_has_cached_ticket() {
         return 0
     fi
     if command -v runuser >/dev/null 2>&1 && getent passwd "$user" >/dev/null 2>&1; then
-        if runuser -u "$user" -- sudo -n -v 2>/dev/null; then
+        local _sv_rc=0
+        runuser -u "$user" -- sudo -n -v 2>"$DEVNULL" || _sv_rc=$?
+        if [[ $_sv_rc -eq 0 ]]; then
             return 0
         fi
     fi
@@ -56,17 +71,22 @@ hp_sudo_revoke_cached_ticket() {
     local user="${1:?user}"
 
     if command -v runuser >/dev/null 2>&1 && getent passwd "$user" >/dev/null 2>&1; then
-        runuser -u "$user" -- sudo -k 2>/dev/null || true
+        local _sk_rc=0
+        runuser -u "$user" -- sudo -k 2>"$DEVNULL" || _sk_rc=$?
+        if [[ $_sk_rc -ne 0 ]]; then
+            echo "  NOTICE: sudo -k for $user returned $_sk_rc" >&2
+        fi
     fi
-    local path=""
-    if path="$(hp_sudo_ticket_path "$user" 2>/dev/null)"; then
+    local path="" _tp_rc=0
+    path="$(hp_sudo_ticket_path "$user")" || _tp_rc=$?
+    if [[ $_tp_rc -eq 0 ]]; then
         rm -f "$path"
         echo "  VERIFIED: revoked cached sudo ticket for $user"
     fi
 }
 
 # privilege_state: none | privileged | verify_failed
-#   privileged — group sudo, sudoers line, or sudo -l -U policy shows grants
+#   privileged - group sudo, sudoers line, or sudo -l -U policy shows grants
 hp_sudo_privilege_state() {
     local user="${1:?user}" listing="" rc=0
 
@@ -145,7 +165,7 @@ hp_sudo_listing_for_user() {
 hp_sudo_user_referenced_in_sudoers() {
     local user="${1:?user}" f
     if [[ -r /etc/sudoers ]] \
-        && grep -vE '^[[:space:]]*#' /etc/sudoers 2>/dev/null \
+        && grep -vE '^[[:space:]]*#' /etc/sudoers \
             | grep -qE "(^|[[:space:]])${user}([[:space:]]|,|$)"; then
         return 0
     fi
@@ -265,85 +285,12 @@ hp_sudo_user_has_foreign_direct_root() {
     return 1
 }
 
-hp_sudo_live_runuser_probe() {
-    local user="${1:?user}" out="" rc=0 ticket_path=""
-
-    if ! command -v runuser >/dev/null 2>&1; then
-        echo "    live_probe: runuser unavailable" >&2
-        return 0
-    fi
-    if ! getent passwd "$user" >/dev/null 2>&1; then
-        echo "    live_probe: user $user missing" >&2
-        return 0
-    fi
-
-    out="$(runuser -u "$user" -- sudo -n -l 2>&1)" || rc=$?
-    echo "    live_probe: runuser -u ${user} -- sudo -n -l (exit $rc):" >&2
-    printf '%s\n' "$out" | sed 's/^/      /' >&2
-
-    rc=0
-    out="$(runuser -u "$user" -- sudo -n -v 2>&1)" || rc=$?
-    echo "    live_probe: runuser -u ${user} -- sudo -n -v (exit $rc):" >&2
-    if [[ -n "$out" ]]; then
-        printf '%s\n' "$out" | sed 's/^/      /' >&2
-    fi
-
-    if ticket_path="$(hp_sudo_ticket_path "$user" 2>/dev/null)"; then
-        echo "    live_probe: cached ticket file: $ticket_path" >&2
-    else
-        echo "    live_probe: cached ticket file: none" >&2
-    fi
-}
-
-hp_sudo_print_privilege_sources() {
-    local user="${1:?user}" listing="" rc=0 f base state groups=""
-
-    state="$(hp_sudo_privilege_state "$user")"
-    echo "    privilege_state: $state" >&2
-
-    groups="$(id -nG "$user" 2>&1)" || groups="(id -nG failed: $groups)"
-    echo "    id -nG $user: $groups" >&2
-    if getent group sudo >/dev/null 2>&1; then
-        echo "    getent group sudo: $(getent group sudo)" >&2
-    fi
-
-    if hp_sudo_user_in_sudo_group "$user"; then
-        echo "    - persistent: member of group sudo" >&2
-    fi
-    if [[ -r /etc/sudoers ]] \
-        && grep -vE '^[[:space:]]*#' /etc/sudoers 2>/dev/null \
-            | grep -qE "(^|[[:space:]])${user}([[:space:]]|,|$)"; then
-        echo "    - persistent: /etc/sudoers" >&2
-        grep -vE '^[[:space:]]*#' /etc/sudoers 2>/dev/null \
-            | grep -E "(^|[[:space:]])${user}([[:space:]]|,|$)" \
-            | sed 's/^/        /' >&2
-    fi
-    for f in "$HP_SUDOERS_DIR"/*; do
-        [[ -f "$f" ]] || continue
-        base="$(basename "$f")"
-        if grep -vE '^[[:space:]]*#' "$f" \
-            | grep -qE "(^|[[:space:]])${user}([[:space:]]|,|$)"; then
-            echo "    - persistent: $f" >&2
-            grep -vE '^[[:space:]]*#' "$f" \
-                | grep -E "(^|[[:space:]])${user}([[:space:]]|,|$)" \
-                | sed 's/^/        /' >&2
-        fi
-    done
-    if command -v sudo >/dev/null 2>&1; then
-        listing="$(sudo -l -U "$user" 2>&1)" || rc=$?
-        echo "    - policy: sudo -l -U ${user} as root (exit $rc):" >&2
-        printf '%s\n' "$listing" | sed 's/^/      /' >&2
-    else
-        echo "    - policy: sudo -l -U ${user}: ERROR (sudo binary missing)" >&2
-    fi
-    if hp_sudo_ticket_path "$user" >/dev/null 2>&1 \
-        || hp_sudo_has_cached_ticket "$user"; then
-        echo "    - session: cached sudo ticket active" >&2
-    else
-        echo "    - session: no cached sudo ticket" >&2
-    fi
-    hp_sudo_live_runuser_probe "$user"
-}
+_HPS_PROBE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=host-provision-sudo-probe.sh
+if ! source "$_HPS_PROBE_DIR/host-provision-sudo-probe.sh"; then
+    echo "ERROR: failed to source host-provision-sudo-probe.sh" >&2
+    exit 1
+fi
 
 hp_sudo_managed_strip_is_allowlisted() {
     local base="${1:?base}"
@@ -458,9 +405,9 @@ hp_sudo_assert_no_foreign_grants() {
         [[ -z "$user" ]] && continue
         local f base
         if [[ -r /etc/sudoers ]]; then
-            if grep -vE '^[[:space:]]*#' /etc/sudoers 2>/dev/null | grep -qE "(^|[[:space:]])${user}([[:space:]]|,|$)"; then
+            if grep -vE '^[[:space:]]*#' /etc/sudoers | grep -qE "(^|[[:space:]])${user}([[:space:]]|,|$)"; then
                 echo "ERROR: fleet user $user referenced in /etc/sudoers (not auto-edited)" >&2
-                grep -vE '^[[:space:]]*#' /etc/sudoers 2>/dev/null \
+                grep -vE '^[[:space:]]*#' /etc/sudoers \
                     | grep -E "(^|[[:space:]])${user}([[:space:]]|,|$)" \
                     | sed 's/^/       /' >&2
                 found=1

@@ -32,7 +32,7 @@ _setup_uninstall() {
 
 @test "uninstall-lock: exits 0 when state file missing (nothing to roll back)" {
     _setup_uninstall
-    # No res/lock-state.yaml in the fake repo.
+    # No lock-state.yaml in the runtime state dir.
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
     assert_success
     assert_output --partial "nothing to roll back"
@@ -41,7 +41,7 @@ _setup_uninstall() {
 @test "uninstall-lock: exits 0 when state file is empty" {
     _setup_uninstall
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state: []
 EOF
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
@@ -55,7 +55,7 @@ EOF
     mkdir -p "$(dirname "$p")"
     touch "$p" "${p}.real"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p"
     real_sha256: "abc"
@@ -81,7 +81,7 @@ EOF
     mkdir -p "$(dirname "$p")"
     touch "$p" "${p}.real"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p"
     real_sha256: "abc"
@@ -102,7 +102,7 @@ EOF
     mkdir -p "$(dirname "$p")"
     touch "$p" "${p}.real"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p"
     real_sha256: "abc"
@@ -125,7 +125,7 @@ EOF
     # Record the divert so --list shows it's diverted.
     echo "$p" >> "$GUARD_DIVERT_DB"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p"
     real_sha256: "abc"
@@ -147,7 +147,7 @@ EOF
     mkdir -p "$(dirname "$p")"
     touch "$p" "${p}.real"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p"
     real_sha256: "abc"
@@ -159,7 +159,7 @@ EOF
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
     assert_success
     # State file should be cleared.
-    grep -q 'lock_state: \[\]' "$FAKE_REPO/res/lock-state.yaml"
+    grep -q 'lock_state: \[\]' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
 }
 
 @test "uninstall-lock: multiple entries all rolled back" {
@@ -168,7 +168,7 @@ EOF
     mkdir -p "$(dirname "$p1")"
     touch "$p1" "${p1}.real" "$p2" "${p2}.real"
     mkdir -p "$FAKE_REPO/res"
-    cat > "$FAKE_REPO/res/lock-state.yaml" <<EOF
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p1"
     real_sha256: "abc"

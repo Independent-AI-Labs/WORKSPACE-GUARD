@@ -85,8 +85,9 @@ _ssh_pub_comment() {
 
 _key_comment_matches_email() {
     local pub_path="$1" git_email="$2" comment=""
-    comment="$(_ssh_pub_comment "$pub_path" || true)"
-    [[ -n "$comment" && "$comment" == "$git_email" ]]
+    local _c_rc=0
+    comment="$(_ssh_pub_comment "$pub_path")" || _c_rc=$?
+    [[ $_c_rc -eq 0 && -n "$comment" && "$comment" == "$git_email" ]]
 }
 
 provision_one_user() {
@@ -128,7 +129,9 @@ provision_one_user() {
         echo "  OK: SSH key already exists at $key_path (unchanged)"
     fi
     chmod 600 "$key_path"
-    chmod 644 "$pub_path" 2>"$DEVNULL" || true
+    if ! chmod 644 "$pub_path" 2>"$DEVNULL"; then
+        echo "WARN: chmod 644 $pub_path failed" >&2
+    fi
     chown root:root "$key_path" "$pub_path" 2>"$DEVNULL" || chown root:root "$key_path"
 
     cat > "$home/.gitconfig" <<EOF

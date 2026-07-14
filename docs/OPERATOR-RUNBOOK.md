@@ -1,4 +1,4 @@
-# Operator Runbook — Git Guard and Host Stack
+# Operator Runbook - Git Guard and Host Stack
 
 Quick reference for refreshing or recovering WORKSPACE-GUARD on a fleet host.
 Full policy detail lives in `docs/specifications/`.
@@ -51,7 +51,7 @@ sudo --preserve-env=HOME,SSH_AUTH_SOCK make reconcile-guard-host-exec
 sudo --preserve-env=HOME,SSH_AUTH_SOCK,WORKSPACE_ADMIN_PASSWORD make install-host-stack
 ```
 
-If you must use a root shell, `cd` into WORKSPACE-GUARD first — the Makefile
+If you must use a root shell, `cd` into WORKSPACE-GUARD first - the Makefile
 resolves paths from its own location, not `git rev-parse`. Direct root builds
 leave `target/` root-owned and can force slow rebuilds or rustc LLVM crashes;
 fix ownership: `chown -R agent:agent projects/WORKSPACE-GUARD/target`.

@@ -85,7 +85,7 @@ binary lock this complements is in
   absent and the lock is a no-op.
 
 - **REQ-HL-101**: For each entry, install shall record the original
-  owner uid, owner gid, and mode in `res/home-lock-state.yaml` so
+  owner uid, owner gid, and mode in `/usr/lib/workspace-guard/home-lock-state.yaml` so
   `uninstall-home-lock` can restore them.
 
 - **REQ-HL-102**: Install shall be idempotent: re-running on an
@@ -118,7 +118,7 @@ binary lock this complements is in
 
 - **REQ-HL-200**: `uninstall-home-lock` shall restore the original
   owner uid, owner gid, and mode recorded in
-  `res/home-lock-state.yaml` for every entry.
+  `/usr/lib/workspace-guard/home-lock-state.yaml` for every entry.
 
 - **REQ-HL-201**: After rolling back ALL entries, uninstall shall
   clear the state file (`home_lock_state: []`) so a subsequent run
@@ -138,7 +138,7 @@ binary lock this complements is in
 ## 4. Drift Check Behaviour (REQ-HL-300 series)
 
 - **REQ-HL-300**: `home-drift-check` shall compare the live state of
-  every entry in `res/home-lock-state.yaml` against the recorded
+  every entry in `/usr/lib/workspace-guard/home-lock-state.yaml` against the recorded
   baseline (owner uid, owner gid, mode) and emit a CRITICAL alert
   for any of:
   - **missing-file**: the path no longer exists (suspected tamper).
@@ -160,7 +160,7 @@ binary lock this complements is in
   write the report YAML.
 
 - **REQ-HL-304**: The drift check shall write a structured report to
-  `res/home-drift-report.yaml` with per-entry `path`, `class`,
+  `/usr/lib/workspace-guard/home-drift-report.yaml` with per-entry `path`, `class`,
   `detail`, `timestamp` and a `summary` block with `critical` and
   `warnings` counts.
 
