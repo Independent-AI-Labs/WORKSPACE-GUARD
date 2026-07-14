@@ -77,6 +77,18 @@ parse_admin_from_host_provision() {
     [[ -n "$name" && -n "$git_name" && -n "$git_email" ]] && printf '%s\t%s\t%s\n' "$name" "$git_name" "$git_email"
 }
 
+_ssh_pub_comment() {
+    local pub_path="$1"
+    [[ -f "$pub_path" ]] || return 1
+    awk '{ if (NF >= 3) { $1=""; $2=""; sub(/^  */, ""); print; exit } }' "$pub_path"
+}
+
+_key_comment_matches_email() {
+    local pub_path="$1" git_email="$2" comment=""
+    comment="$(_ssh_pub_comment "$pub_path" || true)"
+    [[ -n "$comment" && "$comment" == "$git_email" ]]
+}
+
 provision_one_user() {
     local username="$1" git_name="$2" git_email="$3"
     local home key_dir key_path pub_path
@@ -99,8 +111,15 @@ provision_one_user() {
     fi
 
     mkdir -p "$key_dir" "$home/.ssh"
+    chmod 755 "$key_dir"
+    chown root:root "$key_dir"
     if ! chmod 700 "$home/.ssh" 2>"$DEVNULL"; then
         echo "WARN: chmod 700 $home/.ssh failed" >&2
+    fi
+
+    if [[ -f "$key_path" ]] && ! _key_comment_matches_email "$pub_path" "$git_email"; then
+        echo "  REGEN: SSH key comment drifted from git_email; replacing key pair"
+        rm -f "$key_path" "$pub_path"
     fi
 
     if [[ ! -f "$key_path" ]]; then
@@ -109,6 +128,7 @@ provision_one_user() {
         echo "  OK: SSH key already exists at $key_path (unchanged)"
     fi
     chmod 600 "$key_path"
+    chmod 644 "$pub_path" 2>"$DEVNULL" || true
     chown root:root "$key_path" "$pub_path" 2>"$DEVNULL" || chown root:root "$key_path"
 
     cat > "$home/.gitconfig" <<EOF
@@ -118,9 +138,10 @@ provision_one_user() {
 EOF
 
     cat > "$home/.ssh/config" <<EOF
+# Git transport uses /usr/lib/workspace-guard/git-ssh-wrapper (GIT_SSH).
+# Do not add IdentityFile here; plain ssh must not read root-owned keys.
 Host *
 	IdentitiesOnly yes
-	IdentityFile $key_path
 	StrictHostKeyChecking accept-new
 EOF
 

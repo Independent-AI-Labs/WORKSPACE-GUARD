@@ -1,15 +1,22 @@
 //! Git SSH wrapper: exec ssh with root-provisioned per-user ed25519 key only.
 //! Installed as /usr/lib/workspace-guard/git-ssh-wrapper with cap_dac_override.
+//!
+//! OpenSSH requires the connecting user to own the private key file. Provision
+//! stores keys root:root under `/usr/lib/workspace-guard/ssh-keys/`. This
+//! wrapper reads them (via file cap), stages a 0600 copy under the user's
+//! runtime dir, then execs ssh against that path.
 
 use std::ffi::{CString, OsString};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
-use nix::unistd::{execv, getuid, User};
+use nix::unistd::{chown, execv, getuid, User, Uid};
 
 const SSH_BIN: &str = "/usr/bin/ssh";
 const KEY_ROOT: &str = "/usr/lib/workspace-guard/ssh-keys";
+const STAGE_DIR_NAME: &str = "workspace-guard";
 
 fn valid_username(name: &str) -> bool {
     !name.is_empty()
@@ -55,6 +62,26 @@ fn fs_canonicalize(path: &Path) -> std::io::Result<PathBuf> {
     }
 }
 
+fn runtime_base(uid: Uid) -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", uid.as_raw())))
+}
+
+fn stage_key_for_user(uid: Uid, source: &Path) -> Result<PathBuf, std::io::Error> {
+    let material = std::fs::read(source)?;
+    let stage_dir = runtime_base(uid).join(STAGE_DIR_NAME);
+    std::fs::create_dir_all(&stage_dir)?;
+    std::fs::set_permissions(&stage_dir, std::fs::Permissions::from_mode(0o700))?;
+    let _ = chown(&stage_dir, Some(uid), None);
+
+    let stage_key = stage_dir.join("id_ed25519");
+    std::fs::write(&stage_key, &material)?;
+    std::fs::set_permissions(&stage_key, std::fs::Permissions::from_mode(0o600))?;
+    chown(&stage_key, Some(uid), None)?;
+    Ok(stage_key)
+}
+
 fn cstring_arg(arg: &OsString) -> CString {
     CString::new(arg.as_bytes()).unwrap_or_else(|_| CString::new("ssh").unwrap())
 }
@@ -68,7 +95,7 @@ fn main() {
         }
     };
     let username = &user.name;
-    let key = match provisioned_key_path(username) {
+    let source_key = match provisioned_key_path(username) {
         Some(k) => k,
         None => {
             eprintln!("git-ssh-wrapper: no provisioned key for user {}", username);
@@ -76,16 +103,25 @@ fn main() {
         }
     };
 
-    let ssh_config = user.dir.join(".ssh/config");
+    let staged_key = match stage_key_for_user(user.uid, &source_key) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("git-ssh-wrapper: cannot stage SSH key: {e}");
+            process::exit(2);
+        }
+    };
+
     let ssh = CString::new(SSH_BIN).expect("ssh path");
     let mut argv: Vec<CString> = vec![
         CString::new("ssh").expect("argv0"),
         CString::new("-i").expect("-i"),
-        CString::new(key.to_string_lossy().as_bytes()).expect("identity file"),
+        CString::new(staged_key.to_string_lossy().as_bytes()).expect("identity file"),
         CString::new("-F").expect("-F"),
-        CString::new(ssh_config.to_string_lossy().as_bytes()).expect("ssh config"),
+        CString::new("/dev/null").expect("ssh config"),
         CString::new("-o").expect("-o flag"),
         CString::new("IdentitiesOnly=yes").expect("IdentitiesOnly"),
+        CString::new("-o").expect("-o flag"),
+        CString::new("StrictHostKeyChecking=accept-new").expect("StrictHostKeyChecking"),
     ];
     for arg in std::env::args_os().skip(1) {
         argv.push(cstring_arg(&arg));
@@ -118,5 +154,12 @@ mod tests {
     fn provisioned_key_path_rejects_bad_username() {
         assert!(provisioned_key_path("").is_none());
         assert!(provisioned_key_path("bad/name").is_none());
+    }
+
+    #[test]
+    fn runtime_base_prefers_xdg_runtime_dir() {
+        std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
+        assert_eq!(runtime_base(Uid::from_raw(1000)), PathBuf::from("/run/user/1000"));
+        std::env::remove_var("XDG_RUNTIME_DIR");
     }
 }
