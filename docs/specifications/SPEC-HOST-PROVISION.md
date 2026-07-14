@@ -179,8 +179,10 @@ From repo root, as root:
 1. `make install-host-stack-phase5` (always runs `build-guard` or `build-host-stack`)
 2. Fleet sudo state unchanged by provision (audit only)
 
-Write completion marker `/usr/lib/workspace-guard/host-provision.ok` **only after
-all requested phase-5 steps succeed**:
+Write completion marker `/usr/lib/workspace-guard/host-provision.ok` **before
+phase 5** when `user_management.enabled: true` (phases 1-4 complete) so
+`install-guard-host-exec` can run inside `install-host-stack`. Refresh the marker
+**after all requested phase-5 steps succeed**:
 
 ```
 admin=<name>

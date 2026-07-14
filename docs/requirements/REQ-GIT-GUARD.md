@@ -199,12 +199,14 @@ This document specifies the requirements for the Rust binary. The installation/d
   3. Running `git --version` as the current user and confirming it succeeds
   4. Running `git reset --hard` as the current user and confirming it is blocked
 - **REQ-GGUARD-147**: If any step of the installation fails, the script shall attempt to restore the original state: copy `/usr/bin/git.original` back to `/usr/bin/git` and set permissions to 0755. A clear error message shall be displayed.
-- **REQ-GGUARD-148**: `make install-guard-host-exec` shall be idempotent for the host-exec class: it reconciles drift when `deployment-class` is `host-exec` or missing after legacy uninstall, including stale guard binary hash, wrong file caps, pam artifacts, missing `dpkg-divert`, apt hook, or immutable flags. Drift detection shall read `/usr/lib/workspace-guard/deployment-class` only (not infer from CapAmb or pam state). Functional verify shall use `runuser`, not `su -`. The script shall skip re-installation only when **fully healthy**.
+- **REQ-GGUARD-148**: `make install-guard-host-exec` shall be idempotent for the host-exec class: it reconciles drift when `deployment-class` is `host-exec` or missing after legacy uninstall, including stale guard binary hash, stale `git-ssh-wrapper` or `agent-git-identity` hash, wrong file caps on `/usr/bin/git` or `git-ssh-wrapper`, pam artifacts, missing `dpkg-divert`, apt hook, or immutable flags. Drift detection shall read `/usr/lib/workspace-guard/deployment-class` only (not infer from CapAmb or pam state). Functional verify shall use `runuser`, not `su -`. The script shall skip re-installation only when **fully healthy**. `make reconcile-guard-host-exec` with `GUARD_FORCE_RECONCILE=1` shall always reconcile.
 - **REQ-GGUARD-149**: An uninstall procedure shall be available via `make uninstall-guard` which:
   1. Removes `/usr/bin/git` (the guard)
   2. Restores `/usr/bin/git.original` to `/usr/bin/git` with mode 0755
   3. Restores the dpkg diversion (removes it, returning `/usr/bin/git` to dpkg control)
-  4. Confirms `git --version` works
+  4. Removes git-install artifacts (`deployment-class`, `git-ssh-wrapper`, apt hook) but **preserves** host-provision state (`host-provision.ok`, `ssh-keys/`, `agent-git-identity`)
+  5. Confirms `git --version` works
+- **REQ-GGUARD-149A**: `make purge-guard-state` shall remove all state under `/usr/lib/workspace-guard` (including provision markers and SSH keys) only when `GUARD_PURGE_CONFIRM=1` is set.
 - **REQ-GGUARD-150**: The installation script shall configure a `dpkg-divert` for `/usr/bin/git` to prevent the `git` apt package from overwriting the guard binary during `apt install git` or `apt upgrade`. The diversion shall redirect `/usr/bin/git` → `/usr/bin/git.distrib`.
 - **REQ-GGUARD-151**: The installation script shall remove the older bash wrapper at `.boot-linux/bin/git` to prevent PATH-based bypass. If `.boot-linux/bin/git` exists, it shall be removed during guard installation.
 - **REQ-GGUARD-152**: If the guard detects that `/usr/bin/git` has been replaced (e.g., by a manual override or failed divert), the guard binary shall refuse to `execve()` real git if the inode of `/usr/bin/git` does not match its own. This prevents a scenario where an attacker replaces the SUID binary at the filesystem level.

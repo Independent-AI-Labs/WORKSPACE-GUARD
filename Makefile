@@ -25,7 +25,9 @@ export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-
 
 .DEFAULT_GOAL := help
 
-REPO_ROOT := $(shell if [ -d .git ]; then git rev-parse --show-toplevel; else pwd; fi)
+# Repo root from this Makefile (not git: root/sudo often hits safe.directory).
+_WORKSPACE_GUARD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
+REPO_ROOT := $(patsubst %/,%,$(dir $(_WORKSPACE_GUARD_MK)))
 CI_DIR := $(abspath $(REPO_ROOT)/../CI)
 CI_BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 CI_BOOT_BIN := $(CI_DIR)/$(CI_BOOT_NAME)/bin
@@ -189,7 +191,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + host-provis
 # ═══════════════════════════════════════════════════════════════════════
 
 .PHONY: test-podman test-podman-quick test-podman-provision test-qemu-guest
-.PHONY: build-guard install-guard install-guard-host-exec uninstall-guard check-guard check-guard-host-exec
+.PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard purge-guard-state check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
 	bash scripts/test-in-podman.sh
@@ -212,15 +214,26 @@ build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-gua
 INSTALL_LOCK ?= false
 INSTALL_AUDITD ?= false
 
+_GUARD_RELEASE_BIN := $(REPO_ROOT)/target/release/workspace-guard
+_GUARD_RELEASE_SSH := $(REPO_ROOT)/target/release/workspace-git-ssh
+_GUARD_RELEASE_MODE := $(REPO_ROOT)/target/release/workspace-guard.mode
+
 _install-host-stack-phase5-build:
-	@if [ "$(INSTALL_LOCK)" = "true" ]; then \
+	@if [ "$(GUARD_SKIP_BUILD)" = "1" ]; then \
+		:; \
+	elif [ "$(INSTALL_LOCK)" != "true" ] \
+		&& [ -x "$(_GUARD_RELEASE_BIN)" ] \
+		&& [ -x "$(_GUARD_RELEASE_SSH)" ] \
+		&& [ -f "$(_GUARD_RELEASE_MODE)" ]; then \
+		:; \
+	elif [ "$(INSTALL_LOCK)" = "true" ]; then \
 		$(MAKE) build-host-stack; \
 	else \
 		$(MAKE) build-guard; \
 	fi
 
 install-host-stack-phase5: _install-host-stack-phase5-build ## Build + install guard + optional lock/auditd
-	GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
+	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
 	@if [ "$(INSTALL_LOCK)" = "true" ]; then GUARD_SKIP_BUILD=1 $(MAKE) install-lock; fi
 	@if [ "$(INSTALL_AUDITD)" = "true" ]; then $(MAKE) install-auditd; fi
 
@@ -232,8 +245,14 @@ _INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
 install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
 	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
 
-uninstall-guard: ## Uninstall git-guard, restore original /usr/bin/git (requires root)
+uninstall-guard: ## Uninstall git-guard, restore stock git; preserve provision state (requires root)
 	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
+
+purge-guard-state: ## Destroy all /usr/lib/workspace-guard state (requires GUARD_PURGE_CONFIRM=1)
+	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" purge-guard-state
+
+reconcile-guard-host-exec: build-guard ## Force rebuild + reinstall git guard and aux artifacts (requires root)
+	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
 
 check-guard: ## REMOVED - use check-guard-host-exec
 	@echo "ERROR: make check-guard is removed. Use: make check-guard-host-exec" >&2

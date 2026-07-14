@@ -71,7 +71,12 @@ sudo make install-auditd     # Program II-C
 - `make install-guard` and `make check-guard` **hard-fail** - use suffixed
   targets only.
 - WORKSPACE-CI entry point: `bootstrap-workspace-guard install-host-exec`.
-- Uninstall: maintenance only (`sudo make uninstall-guard`).
+- Refresh after code changes: `sudo make reconcile-guard-host-exec` (never
+  uninstall to refresh). See [OPERATOR-RUNBOOK](docs/OPERATOR-RUNBOOK.md).
+- Uninstall git guard only: `sudo make uninstall-guard` (restores stock git;
+  **preserves** `host-provision.ok`, SSH keys, identities).
+- Factory reset guard state: `sudo GUARD_PURGE_CONFIRM=1 make purge-guard-state`
+  then `sudo make install-host-stack`.
 
 ---
 

@@ -258,6 +258,11 @@ if hp_should_run_phase 5 && [[ "$SKIP_PHASE5" -eq 0 ]]; then
             && [[ -f "$REPO_ROOT/config/agent-git-identity.example" ]]; then
             cp "$REPO_ROOT/config/agent-git-identity.example" "$REPO_ROOT/config/agent-git-identity"
         fi
+        # Phases 1-4 satisfy the install-guard gate; write marker before phase 5
+        # so install-guard-host-exec does not deadlock inside install-host-stack.
+        if [[ "$USER_MGMT" -eq 1 ]]; then
+            hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
+        fi
         install_lock="$(hp_parse_field guard_stack.install_lock)"
         install_auditd="$(hp_parse_field guard_stack.install_auditd)"
         INSTALL_LOCK="${install_lock:-false}" INSTALL_AUDITD="${install_auditd:-false}" \
