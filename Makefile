@@ -221,11 +221,6 @@ _GUARD_RELEASE_MODE := $(REPO_ROOT)/target/release/workspace-guard.mode
 _install-host-stack-phase5-build:
 	@if [ "$(GUARD_SKIP_BUILD)" = "1" ]; then \
 		:; \
-	elif [ "$(INSTALL_LOCK)" != "true" ] \
-		&& [ -x "$(_GUARD_RELEASE_BIN)" ] \
-		&& [ -x "$(_GUARD_RELEASE_SSH)" ] \
-		&& [ -f "$(_GUARD_RELEASE_MODE)" ]; then \
-		:; \
 	elif [ "$(INSTALL_LOCK)" = "true" ]; then \
 		$(MAKE) build-host-stack; \
 	else \
@@ -358,6 +353,10 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 	fi
 	@test -x scripts/uninstall-lock-runtime && bash scripts/uninstall-lock-runtime \
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
+
+.PHONY: guard-up guard-refresh guard-check guard-down guard-reset
+guard-up guard-refresh guard-check guard-down guard-reset: ## Canonical guard operator intents (see docs/OPERATOR.md)
+	@bash scripts/guard-operator.sh $@
 
 .PHONY: provision-host install-host-stack
 provision-host: ## Full host bootstrap: admin, fleet sudo audit, identities, guard stack (ROOT)

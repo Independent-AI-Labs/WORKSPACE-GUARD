@@ -208,7 +208,7 @@ Gaps are numbered for traceability. Severity: **C** = critical (OS destruction o
 | **GAP-C03** | `dd` catalog-only; `path: null`, `reject_patterns: []` | [res/binary-lock.yaml](../res/binary-lock.yaml) | II-A extension + arg-validate |
 | **GAP-C04** | `mkfs`, `wipefs`, `parted`, `fdisk`, `losetup`, `blockdev` not in policy catalog | [res/binary-lock.yaml](../res/binary-lock.yaml) grep | II-A extension |
 | **GAP-C05** | IDE shells = full host user; no seccomp/Landlock/namespace on agent process tree | [README.md](../README.md) Role in framework | II-B applied to IDE entry |
-| **GAP-C06** | Agent in `sudo` group on `vm-ws` ,  any allowed sudo command can wipe disk | Live: `groups agent` includes `sudo` | **Closing:** [SPEC-HOST-PROVISION](specifications/SPEC-HOST-PROVISION.md) `provision-host` strips fleet users from `sudo` after admin break-glass; II-A `sudo` lock still recommended |
+| **GAP-C06** | Agent in `sudo` group on `vm-ws` ,  any allowed sudo command can wipe disk | Live: `groups agent` includes `sudo` | **Mitigation:** [SPEC-HOST-PROVISION](specifications/SPEC-HOST-PROVISION.md) break-glass `admin` + RED audit; fleet sudo retained (audit-only); II-A `sudo` lock still recommended |
 
 ### 5.2 CRITICAL ,  privilege escalation → disk access
 
@@ -458,9 +458,9 @@ sudo make install-host-stack
 ```
 
 This creates a break-glass `admin` account (random password printed once),
-requires that password before stripping fleet users from `sudo`, provisions
-git/SSH identities, and installs the guard stack. **Closes GAP-C06** when
-`user_management.enabled: true`.
+requires that password before fleet account setup, provisions git/SSH
+identities, and installs the guard stack. **Mitigates GAP-C06** when
+`user_management.enabled: true` (audit-only fleet sudo; break-glass admin).
 
 Additional host policy (manual / image build):
 

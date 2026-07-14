@@ -6,6 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
+# shellcheck source=scripts/lib/host-provision-state.sh
+source "$LIB_DIR/host-provision-state.sh" || exit 1
 HP_CONFIG="${WORKSPACE_HOST_PROVISION_FILE:-$REPO_ROOT/config/host-provision.yaml}"
 HP_STATE_DIR="${WORKSPACE_GUARD_STATE_DIR:-/usr/lib/workspace-guard}"
 HP_MARKER="$HP_STATE_DIR/host-provision.ok"
@@ -262,16 +264,13 @@ if hp_should_run_phase 5 && [[ "$SKIP_PHASE5" -eq 0 ]]; then
             && [[ -f "$REPO_ROOT/config/agent-git-identity.example" ]]; then
             cp "$REPO_ROOT/config/agent-git-identity.example" "$REPO_ROOT/config/agent-git-identity"
         fi
-        # Phases 1-4 satisfy the install-guard gate; write marker before phase 5
-        # so install-guard-host-exec does not deadlock inside install-host-stack.
-        if [[ "$USER_MGMT" -eq 1 ]]; then
-            hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
-        fi
         install_lock="$(hp_parse_field guard_stack.install_lock)"
         install_auditd="$(hp_parse_field guard_stack.install_auditd)"
-        INSTALL_LOCK="${install_lock:-false}" INSTALL_AUDITD="${install_auditd:-false}" \
+        GUARD_PROVISION_CONTEXT=1 \
+            INSTALL_LOCK="${install_lock:-false}" INSTALL_AUDITD="${install_auditd:-false}" \
             make -C "$REPO_ROOT" install-host-stack-phase5
         if [[ "$USER_MGMT" -eq 1 ]]; then
+            hp_install_system_config "$HP_CONFIG"
             hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
             hp_operator_print_completion_banner "$FLEET_FILE" "$ADMIN_NAME"
         fi

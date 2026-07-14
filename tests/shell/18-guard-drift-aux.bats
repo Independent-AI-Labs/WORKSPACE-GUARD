@@ -72,6 +72,45 @@ teardown() { guard_teardown; }
     assert_success
 }
 
+@test "guard-host-exec: fleet sudo warns but does not block install gate" {
+    local ci_root tmp_state cfg fleet
+    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    tmp_state="$TEST_TMPDIR/guard-state"
+    fleet="$TEST_TMPDIR/fleet.yaml"
+    cfg="$TEST_TMPDIR/host-provision.yaml"
+    mkdir -p "$tmp_state"
+    cat > "$cfg" <<EOF
+version: 1
+user_management:
+  enabled: true
+admin:
+  name: admin
+fleet_users_file: $fleet
+EOF
+    cat > "$fleet" <<EOF
+version: 1
+users:
+  - name: agent
+EOF
+    printf 'admin=admin\n' > "$tmp_state/host-provision.ok"
+
+    run bash -c "
+        export WORKSPACE_GUARD_STATE_DIR='$tmp_state'
+        export WORKSPACE_HOST_PROVISION_FILE='$cfg'
+        _guard_dir='$GUARD_ROOT'
+        log_error() { printf 'ERR:%s\n' \"\$*\"; }
+        log_warn() { printf 'WARN:%s\n' \"\$*\"; }
+        log_info() { :; }
+        source \"$ci_root/lib/guard-drift.sh\"
+        source \"$ci_root/lib/guard-host-exec.sh\"
+        guard_host_provision_fleet_in_sudo() { printf 'agent\n'; return 0; }
+        guard_assert_host_provision_complete
+    "
+    assert_success
+    assert_output --partial "WARN:Fleet user"
+    assert_output --partial "audit-only"
+}
+
 @test "guard-host-exec: purge refuses without GUARD_PURGE_CONFIRM" {
     local ci_root tmp_state
     ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"

@@ -1,9 +1,12 @@
 # Git and Host Guards for Coding Agents
 
 Coding agents can skip hooks with `--no-verify`, force-push, rewrite history,
-or edit git and ssh settings they should not touch. **WORKSPACE-GUARD** wraps
-`git` and other privileged tools with compiled guards that check each command
-before it runs, and locks the global config paths agents must not change.
+or edit git and ssh settings they should not touch.
+
+**WORKSPACE-GUARD** wraps `git` and other privileged tools with compiled
+guards that check each command before it runs, and locks the global config
+paths agents must not change.
+
 **Git Guard**, **System-Binary Lockdown**, and **Home-Dir Lock** cover git,
 the system binary catalog, and home-directory identity files.
 
@@ -38,11 +41,11 @@ cp config/host-provision.yaml.example config/host-provision.yaml
 cp config/home-lock-users.yaml.example config/home-lock-users.yaml
 # edit locally ,  live files are gitignored
 
-sudo make install-host-stack   # provision-host + full guard stack
+sudo make guard-up             # idempotent fleet bring-up (from workspace root)
 # Or with a chosen admin password:
-#   export WORKSPACE_ADMIN_PASSWORD='...' && sudo -E make install-host-stack
+#   export WORKSPACE_ADMIN_PASSWORD='...' && sudo -E make guard-up
 # Preflight (read-only): sudo make provision-host-preflight
-make check-guard-host-exec
+make guard-check
 sudo make install-hooks        # after git install, via WORKSPACE-CI
 ```
 
@@ -52,31 +55,7 @@ phase 3 fleet account setup. Fleet **sudo is never modified**. Mandatory audit:
 or `sudo -l`); **YELLOW WARN** if the user exists without sudo. Unmanaged
 direct-root sudoers grants block phase 3 until removed or acknowledged.
 
-Manual steps (when `user_management.enabled: false` or partial install):
-
-```bash
-make build-guard
-sudo make install-guard-host-exec
-sudo make provision-git-identities
-sudo make install-home-lock
-sudo make install-lock       # Program II-A
-sudo make install-auditd     # Program II-C
-```
-
-- When `config/host-provision.yaml` exists with `user_management.enabled: true`,
-  `install-guard-host-exec` **hard-fails** until `provision-host` completes
-  (`/usr/lib/workspace-guard/host-provision.ok`).
-- Host binding: `config/guard-host-profiles.yaml` maps `hostname -s` → class;
-  install refuses unknown hosts and class mismatches.
-- `make install-guard` and `make check-guard` **hard-fail** - use suffixed
-  targets only.
-- WORKSPACE-CI entry point: `bootstrap-workspace-guard install-host-exec`.
-- Refresh after code changes: `sudo make reconcile-guard-host-exec` (never
-  uninstall to refresh). See [OPERATOR-RUNBOOK](docs/OPERATOR-RUNBOOK.md).
-- Uninstall git guard only: `sudo make uninstall-guard` (restores stock git;
-  **preserves** `host-provision.ok`, SSH keys, identities).
-- Factory reset guard state: `sudo GUARD_PURGE_CONFIRM=1 make purge-guard-state`
-  then `sudo make install-host-stack`.
+Operator commands: [docs/OPERATOR.md](docs/OPERATOR.md).
 
 ---
 

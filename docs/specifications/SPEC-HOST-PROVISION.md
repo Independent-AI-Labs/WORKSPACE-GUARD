@@ -179,10 +179,11 @@ From repo root, as root:
 1. `make install-host-stack-phase5` (always runs `build-guard` or `build-host-stack`)
 2. Fleet sudo state unchanged by provision (audit only)
 
-Write completion marker `/usr/lib/workspace-guard/host-provision.ok` **before
-phase 5** when `user_management.enabled: true` (phases 1-4 complete) so
-`install-guard-host-exec` can run inside `install-host-stack`. Refresh the marker
-**after all requested phase-5 steps succeed**:
+Phase 5 runs with `GUARD_PROVISION_CONTEXT=1` so `install-guard-host-exec` does
+not re-enter the provision gate mid-orchestration. Write completion marker
+`/usr/lib/workspace-guard/host-provision.ok` and install effective config to
+`/etc/workspace-guard/host-provision.yaml` **only after all requested phase-5
+steps succeed**:
 
 ```
 admin=<name>
@@ -206,7 +207,7 @@ When **all** of the following hold:
 1. `/usr/lib/workspace-guard/host-provision.ok` exists and `admin=` matches config
 2. Completion marker present (fleet sudo retention allowed under warn-only default)
 
-Error message: `Run: sudo make provision-host` (or `install-host-stack`).
+Error message: `Run: sudo make guard-up`.
 
 **Escape hatch:** no `host-provision.yaml` on host → gate skipped (Podman dev
 images without fleet config).
@@ -221,7 +222,7 @@ images without fleet config).
 | `/etc/sudoers.d/*` (except `90-workspace-guard-*`) | No | Preserved; WARN if fleet user named |
 | `/etc/sudoers.d/90-workspace-guard-admin` | Yes | Admin full sudo, password required |
 | `/etc/sudoers.d/90-workspace-guard-agents` | Yes | Must not exist after provision |
-| `sudo` group membership | Partially | Fleet users removed; admin untouched |
+| `sudo` group membership | No | Fleet users audited only; admin untouched |
 | Cloud-init drop-ins (`90-cloud-init-users`, etc.) | Yes (allowlist) | Fleet direct-root lines stripped |
 | Effective sudo (`sudo -l -U <fleet>`) | Audited | Never modified by provision |
 

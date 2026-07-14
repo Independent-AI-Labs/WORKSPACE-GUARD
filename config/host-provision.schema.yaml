@@ -1,6 +1,6 @@
 # Schema for host-provision.yaml
 config: host_provision
-description: "Host bootstrap: admin break-glass, fleet sudo strip, guard stack. Live file config/host-provision.yaml is gitignored; commit host-provision.yaml.example only."
+description: "Host bootstrap: admin break-glass, fleet sudo audit, guard stack. Live file config/host-provision.yaml is gitignored; commit host-provision.yaml.example only."
 fields:
   - path: version
     type: integer
@@ -36,8 +36,8 @@ fields:
   - path: guard_stack.install_lock
     type: boolean
     required: false
-    default: true
+    default: false
   - path: guard_stack.install_auditd
     type: boolean
     required: false
-    default: true
+    default: false
