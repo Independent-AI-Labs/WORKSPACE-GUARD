@@ -38,10 +38,10 @@ fn guard_compiles_release() {
 mod capability_mode {
     use super::guard_cmd;
 
-    /// Capability integration tests require a non-root process without file
-    /// caps on the guard binary (Tier 1 `testagent` in Podman). Plain
-    /// `cargo test` as root in a dev container passes the cap check but
-    /// then fails with GitOriginalMissing; skip that environment.
+    /// Capability integration tests require a non-root process without ambient
+    /// workload caps (Tier 1 `testagent` in Podman). Plain `cargo test` as root
+    /// in a dev container may pass the cap check but then fails with
+    /// GitOriginalMissing; skip that environment.
     fn capability_integration_enabled() -> bool {
         unsafe { libc::geteuid() != 0 }
     }
@@ -58,12 +58,12 @@ mod capability_mode {
             .expect("failed to execute guard");
         assert!(
             !output.status.success(),
-            "guard should exit non-zero when missing file capabilities"
+            "guard should exit non-zero when missing workload capabilities"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("missing file capabilities"),
-            "stderr should mention missing file capabilities: {stderr}"
+            stderr.contains("missing workload capabilities"),
+            "stderr should mention missing workload capabilities: {stderr}"
         );
     }
 
@@ -80,12 +80,12 @@ mod capability_mode {
             .expect("failed to execute guard");
         assert!(
             !output.status.success(),
-            "guard should exit non-zero when missing file capabilities"
+            "guard should exit non-zero when missing workload capabilities"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("missing file capabilities"),
-            "stderr should mention missing file capabilities: {stderr}"
+            stderr.contains("missing workload capabilities"),
+            "stderr should mention missing workload capabilities: {stderr}"
         );
     }
 }
@@ -144,7 +144,7 @@ mod root_only {
             "stderr should report blocked {label}: {stderr}"
         );
         assert!(
-            !stderr.contains("missing file capabilities"),
+            !stderr.contains("missing workload"),
             "root-only guard should not fail cap check as root for {label}: {stderr}"
         );
     }

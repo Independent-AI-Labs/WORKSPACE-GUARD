@@ -16,7 +16,6 @@ use crate::{
 };
 
 #[cfg(feature = "capability-mode")]
-#[allow(dead_code)]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
     // Raise all guard caps into the Inheritable set so forked children
     // can promote them into Ambient before exec. We do NOT raise
@@ -45,13 +44,14 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
 /// Requires CAP_SETPCAP in Effective (inherited from parent via fork)
 /// and CAP_DAC_OVERRIDE in Inheritable+Permitted (also inherited).
 #[cfg(feature = "capability-mode")]
-fn raise_child_dac_override() {
-    let _ = caps::clear(None, caps::CapSet::Ambient);
-    let _ = caps::raise(
+fn raise_child_dac_override() -> Result<(), GuardError> {
+    caps::clear(None, caps::CapSet::Ambient).map_err(|_| GuardError::MissingCap)?;
+    caps::raise(
         None,
         caps::CapSet::Ambient,
         caps::Capability::CAP_DAC_OVERRIDE,
-    );
+    )
+    .map_err(|_| GuardError::MissingCap)
 }
 
 #[cfg(not(feature = "capability-mode"))]
@@ -61,7 +61,9 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
 }
 
 #[cfg(not(feature = "capability-mode"))]
-fn raise_child_dac_override() {}
+fn raise_child_dac_override() -> Result<(), GuardError> {
+    Ok(())
+}
 
 pub fn set_resource_limits() {
     let _ = setrlimit(Resource::RLIMIT_NOFILE, NOFILE_LIMIT, NOFILE_LIMIT);
@@ -224,7 +226,16 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
     match pid {
         -1 => Err(GuardError::GitOriginalMissing),
         0 => {
-            raise_child_dac_override();
+            if raise_child_dac_override().is_err() {
+                const MSG: &[u8] =
+                    b"FATAL: failed to loan CAP_DAC_OVERRIDE to git.original; reinstall guard\n";
+                // SAFETY: write(2) is async-signal-safe; used only in the post-fork
+                // child before execve.
+                unsafe {
+                    libc::write(libc::STDERR_FILENO, MSG.as_ptr().cast(), MSG.len());
+                    libc::_exit(2);
+                }
+            }
             let _ = nix::unistd::execve(git_path, &argv_c, &envp);
             // SAFETY: libc::_exit is the only async-signal-safe exit path;
             // std::process::exit and Drop runtimes are forbidden in the

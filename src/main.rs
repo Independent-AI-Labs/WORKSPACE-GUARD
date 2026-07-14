@@ -39,6 +39,7 @@ use log::block;
 #[derive(Debug)]
 pub enum GuardError {
     MissingCap,
+    MissingCapabilities(String),
     GitOriginalMissing,
     GitOriginalBadPerms,
     NullByteInArg,
@@ -123,10 +124,14 @@ fn main() {
         }
         Err(GuardError::MissingCap) => {
             eprintln!(
-                "FATAL: missing file capabilities (needs \
-                 cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep): \
-                 reinstall guard"
+                "FATAL: missing workload capabilities (needs \
+                 cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid); \
+                 run make install-guard-host-exec"
             );
+            process::exit(2);
+        }
+        Err(GuardError::MissingCapabilities(msg)) => {
+            eprintln!("{msg}");
             process::exit(2);
         }
         Err(e) => {
@@ -155,20 +160,122 @@ fn check_privileges() -> Result<(), GuardError> {
 }
 
 #[cfg(not(feature = "root-only"))]
-fn check_privileges() -> Result<(), GuardError> {
-    const REQUIRED_CAPS: [caps::Capability; 5] = [
-        caps::Capability::CAP_SETPCAP,
-        caps::Capability::CAP_CHOWN,
-        caps::Capability::CAP_DAC_OVERRIDE,
-        caps::Capability::CAP_FOWNER,
-        caps::Capability::CAP_FSETID,
-    ];
-    for cap in REQUIRED_CAPS.iter().copied() {
-        if !caps::has_cap(None, caps::CapSet::Effective, cap).unwrap_or(false) {
-            return Err(GuardError::MissingCap);
+const REQUIRED_WORKLOAD_CAPS: [caps::Capability; 5] = [
+    caps::Capability::CAP_SETPCAP,
+    caps::Capability::CAP_CHOWN,
+    caps::Capability::CAP_DAC_OVERRIDE,
+    caps::Capability::CAP_FOWNER,
+    caps::Capability::CAP_FSETID,
+];
+
+#[cfg(not(feature = "root-only"))]
+fn no_new_privs_enabled() -> bool {
+    const PR_GET_NO_NEW_PRIVS: libc::c_int = 39;
+    unsafe { libc::prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) == 1 }
+}
+
+#[cfg(not(feature = "root-only"))]
+const DEPLOYMENT_CLASS_FILE: &str = "/usr/lib/workspace-guard/deployment-class";
+
+#[cfg(not(feature = "root-only"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeploymentClass {
+    HostExec,
+    SandboxService,
+    Unknown,
+}
+
+#[cfg(not(feature = "root-only"))]
+fn read_deployment_class() -> DeploymentClass {
+    let raw = std::fs::read_to_string(DEPLOYMENT_CLASS_FILE)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    match raw.as_str() {
+        "host-exec" => DeploymentClass::HostExec,
+        "sandbox-service" => DeploymentClass::SandboxService,
+        _ => DeploymentClass::Unknown,
+    }
+}
+
+#[cfg(not(feature = "root-only"))]
+fn workload_has_cap_ambient(cap: caps::Capability) -> bool {
+    caps::has_cap(None, caps::CapSet::Ambient, cap).unwrap_or(false)
+        && caps::has_cap(None, caps::CapSet::Permitted, cap).unwrap_or(false)
+}
+
+#[cfg(not(feature = "root-only"))]
+fn workload_has_cap_file_exec(cap: caps::Capability) -> bool {
+    caps::has_cap(None, caps::CapSet::Effective, cap).unwrap_or(false)
+        && caps::has_cap(None, caps::CapSet::Permitted, cap).unwrap_or(false)
+}
+
+#[cfg(not(feature = "root-only"))]
+fn workload_has_cap_for_class(class: DeploymentClass, cap: caps::Capability) -> bool {
+    match class {
+        DeploymentClass::HostExec => !no_new_privs_enabled() && workload_has_cap_file_exec(cap),
+        DeploymentClass::SandboxService => workload_has_cap_ambient(cap),
+        DeploymentClass::Unknown => false,
+    }
+}
+
+#[cfg(not(feature = "root-only"))]
+fn promote_ambient_to_effective(class: DeploymentClass) -> Result<(), GuardError> {
+    if class != DeploymentClass::SandboxService {
+        return Ok(());
+    }
+    for cap in REQUIRED_WORKLOAD_CAPS.iter().copied() {
+        if workload_has_cap_for_class(class, cap)
+            && !caps::has_cap(None, caps::CapSet::Effective, cap).unwrap_or(false)
+        {
+            caps::raise(None, caps::CapSet::Effective, cap).map_err(|_| GuardError::MissingCap)?;
         }
     }
-    exec::raise_ambient_caps()?;
+    Ok(())
+}
+
+#[cfg(not(feature = "root-only"))]
+fn deployment_class_hint(class: DeploymentClass) -> &'static str {
+    match class {
+        DeploymentClass::HostExec => {
+            "deployment-class host-exec: file capabilities on /usr/bin/git required \
+             (NoNewPrivs must be 0); run make install-guard-host-exec"
+        }
+        DeploymentClass::SandboxService => {
+            "deployment-class sandbox-service: ambient capabilities required from \
+             workspace-agent@ systemd unit; run make install-sandbox"
+        }
+        DeploymentClass::Unknown => {
+            "deployment-class missing or unknown in /usr/lib/workspace-guard/deployment-class; \
+             run make install-guard-host-exec"
+        }
+    }
+}
+
+#[cfg(not(feature = "root-only"))]
+fn check_privileges() -> Result<(), GuardError> {
+    let class = read_deployment_class();
+    let mut missing = Vec::new();
+    for cap in REQUIRED_WORKLOAD_CAPS.iter().copied() {
+        if !workload_has_cap_for_class(class, cap) {
+            missing.push(format!("{cap:?}"));
+        }
+    }
+    if !missing.is_empty() {
+        let caps_list = "cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid";
+        let hint = deployment_class_hint(class);
+        return Err(GuardError::MissingCapabilities(format!(
+            "FATAL: missing workload capabilities ({caps_list}); missing: [{}]. {hint}",
+            missing.join(", ")
+        )));
+    }
+    promote_ambient_to_effective(class)?;
+    match class {
+        DeploymentClass::HostExec | DeploymentClass::SandboxService => {
+            exec::raise_ambient_caps()?;
+        }
+        DeploymentClass::Unknown => {}
+    }
     Ok(())
 }
 

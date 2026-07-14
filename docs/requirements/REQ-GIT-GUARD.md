@@ -19,7 +19,7 @@ The replacement is a **Rust binary** installed as a **capability-enabled** execu
 
 For environments where file capabilities are unavailable (PRoot, containers running as root), a **root-only mode** (`--features root-only`) provides a soft barrier with the same policy engine.
 
-This document specifies the requirements for the Rust binary. The installation/deployment procedure is specified in [SPEC-GIT-GUARD-INSTALL](../specifications/SPEC-GIT-GUARD-INSTALL.md) and is handled by `make build-guard` and `make install-guard`.
+This document specifies the requirements for the Rust binary. The installation/deployment procedure is specified in [SPEC-GIT-GUARD-DEPLOYMENT](../specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) and is handled by `make build-guard` and `make install-guard-host-exec`.
 
 ---
 
@@ -27,7 +27,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 1. Privileged Execution Model
 
-- **REQ-GGUARD-001**: The binary shall be installed at `/usr/bin/git` with owner root:root and mode 0755, with file capability `cap_dac_override+ep` (capability mode).
+- **REQ-GGUARD-001**: The binary shall be installed at `/usr/bin/git` with owner root:root and mode 0755, with file capabilities `cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid=ep` (host-exec deployment class).
 - **REQ-GGUARD-002**: The real git binary shall reside at `/usr/bin/git.original` with owner root:root and mode 0700.
 - **REQ-GGUARD-003**: The binary shall detect privileged execution via `caps::has_cap()` (capability mode) or `geteuid() == 0` (root-only mode).
 - **REQ-GGUARD-004**: If the capability check fails (capability mode) or euid is not 0 (root-only mode), the binary shall refuse to operate and exit with code 2. This prevents an attacker from compiling their own binary that bypasses the guard.
@@ -179,8 +179,8 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 15. Deployment and Installation
 
-- **REQ-GGUARD-140**: The git guard shall be installed by `make build-guard` and `make install-guard`: not by `make install`. `make install` shall NOT touch the git binary or git guard.
-- **REQ-GGUARD-141**: The `make install-guard` script shall inform the user **before** any git-related changes are made, including: that the existing system git will be relocated, that a capability-enabled binary will be installed at `/usr/bin/git`, and that the real git will be restricted to mode 0700 root:root.
+- **REQ-GGUARD-140**: The git guard shall be installed by `make build-guard` and `make install-guard-host-exec`: not by `make install`. `make install` shall NOT touch the git binary or git guard. `make install-guard` shall hard-fail.
+- **REQ-GGUARD-141**: The `make install-guard-host-exec` script shall inform the user **before** any git-related changes are made, including: that the existing system git will be relocated, that a file-capability guard binary will be installed at `/usr/bin/git`, and that the real git will be restricted to mode 0700 root:root.
 - **REQ-GGUARD-142**: The installation script shall build the `workspace-guard` Rust binary from source (`projects/WORKSPACE-GUARD/`) before installing it. The build shall use `cargo build --release` with appropriate feature flags.
 - **REQ-GGUARD-143**: Before relocating the real git, the script shall verify that: (a) the Rust binary compiled successfully, (b) the compiled binary is a valid ELF executable, and (c) `/usr/bin/git` exists and is the system git.
 - **REQ-GGUARD-144**: The script shall relocate the real git binary as follows:
@@ -192,14 +192,14 @@ This document specifies the requirements for the Rust binary. The installation/d
   1. Copy the built binary to `/usr/bin/git`
   2. Set ownership: `chown root:root /usr/bin/git`
   3. Set permissions: `chmod 0755 /usr/bin/git`
-  4. Set file capability: `setcap cap_dac_override+ep /usr/bin/git` (capability mode only)
+  4. Set file capabilities: `setcap cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid=ep /usr/bin/git` (host-exec only)
 - **REQ-GGUARD-146**: After installation, the script shall verify correctness by:
   1. Confirming `/usr/bin/git` has correct mode and owner
   2. Confirming `/usr/bin/git.original` has mode 0700 and owner root:root
   3. Running `git --version` as the current user and confirming it succeeds
   4. Running `git reset --hard` as the current user and confirming it is blocked
 - **REQ-GGUARD-147**: If any step of the installation fails, the script shall attempt to restore the original state: copy `/usr/bin/git.original` back to `/usr/bin/git` and set permissions to 0755. A clear error message shall be displayed.
-- **REQ-GGUARD-148**: The installation script shall detect if the guard is already installed (by checking `/usr/bin/git.original` exists with mode 0700). If already installed, the script shall inform the user and skip re-installation unless a `reinstall` mode is passed.
+- **REQ-GGUARD-148**: `make install-guard-host-exec` shall be idempotent for the host-exec class: it reconciles drift when `deployment-class` is `host-exec` or missing after legacy uninstall, including stale guard binary hash, wrong file caps, pam artifacts, missing `dpkg-divert`, apt hook, or immutable flags. Drift detection shall read `/usr/lib/workspace-guard/deployment-class` only (not infer from CapAmb or pam state). Functional verify shall use `runuser`, not `su -`. The script shall skip re-installation only when **fully healthy**.
 - **REQ-GGUARD-149**: An uninstall procedure shall be available via `make uninstall-guard` which:
   1. Removes `/usr/bin/git` (the guard)
   2. Restores `/usr/bin/git.original` to `/usr/bin/git` with mode 0755
@@ -208,7 +208,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-150**: The installation script shall configure a `dpkg-divert` for `/usr/bin/git` to prevent the `git` apt package from overwriting the guard binary during `apt install git` or `apt upgrade`. The diversion shall redirect `/usr/bin/git` → `/usr/bin/git.distrib`.
 - **REQ-GGUARD-151**: The installation script shall remove the older bash wrapper at `.boot-linux/bin/git` to prevent PATH-based bypass. If `.boot-linux/bin/git` exists, it shall be removed during guard installation.
 - **REQ-GGUARD-152**: If the guard detects that `/usr/bin/git` has been replaced (e.g., by a manual override or failed divert), the guard binary shall refuse to `execve()` real git if the inode of `/usr/bin/git` does not match its own. This prevents a scenario where an attacker replaces the SUID binary at the filesystem level.
-- **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `make install-guard`. The hook shall NOT reinstall the guard on its own; it only warns.
+- **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `make install-guard-host-exec`. The hook shall NOT reinstall the guard on its own; it only warns.
 - **REQ-GGUARD-154**: The installation script shall detect and warn about alternative git installations (`snap`, `flatpak`, `nix`, `/usr/local/bin/git`). The user shall be informed that these provide alternate paths to git that bypass the guard. This is informational only: the guard does not attempt to disable them.
 
 ### 15A. Root-Only Mode
@@ -250,7 +250,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **Target**: `x86_64-unknown-linux-musl` (static) or `x86_64-unknown-linux-gnu` (dynamic) or `aarch64-unknown-linux-gnu` depending on availability of musl toolchain and target architecture.
 - **No shell, no Python, no interpreter**: the binary is fully self-contained.
 - **Binary size target**: under 500KB stripped.
-- **Deployment is via `make build-guard` + `make install-guard`**: the `make install` flow shall NOT handle git or the git guard.
+- **Deployment is via `make build-guard` + `make install-guard-host-exec`**: the `make install` flow shall NOT handle git or the git guard.
 
 ## Non-Requirements
 

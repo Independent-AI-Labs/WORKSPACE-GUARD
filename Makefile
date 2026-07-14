@@ -188,7 +188,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check (both feature combos)
 # ═══════════════════════════════════════════════════════════════════════
 
 .PHONY: test-podman test-podman-quick test-qemu-guest
-.PHONY: build-guard install-guard uninstall-guard check-guard
+.PHONY: build-guard install-guard install-guard-host-exec uninstall-guard check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
 	bash scripts/test-in-podman.sh
@@ -202,14 +202,22 @@ test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in g
 build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 
-install-guard: ## Install git-guard to /usr/bin/git (requires root, binary pre-built)
-	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-only
+install-guard: ## REMOVED - use install-guard-host-exec
+	@echo "ERROR: make install-guard is removed. Use: make install-guard-host-exec" >&2
+	@exit 1
+
+install-guard-host-exec: build-guard ## Install git-guard (host-exec class; requires root)
+	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
 
 uninstall-guard: ## Uninstall git-guard, restore original /usr/bin/git (requires root)
 	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
 
-check-guard: ## Check git-guard installation status
-	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check
+check-guard: ## REMOVED - use check-guard-host-exec
+	@echo "ERROR: make check-guard is removed. Use: make check-guard-host-exec" >&2
+	@exit 1
+
+check-guard-host-exec: ## Check host-exec git-guard installation status
+	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
 
 .PHONY: build
 build: ## Build release binary (default + root-only)

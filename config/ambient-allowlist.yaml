@@ -1,0 +1,21 @@
+# Ambient capability grant for git-guard workloads (capability mode).
+#
+# File capabilities on /usr/bin/git are NOT used: under PR_SET_NO_NEW_PRIVS
+# the kernel ignores them. Privilege is delivered via ambient caps on the
+# agent UID at session/service start (pam_cap on bare metal, systemd
+# AmbientCapabilities on VM agents, Podman --cap-add + bounding set).
+#
+# Sandbox-service only (make install-sandbox). Git host-exec does not use pam ambient.
+
+workload_caps:
+  - cap_setpcap
+  - cap_chown
+  - cap_dac_override
+  - cap_fowner
+  - cap_fsetid
+
+# Non-root login users that run git through the guard.
+grant_to:
+  uid_min: 1000
+  uid_max: 65533
+  login_shells: [bash, sh, zsh, fish]

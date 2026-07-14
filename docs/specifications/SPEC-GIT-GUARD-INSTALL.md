@@ -123,24 +123,38 @@ done
 
 This is informational only. The guard does not attempt to disable snap, nix, or user-installed binaries: it protects the system git path.
 
-### 5.1 Pre-Flight Checks
+### 5.1 Pre-Flight: Health Check and Reconcile
 
-Before modifying `/usr/bin/git`:
+Before modifying `/usr/bin/git`, `make install-guard` (via `bootstrap-workspace-guard install-only`) builds the guard binary, then runs `guard_install_drift_reasons()`.
 
-1. **Verify system git exists**: `test -x /usr/bin/git`
-2. **Check if already installed**: `test -f /usr/bin/git.original`
-
-If already installed (git.original exists with mode 0700):
+**Healthy** (no drift) - skip installation:
 ```
-[INFO] Git guard is already installed.
-  /usr/bin/git.original exists (mode 0700, root:root)
-  /usr/bin/git is SUID (mode 4555, root:root)
-
-To reinstall: sudo make pre-req --reinstall-git-guard
-To uninstall: sudo make pre-req --uninstall-git-guard
+[INFO] Git guard healthy; nothing to do.
 ```
 
-The script exits successfully without re-installing.
+**Drifted** - reconcile in place (no separate recovery script):
+```
+[WARN] Git guard drift detected; reconciling:
+  - legacy file capabilities on /usr/bin/git (must be empty for ambient delivery)
+  - pam_cap ambient grant missing in /etc/security/capability.conf
+  ...
+[INFO] Reconciling git guard installation...
+```
+
+Drift dimensions checked (capability mode): `/usr/bin/git.original` mode 0700; `/usr/bin/git` mode 0755 with no file caps; installed binary sha256 matches built binary; `dpkg-divert` active; `pam_cap` ambient grant in `/etc/security/capability.conf` with `^cap_*` IAB prefix; `auth optional pam_cap.so defer` in `/etc/pam.d/common-auth` (not `session` - pam_cap is auth-only); no stale `session optional pam_cap.so` lines; apt hook present; immutable flags on `/usr/bin/git` and `/usr/bin/git.original`.
+
+### 5.1.1 pam_cap ambient delivery (capability mode)
+
+Under `PR_SET_NO_NEW_PRIVS`, file capabilities on `/usr/bin/git` are ignored. The guard requires **ambient** capabilities (`CapAmb`) at exec time. Delivery uses `libpam-cap`:
+
+1. **`/etc/security/capability.conf`** - managed block with `^`-prefixed caps per user/uid, e.g. `^cap_setpcap,^cap_chown,... agent` (the `^` marks ambient in the IAB tuple; plain `cap_*` sets inheritable only and is insufficient). The block must appear **before** any catch-all rule such as `none *` (capability.conf is first-match).
+2. **`/etc/pam.d/common-auth`** - append `auth optional pam_cap.so defer` for sshd/login paths. Do **not** add `session optional pam_cap.so`; pam_cap provides only an auth module.
+3. **`/etc/pam.d/su`** - insert `auth optional pam_cap.so defer` **before** `pam_rootok.so`. Root `su - user` succeeds at `pam_rootok` (sufficient) and never reaches `@include common-auth`, so pam_cap in common-auth alone is insufficient for install verify and root-initiated `su -`.
+4. **Verify** - `su - <agent> -c 'grep CapAmb /proc/self/status'` must be non-zero before the install is considered healthy.
+
+`make check-guard` reports `HEALTHY`, `DRIFTED`, or `NOT INSTALLED` with the same drift list. Fix: `sudo make install-guard` from a root session where `NoNewPrivs=0` (not from an agent shell with NNP set).
+
+First-time install still prompts `[y/N]`; reconcile skips the prompt when `/usr/bin/git.original` already exists.
 
 ### 5.2 Configure dpkg-divert
 

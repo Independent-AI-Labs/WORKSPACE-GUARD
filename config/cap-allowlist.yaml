@@ -1,9 +1,11 @@
-# Per-path capability allowlist.
+# Per-path file-capability allowlist (system binaries only).
+#
+# /usr/bin/git is NOT listed: the git guard uses ambient caps on the agent
+# UID (see config/ambient-allowlist.yaml), not file caps on the binary.
 #
 # Any capability NOT listed here for a given path is stripped during
 # `make install-lock` (see docs/specifications/SPEC-CAP-THROTTLE.md
-# section 4). The sync-gtfobins script records the pre-strip state in
-# res/fcap-baseline.yaml so the operator can audit what was removed.
+# section 4).
 #
 # Format:
 #   allowlist:
@@ -12,10 +14,6 @@
 #       reason: "why this cap is needed"
 
 allowlist:
-  /usr/bin/git:
-    allowed: [cap_dac_override]
-    reason: "Guard reads root-owned .git/ directory entries"
-
   /usr/bin/sudo:
     allowed: [cap_setuid, cap_setpcap, cap_dac_override]
     reason: "Identity switching (SUID equivalent via file caps)"

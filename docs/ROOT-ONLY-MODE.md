@@ -84,12 +84,13 @@ chmod 0755 /usr/bin/git.guard /usr/bin/git.original
 Or via the Makefile:
 
 ```bash
-make build-guard          # builds with root-only features in root-only envs
-make install-guard        # installs without setcap/chattr when root-only
+make build-guard          # records build mode in .mode marker
+BUILD_MODE=root-only make build-guard   # explicit root-only build
+make install-guard-host-exec   # capability build only; root-only uses separate CI paths
 ```
 
-The bootstrap script detects whether `setcap` is available and falls back
-to root-only installation automatically.
+Root-only installation does not use `install-guard-host-exec`. Build with
+`BUILD_MODE=root-only` and install via documented Podman Tier 2 / PRoot paths only.
 
 ## Runtime Behavior
 

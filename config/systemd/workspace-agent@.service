@@ -16,11 +16,10 @@ After=network.target
 [Service]
 Type=exec
 
-# Capability throttle (SPEC-CAP-THROTTLE section 6): start with zero caps.
-# Per section 6, the unit grants no capabilities by default; the agent
-# runs fully de-privileged inside the sandbox. Any needed cap must be
-# added explicitly and risk-assessed against the always-dropped table.
-CapabilityBoundingSet=
+# Git-guard workload caps (ambient delivery under NoNewPrivs).
+# /usr/bin/git has no file caps; see config/ambient-allowlist.yaml.
+CapabilityBoundingSet=CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID
+AmbientCapabilities=CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID
 NoNewPrivileges=yes
 
 # Address family restriction (AF_ALG block for Copy Fail CVE-2026-31431).

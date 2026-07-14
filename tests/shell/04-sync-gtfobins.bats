@@ -10,6 +10,7 @@ load lib/harness
 setup()    { guard_setup; load_fake_repo; }
 teardown() {
     rm -rf "$GUARD_ROOT/target/.bats-sync-live"
+    unset GUARD_DECODE_CAPS_INCLUDE_FIXTURE_PATHS
     guard_teardown
 }
 
@@ -59,6 +60,7 @@ _setup_sync_repo() {
 
     printf '%s\n' "$SYNC_GIT cap_chown,cap_dac_override=ep" > "$TEST_TMPDIR/caps.lst"
     export GUARD_GETCAP_FIXTURE="$TEST_TMPDIR/caps.lst"
+    export GUARD_DECODE_CAPS_INCLUDE_FIXTURE_PATHS=1
 }
 
 # Convenience: run sync-gtfobins against FAKE_REPO.
@@ -179,13 +181,12 @@ _stage_all_refs() {
     grep -q '    strip:' "$fb"
 }
 
-@test "sync-gtfobins: fcap-baseline recommends throttle for git" {
+@test "sync-gtfobins: fcap-baseline recommends keep for git (host-exec guard)" {
     _setup_sync_repo
     _run_sync
     assert_success
     local fb="$FAKE_REPO/res/fcap-baseline.yaml"
-    # git path should have recommended: "throttle"
-    awk -v p="$SYNC_GIT" '$0 ~ "path: \"" p "\"" {c=1} c && /recommended:/{print; exit}' "$fb" | grep -q 'throttle'
+    awk -v p="$SYNC_GIT" '$0 ~ "path: \"" p "\"" {c=1} c && /recommended:/{print; exit}' "$fb" | grep -q 'keep'
 }
 
 @test "sync-gtfobins: cve-catalog.yaml is static with expected CVE IDs" {

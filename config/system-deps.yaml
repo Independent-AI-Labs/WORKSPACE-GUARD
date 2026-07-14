@@ -42,6 +42,11 @@ requires:
     description: libcap2-bin (setcap/getcap)
     platforms: [linux]
 
+  - check_type: apt-package
+    apt_package: libpam-cap
+    description: libpam-cap (pam_cap.so for ambient git-guard caps)
+    platforms: [linux]
+
   - check_cmd: mke2fs
     apt_package: e2fsprogs
     description: e2fsprogs (chattr/e2fs tools)

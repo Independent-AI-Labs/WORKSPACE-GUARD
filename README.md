@@ -1,425 +1,234 @@
-# Compiled Privilege Enforcement for the Linux SUID & Capability Surface
+# Git and Host Guards for Coding Agents
 
-dpkg-divert-installed Rust guards replace public SUID and file-capability
-binaries: policy checks argv, `-c`/`--config` keys, and environment before
-`execve()` of the relocated real binary (mode-0700 `root:root`, unreadable to
-callers). Three programs share one pattern: deployed **Git Guard** (18 deny
-rules, `--no-verify`/`--force` blocks at the syscall boundary);
-**System-Binary Lockdown** for the GTFOBins catalog; **Home-Dir Lock** for
-`~/.gitconfig`, `~/.ssh`, and `/root/*`.
+Coding agents can skip hooks with `--no-verify`, force-push, rewrite history,
+or edit git and ssh settings they should not touch. **WORKSPACE-GUARD** wraps
+`git` and other privileged tools with compiled guards that check each command
+before it runs, and locks the global config paths agents must not change.
+**Git Guard**, **System-Binary Lockdown**, and **Home-Dir Lock** cover git,
+the system binary catalog, and home-directory identity files.
 
-Three programs ship in this repo today:
+On a Linux agent host, run `make build-guard` and
+`sudo make install-guard-host-exec` to deploy Git Guard; see **Host install**
+below for optional programs. Full policy detail is in `docs/specifications/`.
 
-| Program | Target surface | State |
-|---------|----------------|-------|
-| **Git Guard** (Program I) | `/usr/bin/git` only | Built, deployed, tested (220+ Rust unit tests, 7 integration tests, 75-case policy matrix, Podman + QEMU E2E) |
-| **System-Binary Lockdown + Sandbox + Audit** (Program II) | Full GTFOBins SUID + file-capability catalog | Baselines, specs, sync + drift scripts, config artifacts; runtime install pending |
-| **Home-Dir Lock** (Program III) | `~/.gitconfig`, `~/.config/git/config`, `~/.ssh/config`, `~/.ssh/authorized_keys`, `/root/*` | Scripts + bats suite (34 tests) + 3 Rust consistency tests; runtime install pending |
+---
 
-All three programs share the same core mechanics, described next. Detail for
-each program follows. Architecture lives in `docs/specifications/`; tooling in
-`scripts/`; policies in `config/`.
+## Role in the framework
 
-## The Guard Pattern
+| Surface | Git class | Install | Purpose |
+|---------|-----------|---------|---------|
+| Agent dev host (IDE shells, SSH) | `host-exec` | `make install-guard-host-exec` | **Primary** - real repos; non-PAM spawns need file caps on `/usr/bin/git` |
+| Long-running agents under systemd | `sandbox-service` | `make install-sandbox` | Program II isolation; separate from git install |
+| Podman Tier 2 / PRoot / macOS | none | `BUILD_MODE=root-only` in harness | CI soft barrier only; no host git guard |
 
-Every instance of the framework applies the same five steps:
+Agent IDE terminals do not run PAM login, so ambient capabilities are
+unavailable. **host-exec** delivers caps at file exec via `setcap` on
+`/usr/bin/git`. See [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md).
 
-1. **Relocate.** Move the real binary from its public path to
-   `<path>.original` (git guard) or `<path>.real` (system-binary lockdown),
-   mode 0700 `root:root`: unreadable and unexecutable by non-root.
-2. **Install.** Place a compiled Rust guard binary (git guard, ~1,600 lines, 5
-   modules) or a single generic Rust guard binary (system-binary lockdown:
-   one binary compiled once, copied to every contained path, dispatching by
-   `basename(argv[0])` at runtime) at the
-   public path, with a minimal set of Linux file capabilities.
-3. **Gate.** Before `execve()` of the real binary, the guard validates the
-   full argument vector, intercepted `-c`/`--config` keys, and the
-   environment. Anything matching a deny rule is blocked and audited.
-4. **Contain.** For authorized invocations, the real binary runs under a
-   sanitised, allow-list environment with resource limits (`NOFILE=256`,
-   `CORE=0`) and, in capability mode, a scoped `CAP_DAC_OVERRIDE` loaned to
-   the child via the Ambient set that dies when the child exits.
-5. **Audit.** Every block is written to an audit log (resolved via the real
-   UID, not spoofable `$HOME`) and to `/dev/tty` for visibility.
+---
 
-File capabilities are granular, safe under `NO_NEW_PRIVS`, and simple to
-audit. `dpkg-divert` protects the guard from `apt` overwrites; `chattr +i`
-makes the relocated real binary immutable.
+## Host install
 
-## Program I: Git Guard
-
-A Rust binary replaces `/usr/bin/git` to enforce immutable, unbypassable
-policies on destructive and history-rewriting operations.
-
-### Deployment modes
-
-| Mode | Feature flag | Enforcement | Requires | Suitable for |
-|------|-------------|-------------|----------|-------------|
-| Capability (default) | `--features capability-mode` (default) | Hard barrier | `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep'`, `chattr`, `dpkg-divert` | Production, non-root users |
-| Root-only | `--features root-only` | Soft barrier | Root only | PRoot, containers, CI agents as root |
-
-See [docs/ROOT-ONLY-MODE.md](docs/ROOT-ONLY-MODE.md) for the root-only threat
-model.
-
-### Blocked operations
-
-18 policy rules cover three classes:
-
-- **Unconditional subcommand blocks**: `reset`, `clean`, `restore`, `rebase`,
-  `gc`, `prune`, `bisect`, `filter-branch`, `filter-repo`, `worktree`,
-  `reflog`, `replace`, `lfs`, `daemon`, `fast-import`.
-- **Sudo-gated subcommands** (denied for non-root, allowed via `sudo`):
-  `submodule`, `checkout`.
-- **Flag-gated blocks**: `rm` without `--cached`, `stash drop`/`clear`
-  (non-root), `branch -D`/`-M`, `tag -f`/`-d`/`-D`, `push --force`/`-f`/
-  `--force-with-lease`, `push --delete`, `commit --amend`, `revert` (unpushed
-  target), `pull` (protected branch, no `--ff-only`/`--rebase`), `merge`
-  (protected branch, no `--ff-only`/`--abort`, non-root), background `push`
-  (`pgrp != tpgid`), `SKIP=` env, `PRE_COMMIT_ALLOW_NO_CONFIG=1` env.
-
-Protected branches: `main`, `master`, `develop`, `production`, `staging`,
-`release`, `release/*`.
-
-Immediate-fail flags (rejected during parsing): `--hard`, `--no-verify`,
-`-n`, `-N`, `--upload-pack`, `--receive-pack`, `--exec`, any null byte.
-
-Full rule table and decision engine: [SPEC-GIT-GUARD.md §4](docs/specifications/SPEC-GIT-GUARD.md)
-
-### Config key interception
-
-`-c`/`-C`/`--config`/`--config-env` keys are matched against 96 glob patterns
-covering core internals (`core.hooksPath`, `core.fsmonitor`, `core.sshCommand`),
-protocol, `safe.directory`, `include.path`, aliases, URL redirects,
-credentials, HTTP/HTTPS, filters, diff/merge tools, remotes, and submodules.
-Syntax: `*` matches one segment, `**` matches zero or more. Case-insensitive.
-
-Sudo-gated config keys (`core.editor`, `sequence.editor`, `user.name`,
-`user.email`, `user.signingkey`) are blocked for non-root, allowed for root.
-Sudo-gated env vars (`EDITOR`, `VISUAL`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`,
-`GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `EMAIL`) are dropped for non-root with an
-explicit warning, passed through for root.
-
-Full list: [SPEC-GIT-GUARD.md §3](docs/specifications/SPEC-GIT-GUARD.md) and
-[§5](docs/specifications/SPEC-GIT-GUARD.md)
-
-### Environment sanitisation
-
-The child environment is constructed from scratch from an 18-variable allow-list
-(`HOME`, `USER`, locale, `TERM`, display, `SSH_AUTH_SOCK`, `GPG_TTY`, `SHELL`,
-`PWD`). `PATH` is hardcoded. `safe.directory=*` is injected to suppress git's
-ownership checks. This is a closed surface: future glibc or git variables cannot
-sneak through.
-
-Detail: [SPEC-GIT-GUARD.md §5](docs/specifications/SPEC-GIT-GUARD.md)
-
-### `.git` ownership lock (capability mode)
-
-The guard recursively `chown`s the entire `.git/` directory tree to
-`root:root` (0o755 dirs, 0o644 files, 0o755 hooks) so a non-root user can
-read/traverse but not write to any part of `.git/`. The lock runs twice per
-invocation: before the policy engine (closes planted-config windows during
-policy-check sub-calls) and after `git.original` exits (reclaims
-agent-owned files the child created). Idempotent, best-effort, skipped under
-`sudo`.
-
-This closes 11 local-RCE vectors: `core.fsmonitor` RCE, `core.hooksPath`
-redirect, `.git/hooks/` trojaning, `.git/index` corruption, `.git/HEAD`
-redirection, `.git/refs/` forging, `.git/objects/` planting, reflog forging,
-`include.path` injection, CVE-2025-48384 submodule hook, and embedded bare
-repo trigger. Full threat model table:
-[SPEC-GIT-GUARD-HARDENING.md §11.7](docs/specifications/SPEC-GIT-GUARD-HARDENING.md)
-
-### WORKSPACE-CI contract enforcement
-
-Before `git commit` and `git push`, the guard locates the workspace root,
-checks for vendored-tier bypass, and delegates to
-`projects/CI/lib/checks_quality.sh`. Returns exit code 4 on contract failure.
-Detail: [SPEC-GIT-GUARD.md §6](docs/specifications/SPEC-GIT-GUARD.md)
-
-### Git guard exit codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Operation allowed, real git ran successfully |
-| 1 | Policy block: destructive or disallowed operation |
-| 2 | Infrastructure error: missing caps, missing git.original, bad permissions, null bytes |
-| 4 | WORKSPACE-CI contract failure |
-| (real git exit) | Forwarded from `/usr/bin/git.original` |
-
-### Audit log
-
-Every blocked operation is logged to `~/.workspace-guard.log`:
-
-```
-<timestamp>|<cwd>|git <command>|<reason>|uid=<uid>
-```
-
-Home directory resolved via `nix::unistd::User::from_uid(getuid())` (safe
-wrapper over `getpwuid_r(3)`) using the real UID (not spoofable `$HOME`).
-Block messages written to both stderr and `/dev/tty`.
-
-### Git guard residual risk
-
-- `safe.bareRepository=explicit` not yet globally enforced (needs git >= 2.39).
-- Pre-existing `.git/config` payloads not stripped (lock is locking-only).
-- Sub-microsecond re-lock window after `git.original` exits.
-
-Detail: [SPEC-GIT-GUARD-HARDENING.md](docs/specifications/SPEC-GIT-GUARD-HARDENING.md)
-
-## System-Binary Lockdown + Sandbox + Audit
-
-The same guard pattern extends to the rest of the Linux SUID and
-file-capability surface. This program is shell-driven (bash + YAML, no
-Rust) and covers four pillars:
-
-1. **Discover.** `scripts/sync-gtfobins` fetches the canonical GTFOBins
-   catalog + konstruktoid SUID list on every run, parses them, and matches
-   against the live host (`/proc`, `getcap`). The baseline matches whatever
-   binaries are actually installed, not a static snapshot. Emits
-   `res/suid-baseline.yaml`, `res/fcap-baseline.yaml`, `res/cve-catalog.yaml`.
-2. **Contain.** Every exploitable binary gets a row in the policy rule
-   catalog (`config/binary-policy-rules.yaml`, host-independent, full
-   GTFOBins coverage) plus a cap allowlist
-   (`config/cap-allowlist.yaml`) that throttles `CAP_*` to a documented
-   minimum. Disposition is **contain-via-guard only**: binaries are never
-   purged. The real binary is moved to `<path>.real` and the guard installed
-   at the public path, mirroring the git guard's relocate-and-replace step.
-   `chattr +i` on `.real` so the swap cannot be undone.
-3. **Sandbox.** A per-host profile picker (`config/sandbox/profiles.yaml`)
-   selects one of rootless Landlock+seccomp (~5 ms), gVisor runsc (~200 ms),
-   or Firecracker microVM (~125 ms). The resolved profile is materialised
-   into a systemd unit (`config/systemd/workspace-agent@.service`) that drops
-   ambient caps, sets `NoNewPrivileges`, applies a seccomp syscall allowlist,
-   and pins private network + mount namespaces.
-4. **Audit.** `config/auditd/99-workspace-guard.rules` watches every
-   `execve` of a guarded binary. AIDE
-   (`config/aide/aide-workspace-guard.conf`) file-integrity-checks the `.real`
-   binaries and identity files. `scripts/suid-drift-check` compares the live
-   SUID/CAP surface against the committed baselines and exits non-zero on any
-   CRITICAL delta.
-
-### End-to-end flow
-
-```
-scripts/sync-gtfobins                 <-- fetch canonical GTFOBins + konstruktoid
-   |  parses gtfobins-*.html, matches against /proc + getcap
-   v
-res/suid-baseline.yaml  +  res/fcap-baseline.yaml  +  res/cve-catalog.yaml
-   |
-   v
-make install-lock       <-- (root) mv binary -> binary.real, install guard, chattr +i
-make install-auditd     <-- (root) deploy auditd + AIDE rules
-make install-sandbox    <-- (root) install systemd unit + sandbox profile
-make drift-check        <-- (any user) verify live surface == baseline
-make sandbox-check      <-- (any user) resolve per-host profile
-```
-
-### Reading order
-
-1. [docs/RESEARCH-SYSTEM-BINARIES.md](docs/RESEARCH-SYSTEM-BINARIES.md): CVE
-   catalog (9 CVEs: PwnKit, Baron Samedit, sudo `--chroot`, overlayfs, Copy
-   Fail), sandbox isolation tiers, defense-in-depth map.
-2. [docs/requirements/REQ-SANDBOX.md](docs/requirements/REQ-SANDBOX.md):
-   contract IDs `REQ-LCK-*`, `REQ-CAP-*`, `REQ-SBX-*`, `REQ-AUD-*`,
-   `REQ-SYNC-*`, `REQ-MAKE-*`, `REQ-ART-*`.
-3. [docs/specifications/SPEC-BINARY-LOCK.md](docs/specifications/SPEC-BINARY-LOCK.md):
-   contain-via-guard procedure, full-GTFOBins policy rules catalog, generic
-   guard binary architecture, and codegen boundary.
-4. [docs/specifications/SPEC-CAP-THROTTLE.md](docs/specifications/SPEC-CAP-THROTTLE.md):
-   capability allowlist + systemd `CapabilityBoundingSet`.
-5. [docs/specifications/SPEC-AUDIT.md](docs/specifications/SPEC-AUDIT.md):
-   auditd execve watch rules + AIDE/FIM + drift detection.
-6. [docs/specifications/SPEC-SANDBOX.md](docs/specifications/SPEC-SANDBOX.md):
-   profile picker + seccomp/Landlock/namespaces + systemd unit template.
-7. [docs/requirements/REQ-HOME-LOCK.md](docs/requirements/REQ-HOME-LOCK.md):
-   home-dir lock requirements (`REQ-HL-*`) protecting `~/.gitconfig`,
-   `~/.ssh/config`, `~/.ssh/authorized_keys` against direct file writes.
-8. [docs/specifications/SPEC-HOME-LOCK.md](docs/specifications/SPEC-HOME-LOCK.md):
-   install / uninstall / drift-check scripts; `absolute_file_paths` YAML block.
-9. [docs/references/SOURCES.md](docs/references/SOURCES.md): offline-cached
-   canonical sources (GTFOBins, konstruktoid, NVD, sudo advisories, man7).
-
-### Why the layers
-
-The research in `docs/RESEARCH-SYSTEM-BINARIES.md` surfaces a split: some
-CVEs are arg/env validation bugs the guard stops at the gate (PwnKit env-var
-handling, Baron Samedit arg-parse, sudo `--chroot`); others are in-binary
-memory corruptions or kernel-layer flaws (overlayfs, Copy Fail) that no SUID
-guard can reach. The layered design reflects that split: the guard is the
-**first** control, the sandbox profile is the **post-exploit** control, and
-auditd is the **detection** control. Removing any single layer re-opens the
-class of CVEs that layer was responsible for.
-
-## Program III: Home-Dir Lock
-
-The git guard (Program I) intercepts the `git config` command so
-`core.hooksPath` cannot be set via the command line. The `.git/config`
-lock inside each repo closes the per-repo vector. NEITHER covers the
-**file-write** vector: a non-root agent can open `~/.gitconfig` with a
-text-editor subprocess and write `core.hooksPath = /tmp/evil`
-directly. Because every git invocation for that user reads
-`~/.gitconfig`, this compromises every repo on the host without raising an alert.
-This exact attack happened in WORKSPACE-CI; it persisted across
-reboots and produced no drift alert.
-
-Program III closes the vector by chowning the user-global git and SSH
-config files to `root:root` so a non-root agent (without
-`CAP_DAC_OVERRIDE`) cannot open them for write. Editing is still
-possible via `sudoedit <path>` (runs the editor as root, subject to
-the git guard's `git config core.hooksPath` BLOCK inside that
-editor shell).
-
-Three scripts, all data-driven from
-`config/guard_locked_paths.yaml` (the `absolute_file_paths:` block):
-
-- `scripts/install-home-lock`: root-only chown + chmod, create-missing,
-  idempotent, writes `res/home-lock-state.yaml`.
-- `scripts/uninstall-home-lock`: root-only restore-from-state, clears
-  state on completion.
-- `scripts/home-drift-check`: report-only (no auto-repair, audit
-  trail preserved); exits 1 on CRITICAL.
-
-`make install-home-lock` / `make uninstall-home-lock` / `make home-drift-check`.
-See [docs/specifications/SPEC-HOME-LOCK.md](docs/specifications/SPEC-HOME-LOCK.md)
-(§4) and [docs/requirements/REQ-HOME-LOCK.md](docs/requirements/REQ-HOME-LOCK.md)
-(`REQ-HL-*`).
-
-Coverage: 34 bats tests (`tests/shell/12-home-lock.bats`) + 3 Rust
-consistency tests (`home_lock_paths_parses`,
-`home_lock_paths_are_absolute_or_tilde_prefixed`,
-`home_lock_modes_are_in_valid_range`). `build.rs` also bakes the
-`absolute_file_paths` block into `LOCKED_ABSOLUTE_FILE_PATHS` so future
-in-binary enforcement (e.g. an `lstat` guard at start-up) does not
-require a runtime config read.
-
-## Deployment
-
-### Git guard
+Mandatory on agent dev hosts where agents run `git`.
 
 ```bash
-# From the WORKSPACE-CI repo root (as root):
-sudo make pre-req            # Full install: deps + build guard + install + hooks
-
-# Or step-by-step from WORKSPACE-GUARD:
 make build-guard
-sudo make install-guard      # setcap, dpkg-divert, chattr, apt hook, alt-binary restriction
-make check-guard
-sudo make install-hooks      # Hooks live in root-owned .git/hooks/ (capability mode)
+sudo make install-guard-host-exec
+make check-guard-host-exec
+sudo make install-hooks    # after git install, via WORKSPACE-CI
 ```
 
-install-guard steps: relocate `git` to `git.original` (0700), install guard
-(0755), `setcap` 5 caps, `dpkg-divert`, `chattr +i`, apt post-invoke hook,
-restrict `/snap/bin/git` + `/usr/local/bin/git`, create
-`/var/log/workspace-guard/`.
-
-Uninstall: `sudo make uninstall-guard`.
-
-Full procedure: [SPEC-GIT-GUARD-INSTALL.md](docs/specifications/SPEC-GIT-GUARD-INSTALL.md)
-
-### System-binary lockdown
+Optional on the same host (explicit steps, no meta-target):
 
 ```bash
-scripts/sync-gtfobins                    # fetch + parse + emit baselines (any user)
-make sync-gtfobins-verify               # verify canonical-source SHA-256
-sudo make install-lock                   # (root) apply binary lock baselines
-sudo make install-auditd                 # (root) deploy auditd + AIDE rules
-sudo make install-sandbox                # (root) install systemd unit + sandbox profile
-make drift-check                         # verify live surface == baseline
-make sandbox-check                       # resolve per-host sandbox profile
-make gitleaks-ignore-regen               # refresh .gitleaksignore for docs/references/
+sudo make install-lock       # Program II-A
+sudo make install-auditd     # Program II-C
+sudo make install-home-lock  # Program III
 ```
 
-## Development
+- Host binding: `config/guard-host-profiles.yaml` maps `hostname -s` → class;
+  install refuses unknown hosts and class mismatches.
+- `make install-guard` and `make check-guard` **hard-fail** - use suffixed
+  targets only.
+- WORKSPACE-CI entry point: `bootstrap-workspace-guard install-host-exec`.
+- Uninstall: maintenance only (`sudo make uninstall-guard`).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph host [Framework dev host]
+    P1[Program I - Git Guard]
+    P2A[Program II-A - Binary lock]
+    P2B[Program II-B - Sandbox]
+    P3[Program III - Home lock]
+  end
+
+  P1 --> S1["/usr/bin/git"]
+  S1 --> E1["workspace-guard → git.original"]
+
+  P2A --> S2["GTFOBins SUID/CAP paths"]
+  S2 --> E2["workspace-binary-guard → path.real"]
+
+  P2B --> S3["workspace-agent@.service"]
+  S3 --> E3["Landlock / seccomp / namespaces"]
+
+  P3 --> S4["~/.gitconfig · ~/.ssh/*"]
+  S4 --> E4["root-owned identity files"]
+
+  subgraph ops [Program II - Operations]
+    P2C[II-C Audit]
+    P2D[II-D Inventory]
+  end
+
+  P2C --> D1["auditd · AIDE · drift-check"]
+  P2D --> D2["sync-gtfobins → res/*-baseline.yaml"]
+```
+
+| Program | Surface | Enforcement | Install |
+|---------|---------|-------------|---------|
+| **I - Git Guard** | `/usr/bin/git` | Argument, config-key, and env policy; exec of `git.original` | `make install-guard-host-exec` |
+| **II-A - Binary lock** | SUID and file-cap binaries (GTFOBins catalog) | Per-binary policy; non-root denied at public path | `make install-lock` |
+| **II-B - Sandbox** | `workspace-agent@` services | Profile-based isolation (Landlock, seccomp, namespaces) | `make install-sandbox` |
+| **II-C - Audit** | Guarded exec paths, baselines | auditd, AIDE, drift reports | `make install-auditd` |
+| **II-D - Inventory** | Live host vs catalog | GTFOBins sync → `res/*-baseline.yaml` | `make sync-gtfobins` |
+| **III - Home lock** | `~/.gitconfig`, `~/.ssh/*`, `/root/*` | Root-owned paths; non-root cannot write | `make install-home-lock` |
+
+Programs compose on one host. Each has its own install target, spec, and
+operational lifecycle.
+
+---
+
+## Program I - Git Guard
+
+Replaces `/usr/bin/git` with a Rust guard that enforces repository policy before
+delegating to `/usr/bin/git.original` (root-only, mode `0700`).
+
+**Capability delivery:** see [Role in the framework](#role-in-the-framework).
+File capabilities on `/usr/bin/git` (host-exec class). Installed class recorded at
+`/usr/lib/workspace-guard/deployment-class` - source of truth for drift, check,
+and runtime. Per-host binding: `config/guard-host-profiles.yaml` (`hostname -s` →
+class).
+
+**Policy scope:**
+
+- Subcommand blocks: `reset`, `clean`, `restore`, `rebase`, `gc`, and related
+  destructive operations; sudo-gated `checkout` / `submodule`; flag gates on
+  `--hard`, `--no-verify`, force push, `--amend`, protected-branch pull/merge.
+- 96 glob patterns on `-c` / `--config` / `--config-env` keys.
+- Closed child environment (18-variable allow-list, hardcoded `PATH`).
+- Per-repo `.git/` ownership lock in host-exec mode.
+- WORKSPACE-CI quality contract on commit and push.
+
+**Exit codes:** `0` success · `1` policy block · `2` infrastructure · `4` contract
+failure. Blocks are audited to `~/.workspace-guard.log` and `/dev/tty`.
+
+| Document | Content |
+|----------|---------|
+| [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md) | Policy engine, rules, config keys |
+| [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) | Install classes, host profiles, drift |
+| [SPEC-GIT-GUARD-HARDENING](docs/specifications/SPEC-GIT-GUARD-HARDENING.md) | `.git` lock, threat model |
+| [ROOT-ONLY-MODE](docs/ROOT-ONLY-MODE.md) | Root-only build for CI / containers |
+
+---
+
+## Program II - System surface
+
+### Binary lock
+
+`workspace-binary-guard` is built once and installed at each contained path.
+At runtime it resolves policy from `basename(argv[0])`, validates arguments and
+environment, and either blocks or `execve()`s `<path>.real`. Policies are
+compile-time baked from `config/binary-policy-rules.yaml` and
+`res/binary-lock.yaml` (generated by sync).
+
+Typical dispositions: `deny-non-root`, `deny-all-non-root`, `arg-validate` (e.g.
+`sudo`, `passwd`), `pass-through` for vetted helpers.
+
+### Sandbox
+
+Per-host profile from `config/sandbox/profiles.yaml` materialises into
+`workspace-agent@.service`: capability bounding set, `NoNewPrivileges`, seccomp,
+and optional Landlock / gVisor / Firecracker tiers for long-running agents.
+
+### Audit and inventory
+
+- `make sync-gtfobins` - fetch GTFOBins and konstruktoid, match live SUID/CAP
+  surface, emit `res/suid-baseline.yaml`, `res/fcap-baseline.yaml`,
+  `res/binary-lock.yaml`, `res/cve-catalog.yaml`.
+- `make drift-check` - compare live host to committed baselines; exit non-zero on
+  CRITICAL drift.
+- `make install-auditd` - deploy `config/auditd/99-workspace-guard.rules` and
+  AIDE configuration.
+
+| Document | Content |
+|----------|---------|
+| [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md) | Contain-via-guard procedure |
+| [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md) | Profiles and systemd unit |
+| [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md) | auditd and integrity monitoring |
+| [SPEC-CAP-THROTTLE](docs/specifications/SPEC-CAP-THROTTLE.md) | Capability allowlists |
+| [RESEARCH-SYSTEM-BINARIES](docs/RESEARCH-SYSTEM-BINARIES.md) | CVE catalog and layer rationale |
+
+---
+
+## Program III - Home directory lock
+
+Locks user-global git and SSH identity files by transferring ownership to root.
+Agents cannot open `~/.gitconfig` or `~/.ssh/authorized_keys` for write; per-repo
+`.git/config` is already covered by Program I. Paths and modes are defined in
+`config/guard_locked_paths.yaml`.
 
 ```bash
-cargo build                                              # Debug (capability-mode)
-cargo build --no-default-features --features root-only   # Debug (root-only)
-cargo build --release                                    # Release (opt-level=z, LTO, abort-on-panic, stripped)
-make test                                                # Unit + integration (integration gated by euid)
-make test-podman-quick                                   # Podman Tiers 0-2 (Linux gate on Darwin)
-make sync-gtfobins-linux                                 # Regenerate res/ baselines (Linux container)
-make lint                                                # Format check + strict clippy (both feature combos)
-make test                                                # Full workspace test suite
+sudo make install-home-lock
+make home-drift-check
 ```
 
-On **macOS**, native `cargo test`/`clippy` are unavailable (Linux-only kernel
-features). Bootstrap once with `make init` (reads `config/system-deps.yaml`),
-then use the Podman harness:
+| Document | Content |
+|----------|---------|
+| [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md) | Install, uninstall, drift |
+| [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md) | Requirements (`REQ-HL-*`) |
+
+---
+
+## Building and testing
+
+Crate and harness development for WORKSPACE-GUARD itself (not guard install on
+dev hosts - see [Host install](#host-install)).
 
 ```bash
-make init               # system deps + Rust + Podman (yaml-driven)
-make test-podman        # Tiers 0-3 (dev sanity check; Podman container)
-make test-podman-quick  # Tiers 0-2 (skip privileged capability E2E)
+make check-push        # fmt, clippy, check, cargo test
+make test-shell        # bats suite (scripts and helpers)
+make test-podman-quick # Podman tiers 0-2
+make test-podman       # + Tier 3 host-exec E2E
+make test-qemu-guest   # Authoritative host-exec E2E in QEMU guest
 ```
-
-**Authoritative cap/kernel sign-off** runs inside a WORKSPACE-VM QEMU guest, not Podman:
 
 ```bash
-# From WORKSPACE-VM root (after make install-qemu):
-make test-vm-guard
-
-# Or inside an already-provisioned QEMU guest:
-sudo bash /opt/workspace/projects/WORKSPACE-GUARD/scripts/qemu/e2e-guest.sh
+cargo build --release
+cargo build --release --no-default-features --features root-only
+make lint
+make sync-gtfobins-linux   # Regenerate baselines inside Linux container
 ```
 
-See [docs/specifications/SPEC-PODMAN-TESTING.md](docs/specifications/SPEC-PODMAN-TESTING.md) (dev harness)
-and [WORKSPACE-VM REQ-VM-HYPERVISOR](../../docs/REQ-VM-HYPERVISOR.md) §FR-7 (authoritative gate).
+macOS hosts use `make init` and the Podman harness for Linux-kernel tests.
+See [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md).
 
-## Security Properties
+---
 
-### Shared (both programs)
+## Requirements and specifications
 
-1. **Compiled enforcement**: Guard logic is opaque binary, not readable or
-   editable (git guard). System-binary lockdown uses shell guards with
-   `chattr +i` on `.real` files for tamper resistance.
-2. **File capabilities**: granular, `NO_NEW_PRIVS`-safe. Git guard uses
-   `SETPCAP+CHOWN+DAC_OVERRIDE+FOWNER+FSETID+ep`. `CAP_SETPCAP` lets the
-   forked child raise `DAC_OVERRIDE` into Ambient; on VFS-cap kernels it only
-   modifies your own process cap sets.
-3. **Ambient cap for child only**: the guard keeps Ambient empty at startup.
-   Policy-check sub-calls get no caps (least-privilege). The authorized child
-   raises `CAP_DAC_OVERRIDE` into Ambient before exec'ing the real binary;
-   the cap dies with the child on exit.
-4. **`dpkg-divert` protected** (git guard): `apt` cannot overwrite the guard.
-5. **Allow-list environment**: closed surface, future variables cannot sneak
-   through. `PATH` hardcoded; `safe.directory=*` injected (git guard).
-6. **Resource limits**: `RLIMIT_NOFILE=256` prevents fd exhaustion;
-   `RLIMIT_CORE=0` prevents memory disclosure from crashes.
-7. **Null byte rejection**: any `\0` in arguments exits immediately (git guard).
-8. **Audit trail**: every block logged via real-UID home lookup (not
-   spoofable `$HOME`) + `/dev/tty`.
-9. **Release hardening**: `opt-level=z, lto=true, codegen-units=1,
-   panic=abort, strip=true` for smallest attack surface.
-10. **Log symlink protection**: `O_NOFOLLOW` on log opens prevents symlink
-    attacks. **HOME spoofing prevention**: `User::from_uid(getuid())` (safe
-    `getpwuid_r` wrapper), never `$HOME`. **2-second subprocess timeout**
-    (git guard).
+| Area | Requirements | Specifications |
+|------|--------------|----------------|
+| Git guard | [REQ-GIT-GUARD](docs/requirements/REQ-GIT-GUARD.md) | [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md), [SPEC-GIT-GUARD-IMPL](docs/specifications/SPEC-GIT-GUARD-IMPL.md), [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) |
+| System surface | [REQ-SANDBOX](docs/requirements/REQ-SANDBOX.md) | [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md), [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md), [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md) |
+| Home lock | [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md) | [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md) |
+| Podman / QEMU testing | [REQ-PODMAN-TESTING](docs/requirements/REQ-PODMAN-TESTING.md) | [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md) |
 
-### Git guard only
+Canonical reference sources: [docs/references/SOURCES.md](docs/references/SOURCES.md).
 
-11. **`.git` ownership lock**: recursive `chown` to `root:root` on every
-    invocation, closing 11 local-RCE vectors. See
-    [SPEC-GIT-GUARD-HARDENING.md §11.7](docs/specifications/SPEC-GIT-GUARD-HARDENING.md).
-12. **Hardened rev-parse resolution**: the guard's own `git.original
-    rev-parse` runs under forced env that disables `core.fsmonitor`,
-    `core.hooksPath`, and system config.
-13. **Background push detection**: `/proc/self/stat` check prevents CI/daemon
-    pushes without interactive oversight.
-
-### System-binary lockdown only
-
-14. **Sandbox profile isolation**: rootless Landlock+seccomp / gVisor /
-    Firecracker microVM, selected per-host. Post-exploit containment for
-    CVEs the gate cannot stop (memory corruption, kernel flaws).
-15. **Capability throttle**: `config/cap-allowlist.yaml` drops
-    file capabilities to a documented minimum per binary; systemd
-    `CapabilityBoundingSet` enforces at the unit level.
-16. **Continuous drift detection**: `scripts/suid-drift-check` compares live
-    SUID/CAP surface to committed baselines; auditd watches every `execve`
-    of guarded binaries; AIDE file-integrity-checks `.real` + identity files.
-
-Full threat model (mitigated and not-mitigated):
-[SPEC-GIT-GUARD-IMPL.md §9](docs/specifications/SPEC-GIT-GUARD-IMPL.md)
+---
 
 ## License
 

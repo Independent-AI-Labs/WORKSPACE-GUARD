@@ -85,8 +85,8 @@ exemptions:
 }
 
 #[test]
-fn raise_child_dac_override_does_not_panic() {
-    raise_child_dac_override();
+fn raise_child_dac_override_returns_without_panic() {
+    let _ = raise_child_dac_override();
 }
 
 #[cfg(feature = "capability-mode")]
@@ -136,6 +136,46 @@ fn is_guard_binary_detects_sentinel() {
     assert!(!is_guard_binary(&empty));
 }
 
+#[cfg(feature = "capability-mode")]
+#[test]
+fn host_exec_cap_loan_after_inheritable_promotion() {
+    if raise_ambient_caps().is_err() {
+        return;
+    }
+    // SAFETY: libc::fork is exercised here intentionally so the test suite
+    // hits the exact same async-signal-safe FFI the production exec path
+    // uses (see src/exec.rs). No allocations occur between fork and exit
+    // in the child branch.
+    let pid = unsafe { libc::fork() };
+    assert!(pid >= 0, "fork should succeed");
+    if pid == 0 {
+        let exit_code = match raise_child_dac_override() {
+            Ok(()) => {
+                let ambient = caps::read(None, caps::CapSet::Ambient).unwrap_or_default();
+                if ambient.contains(&caps::Capability::CAP_DAC_OVERRIDE) {
+                    0
+                } else {
+                    1
+                }
+            }
+            Err(_) => 2,
+        };
+        // SAFETY: libc::_exit is the only async-signal-safe exit path; using
+        // std::process::exit here would run Drop handlers and could deadlock
+        // on malloc locks held across fork. nix has no _exit wrapper.
+        unsafe {
+            libc::_exit(exit_code);
+        }
+    } else {
+        match nix::sys::wait::waitpid(nix::unistd::Pid::from_raw(pid), None) {
+            Ok(nix::sys::wait::WaitStatus::Exited(_, code)) => {
+                assert_eq!(code, 0, "CAP_DAC_OVERRIDE must be in Ambient after loan");
+            }
+            other => panic!("unexpected wait status: {:?}", other),
+        }
+    }
+}
+
 #[test]
 fn fork_child_clears_and_exits() {
     // SAFETY: libc::fork is exercised here intentionally so the test suite
@@ -145,7 +185,7 @@ fn fork_child_clears_and_exits() {
     let pid = unsafe { libc::fork() };
     assert!(pid >= 0, "fork should succeed");
     if pid == 0 {
-        raise_child_dac_override();
+        let _ = raise_child_dac_override();
         // SAFETY: libc::_exit is the only async-signal-safe exit path; using
         // std::process::exit here would run Drop handlers and could deadlock
         // on malloc locks held across fork. nix has no _exit wrapper.

@@ -123,13 +123,13 @@ _setup_emit() {
         | grep -q 'deny-non-root'
 }
 
-@test "binary-lock-yaml: git gets deny-non-root (sudo tag, not sudo binary)" {
+@test "binary-lock-yaml: git gets deny-all-non-root (git-bypass explicit rule)" {
     _setup_emit
     emit_binary_lock
     local lk="$FAKE_REPO/res/binary-lock.yaml"
-    # git is sudo-tagged but NOT the sudo binary; falls to sudo tag catch-all.
+    # git has an explicit name rule in binary-policy-rules.yaml (git-bypass).
     awk '/^  - name: "git"/{c=1} c && /policy:/{print; exit}' "$lk" \
-        | grep -q 'deny-non-root'
+        | grep -q 'deny-all-non-root'
 }
 
 @test "binary-lock-yaml: live-surface binaries get non-null path" {

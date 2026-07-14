@@ -30,7 +30,7 @@ fi
 
 cd "${_GUARD_ROOT}"
 
-echo "==> QEMU guest: capability-mode E2E (authoritative)..."
-bash scripts/podman/e2e-capability.sh
+echo "==> QEMU guest: host-exec E2E (authoritative)..."
+bash scripts/podman/e2e-host-exec.sh
 
 echo "==> QEMU guest E2E complete"

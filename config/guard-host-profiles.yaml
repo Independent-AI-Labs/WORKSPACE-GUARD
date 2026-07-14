@@ -1,0 +1,6 @@
+# Hostname (short name from `hostname -s`) → git deployment class.
+# Install targets assert the current host matches before mutating the system.
+profiles:
+  vm-ws: host-exec
+  # Podman Tier 3 / QEMU E2E set this hostname before install-host-exec.
+  workspace-guard-test: host-exec

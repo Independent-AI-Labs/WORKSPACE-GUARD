@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tier 3: capability-mode E2E in a privileged container.
+# Tier 3: host-exec E2E in a privileged container.
 set -euo pipefail
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,6 +33,6 @@ echo "==> Tier 3: running privileged E2E in $_IMAGE"
     -v "${_PROJECTS_ROOT}:/projects:rw" \
     -w /projects/WORKSPACE-GUARD \
     "$_IMAGE" \
-    bash scripts/podman/e2e-capability.sh
+    bash scripts/podman/e2e-host-exec.sh
 
 echo "==> Tier 3 complete"

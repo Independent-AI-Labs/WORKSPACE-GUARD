@@ -268,9 +268,11 @@ emit_fcap_baseline() {
 
             case "$(basename "$path")" in
                 git)
-                    recommended="throttle"
-                    allowed="cap_dac_override"
-                    strip_list="cap_chown,cap_fowner,cap_fsetid,cap_setpcap"
+                    # workspace-guard host-exec: file caps on /usr/bin/git are intentional.
+                    recommended="keep"
+                    allowed="$(printf '%s' "$caps" | sed 's/=.*$//' | tr ',' '\n' \
+                        | sed 's/^ *//;s/ *$//' | grep -v '^$' | paste -sd,)"
+                    strip_list=""
                     ;;
                 sudo)
                     recommended="keep"

@@ -28,6 +28,7 @@ discover_caps_live() {
     fi
     if ! getcap -r / 2>"$DEVNULL" | awk '
         function excluded(p) {
+            if (ENVIRON["GUARD_DECODE_CAPS_INCLUDE_FIXTURE_PATHS"] != "") return 0
             if (p ~ /^\/home\//)                                  return 1
             if (p ~ /^\/var\/lib\/(containers|docker|flatpak)\//) return 1
             if (p ~ /^\/(tmp|var\/tmp|proc|sys|dev|run)\//)       return 1
