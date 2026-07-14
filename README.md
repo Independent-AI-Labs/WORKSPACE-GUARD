@@ -29,23 +29,38 @@ unavailable. **host-exec** delivers caps at file exec via `setcap` on
 
 ## Host install
 
-Mandatory on agent dev hosts where agents run `git`.
+**Recommended** on agent dev hosts: one-shot stack (admin break-glass, fleet
+user hardening, git/SSH identity, guard programs). See
+[SPEC-HOST-PROVISION](docs/specifications/SPEC-HOST-PROVISION.md).
+
+```bash
+cp config/host-provision.yaml.example config/host-provision.yaml
+cp config/home-lock-users.yaml.example config/home-lock-users.yaml
+# edit locally ,  live files are gitignored
+
+sudo make install-host-stack   # provision-host + full guard stack
+make check-guard-host-exec
+sudo make install-hooks        # after git install, via WORKSPACE-CI
+```
+
+Phase 1 prints a one-time **admin** password; phase 2 prompts for it before
+`agent` is removed from `sudo`. Use the `admin` account (not `agent`) for
+operator `sudo` after provision.
+
+Manual steps (when `user_management.enabled: false` or partial install):
 
 ```bash
 make build-guard
 sudo make install-guard-host-exec
-make check-guard-host-exec
-sudo make install-hooks    # after git install, via WORKSPACE-CI
-```
-
-Optional on the same host (explicit steps, no meta-target):
-
-```bash
+sudo make provision-git-identities
+sudo make install-home-lock
 sudo make install-lock       # Program II-A
 sudo make install-auditd     # Program II-C
-sudo make install-home-lock  # Program III
 ```
 
+- When `config/host-provision.yaml` exists with `user_management.enabled: true`,
+  `install-guard-host-exec` **hard-fails** until `provision-host` completes
+  (`/usr/lib/workspace-guard/host-provision.ok`).
 - Host binding: `config/guard-host-profiles.yaml` maps `hostname -s` → class;
   install refuses unknown hosts and class mismatches.
 - `make install-guard` and `make check-guard` **hard-fail** - use suffixed
@@ -94,7 +109,8 @@ flowchart TB
 | **II-B - Sandbox** | `workspace-agent@` services | Profile-based isolation (Landlock, seccomp, namespaces) | `make install-sandbox` |
 | **II-C - Audit** | Guarded exec paths, baselines | auditd, AIDE, drift reports | `make install-auditd` |
 | **II-D - Inventory** | Live host vs catalog | GTFOBins sync → `res/*-baseline.yaml` | `make sync-gtfobins` |
-| **III - Home lock** | `~/.gitconfig`, `~/.ssh/*`, `/root/*` | Root-owned paths; non-root cannot write | `make install-home-lock` |
+| **III - Home lock** | `~user/.gitconfig`, `~user/.ssh/*` (fleet list) | Root-owned paths; non-root cannot write | `make install-host-stack` or `provision-git-identities` + `install-home-lock` |
+| **Host provision** | Admin account, sudo policy, fleet UNIX users | Break-glass admin; agents ∉ `sudo` | `make provision-host` / `make install-host-stack` |
 
 Programs compose on one host. Each has its own install target, spec, and
 operational lifecycle.
@@ -198,8 +214,9 @@ Crate and harness development for WORKSPACE-GUARD itself (not guard install on
 dev hosts - see [Host install](#host-install)).
 
 ```bash
-make check-push        # fmt, clippy, check, cargo test
+make check-push        # fmt, clippy, check, cargo test, host-provision Podman E2E
 make test-shell        # bats suite (scripts and helpers)
+make test-podman-provision # host-provision E2E only (also in check-push on Linux)
 make test-podman-quick # Podman tiers 0-2
 make test-podman       # + Tier 3 host-exec E2E
 make test-qemu-guest   # Authoritative host-exec E2E in QEMU guest
@@ -224,6 +241,7 @@ See [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md).
 | Git guard | [REQ-GIT-GUARD](docs/requirements/REQ-GIT-GUARD.md) | [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md), [SPEC-GIT-GUARD-IMPL](docs/specifications/SPEC-GIT-GUARD-IMPL.md), [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) |
 | System surface | [REQ-SANDBOX](docs/requirements/REQ-SANDBOX.md) | [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md), [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md), [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md) |
 | Home lock | [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md) | [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md) |
+| Host provision | ,  | [SPEC-HOST-PROVISION](docs/specifications/SPEC-HOST-PROVISION.md) |
 | Podman / QEMU testing | [REQ-PODMAN-TESTING](docs/requirements/REQ-PODMAN-TESTING.md) | [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md) |
 
 Canonical reference sources: [docs/references/SOURCES.md](docs/references/SOURCES.md).

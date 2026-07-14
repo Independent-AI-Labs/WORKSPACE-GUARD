@@ -42,6 +42,9 @@ model exercised in Tier 2.
   `../CI/scripts/bootstrap-podman`) and ensure a running Podman Machine.
 - **REQ-POD-003**: On Darwin, the pre-push hook (`ci-check-push`) shall run
   `make test-podman` instead of skipping Linux-only checks.
+- **REQ-POD-003a**: On Linux, the pre-push hook (`ci-check-push`) shall run
+  `make check-push`, which includes `make test-podman-provision` (host-provision
+  phases 0-4 in a privileged Podman container).
 - **REQ-POD-004**: On Darwin, pre-commit hooks for `cargo-fmt`, `cargo-clippy`,
   and `verify-coverage` may remain skipped on the host; Tier 1 inside the
   container covers fmt, clippy, check, and test.
@@ -90,10 +93,12 @@ model exercised in Tier 2.
   `BUILD_MODE=root-only FORCE_ROOT_ONLY=1 GUARD_NONINTERACTIVE=1` and
   `../CI/scripts/bootstrap-workspace-guard install`.
 - **REQ-POD-051**: Tier 2 sanity check tests shall verify: `git status` succeeds in a
-  fresh repo; `git reset --hard` is blocked. Repo identity (`user.email`,
-  `user.name`) shall be configured only via `sudo git config` on the installed
-  guard :  never via `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env injection or
-  non-sudo `git config`.
+  fresh repo; `git reset --hard` is blocked. Tier 2 runs as container root:
+  repo identity may be set via root-local `git config` (operator bootstrap).
+  Agents never configure identity; production agents consume root-locked
+  per-user `~/.gitconfig` (and SSH keys via `git-ssh-wrapper`) per
+  [SPEC-GIT-IDENTITY](../specifications/SPEC-GIT-IDENTITY.md).
+  Harness shall not use `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env injection.
 - **REQ-POD-052**: Tier 2 shall uninstall the guard (`bootstrap-workspace-guard
   uninstall`) before the container exits, leaving no installed guard on the
   host.
@@ -115,7 +120,8 @@ model exercised in Tier 2.
 ### 8. Makefile Targets
 
 - **REQ-POD-070**: The Makefile shall expose: `init`, `init-check`,
-  `test-podman`, `test-podman-quick`. System packages are declared in
+  `test-podman`, `test-podman-quick`, `test-podman-provision`, and `check-push`
+  (the latter includes `test-podman-provision` on Linux). System packages are
   `config/system-deps.yaml` and resolved via `../CI/scripts/install-system-deps`
   (no inline `brew install` / `apt-get` in the Makefile).
 - **REQ-POD-071**: The Makefile shall expose guard delegation targets matching

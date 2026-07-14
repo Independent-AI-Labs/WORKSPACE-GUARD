@@ -1,5 +1,5 @@
-# Rootless profile tunables (Landlock + seccomp + namespaces + cgroups).
-# See docs/specifications/SPEC-SANDBOX.md section 3.
+# Rootless profile tunables ,  passed to Sandlock by workspace-sandbox-launcher.
+# See docs/specifications/SPEC-SANDBOX.md section 5.
 # Values are applied to the systemd unit template at install time
 # (make install-sandbox regenerates config/systemd/workspace-agent@.service).
 #
@@ -11,7 +11,7 @@ pids_max: 256
 io_weight: 50
 net_host: false           # true: keep host network namespace; false: loopback only
 
-# rlimits applied to the child before execve (SPEC-SANDBOX.md section 3.6).
+# rlimits forwarded to Sandlock policy render (SPEC-SANDBOX.md section 5.3).
 rlimits:
   RLIMIT_CORE: 0          # no core dumps
   RLIMIT_NOFILE: 256      # max 256 file descriptors

@@ -1,0 +1,64 @@
+# Framework sandbox policy for workspace-sandbox-launcher.
+# Rendered to engine-specific form at install time:
+#   rootless     -> /etc/workspace-guard/sandlock-policy.json
+#   gvisor       -> OCI bundle under /var/run/workspace-guard/runsc/
+#   firecracker  -> patched firecracker.json per invocation
+#
+# See docs/specifications/SPEC-SANDBOX.md sections 4 and 5.
+
+version: 1
+
+# Workspace root: launcher expands from WORKSPACE_CI_ROOT or cwd.
+workspace_env: WORKSPACE_CI_ROOT
+
+landlock:
+  allow_read:
+    - /etc
+    - /usr
+    - /bin
+    - /sbin
+    - /lib
+    - /lib64
+    - "${WORKSPACE}"
+  allow_write:
+    - "${WORKSPACE}"
+    - /tmp
+  deny:
+    - /dev
+    - /dev/disk
+    - /sys/block
+    - /boot
+    - /root
+    - /root/.ssh
+    - "${HOME}/.ssh"
+
+network:
+  default: none   # override per-profile: rootless.yaml net_host
+
+bind_mounts:
+  - host: /usr/bin/git
+    guest: /usr/bin/git
+    readonly: true
+  - host: "${WORKSPACE}"
+    guest: "${WORKSPACE}"
+    readonly: false
+
+resources:
+  memory_max: 536870912   # 512 MiB ,  overridden by rootless.yaml
+  cpu_quota: 200000
+  pids_max: 256
+  rlimits:
+    RLIMIT_CORE: 0
+    RLIMIT_NOFILE: 256
+    RLIMIT_NPROC: 256
+    RLIMIT_FSIZE: 1073741824
+
+# Optional Sandlock-only extensions (off by default on vm-ws).
+# stages:
+#   - match_argv: ["npm", "install"]
+#     grant_network: true
+#     grant_write: ["${WORKSPACE}/node_modules"]
+# network:
+#   http:
+#     - method: GET
+#       host: registry.npmjs.org

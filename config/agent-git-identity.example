@@ -1,0 +1,8 @@
+# Copy to config/agent-git-identity (gitignored) and edit per host.
+#   cp config/agent-git-identity.example config/agent-git-identity
+# Installed to /usr/lib/workspace-guard/agent-git-identity at guard install.
+# Only user.email and user.name are honored.
+# See: docs/specifications/SPEC-GIT-IDENTITY.md
+
+user.email=agent@example.local
+user.name=Example Agent

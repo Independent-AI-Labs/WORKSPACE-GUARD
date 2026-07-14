@@ -3,6 +3,8 @@
 # Runs inside the Tier 3 container after guard install (as root + agent user).
 set -euo pipefail
 
+DEVNULL=/dev/null
+
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: e2e-policy-matrix.sh requires root" >&2
     exit 1
@@ -13,8 +15,14 @@ tmpdir="$(mktemp -d)"
 chmod 755 "$tmpdir"
 cd "$tmpdir"
 git init -q
-sudo git config user.email "policy-matrix@test.local"
-sudo git config user.name "Policy Matrix"
+if [[ -f /projects/WORKSPACE-GUARD/config/home-lock-users.yaml ]]; then
+    if ! sed -i "s/agent@example.local/policy-matrix@test.local/; s/Example Agent/Policy Matrix/" \
+        /projects/WORKSPACE-GUARD/config/home-lock-users.yaml 2>"$DEVNULL"; then
+        echo "WARN: home-lock-users.yaml sed skipped (optional E2E customization)" >&2
+    fi
+    bash /projects/WORKSPACE-GUARD/scripts/provision-user-git-identity
+    bash /projects/WORKSPACE-GUARD/scripts/install-home-lock
+fi
 chown -R "$_AGENT_USER:$_AGENT_USER" "$tmpdir"
 
 _agent_script="$(mktemp)"

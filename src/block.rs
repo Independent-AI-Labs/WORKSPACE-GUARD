@@ -256,10 +256,7 @@ pub fn check_blocked(
 fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
     let mut cmd = std::process::Command::new(git_path);
     cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
-    crate::apply_safe_directory(&mut cmd);
-    for (k, v) in crate::gitdir::hardened_git_env() {
-        cmd.env(k, v);
-    }
+    crate::agent_identity::apply_agent_hardened_git_env(&mut cmd, false);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }

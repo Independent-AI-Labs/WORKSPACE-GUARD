@@ -260,6 +260,64 @@ fi
 
 If any check fails, the script attempts rollback (§6).
 
+### 5.8 Agent Git Identity (Root-Provisioned)
+
+See [SPEC-GIT-IDENTITY](SPEC-GIT-IDENTITY.md) for the full per-user design.
+**Interim (implemented):** guard install copies local
+`config/agent-git-identity` → `/usr/lib/workspace-guard/agent-git-identity`.
+
+That file is **gitignored** (real emails/names must not land in git). On each
+host, copy the committed example first:
+
+```bash
+cp config/agent-git-identity.example config/agent-git-identity
+# edit user.email and user.name for this host
+```
+
+Same for the fleet user list (planned per-user provision):
+
+```bash
+cp config/home-lock-users.yaml.example config/home-lock-users.yaml
+```
+
+Rules:
+
+- Agents never run `git config` for `user.email` / `user.name` (blocked
+  for non-root).
+- Non-privileged `git.original` exec sets `GIT_CONFIG_GLOBAL=/dev/null`
+  and injects `user.*` from the root-owned identity source via `GIT_CONFIG_*`.
+- Operators with `euid == 0` (`sudo git` as the **admin** break-glass account)
+  keep normal config resolution. Do not rely on `su root` on fleet VMs ,  use
+  the provisioned `admin` user via managed sudoers
+  ([SPEC-HOST-PROVISION](SPEC-HOST-PROVISION.md)).
+
+Bootstrap (once per VM/image, as root):
+
+```bash
+cp config/host-provision.yaml.example config/host-provision.yaml
+cp config/home-lock-users.yaml.example config/home-lock-users.yaml
+# edit locally (gitignored files ,  never commit real emails/names)
+
+sudo make install-host-stack
+```
+
+`install-host-stack` runs `provision-host` (admin account, password gate,
+fleet sudo strip, per-user git/SSH, home-lock) then `install-guard-host-exec`.
+When `user_management.enabled: true`, `install-guard-host-exec` alone is
+**refused** until provision completes.
+
+Legacy per-step bootstrap (still valid when user management is disabled):
+
+```bash
+cp config/home-lock-users.yaml.example config/home-lock-users.yaml
+sudo make provision-git-identities
+sudo make install-home-lock
+sudo make install-guard-host-exec
+```
+
+After bootstrap, agent commits use the provisioned identity with no
+writable git config path.
+
 ---
 
 ## 6. Rollback on Failure

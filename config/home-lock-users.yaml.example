@@ -1,0 +1,11 @@
+# Copy to config/home-lock-users.yaml (gitignored) and edit per host.
+#   cp config/home-lock-users.yaml.example config/home-lock-users.yaml
+# Schema: config/home-lock-users.schema.yaml
+# See: docs/specifications/SPEC-GIT-IDENTITY.md
+
+version: 1
+
+users:
+  - name: agent
+    git_name: "Example Agent"
+    git_email: agent@example.local

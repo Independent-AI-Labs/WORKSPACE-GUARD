@@ -1,0 +1,24 @@
+# Schema for home-lock-users.yaml
+config: home_lock_users
+description: "Fleet UNIX users provisioned with per-user git identity and SSH keys. Live file config/home-lock-users.yaml is gitignored; commit home-lock-users.yaml.example only."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+  - path: users
+    type: list<object>
+    required: true
+    description: "Login users that receive root-provisioned identity and SSH material."
+  - path: users[].name
+    type: string
+    required: true
+    description: "UNIX account name (must exist in /etc/passwd before provision)."
+  - path: users[].git_name
+    type: string
+    required: true
+    description: "git user.name injected by the guard for this account."
+  - path: users[].git_email
+    type: string
+    required: true
+    description: "git user.email injected by the guard for this account."

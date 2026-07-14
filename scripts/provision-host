@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# provision-host: admin break-glass, fleet sudo strip, git/SSH, guard stack.
+# See docs/specifications/SPEC-HOST-PROVISION.md
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+HP_CONFIG="${WORKSPACE_HOST_PROVISION_FILE:-$REPO_ROOT/config/host-provision.yaml}"
+HP_STATE_DIR="${WORKSPACE_GUARD_STATE_DIR:-/usr/lib/workspace-guard}"
+HP_MARKER="$HP_STATE_DIR/host-provision.ok"
+DEVNULL=/dev/null
+
+usage() {
+    cat <<EOF
+Usage: $0 [--dry-run] [--phase N] [--skip-phase5]
+Root-only host bootstrap: admin, sudo policy, identities, guard stack.
+Config: config/host-provision.yaml (copy from .example)
+Make: sudo make provision-host | sudo make install-host-stack
+EOF
+}
+
+DRY_RUN=0
+PHASE_ONLY=""
+SKIP_PHASE5=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        --phase) PHASE_ONLY="${2:?}"; shift 2 ;;
+        --skip-phase5) SKIP_PHASE5=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$(id -u)" != "0" ]]; then
+    echo "ERROR: provision-host needs root" >&2
+    exit 2
+fi
+if [[ ! -f "$HP_CONFIG" ]]; then
+    echo "ERROR: $HP_CONFIG missing" >&2
+    echo "       cp config/host-provision.yaml.example config/host-provision.yaml" >&2
+    exit 2
+fi
+
+export HP_CONFIG HP_REPO_ROOT="$REPO_ROOT"
+# shellcheck source=scripts/lib/host-provision-parse.sh
+source "$LIB_DIR/host-provision-parse.sh" || exit 1
+# shellcheck source=scripts/lib/host-provision-users.sh
+source "$LIB_DIR/host-provision-users.sh" || exit 1
+# shellcheck source=scripts/lib/host-provision-admin.sh
+source "$LIB_DIR/host-provision-admin.sh" || exit 1
+# shellcheck source=scripts/lib/host-provision-sudo.sh
+source "$LIB_DIR/host-provision-sudo.sh" || exit 1
+
+hp_should_run_phase() {
+    local n="$1"
+    [[ -z "$PHASE_ONLY" || "$PHASE_ONLY" == "$n" ]]
+}
+
+hp_write_marker() {
+    local admin="$1" fleet_sha="$2" um="$3"
+    mkdir -p "$HP_STATE_DIR"
+    {
+        echo "admin=$admin"
+        echo "fleet_sha256=$fleet_sha"
+        echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "user_management=$um"
+    } > "$HP_MARKER"
+    chmod 0644 "$HP_MARKER"
+}
+
+ADMIN_NAME="$(hp_admin_name)"
+[[ -z "$ADMIN_NAME" ]] && ADMIN_NAME="admin"
+ADMIN_SHELL="$(hp_parse_field admin.shell)"
+[[ -z "$ADMIN_SHELL" ]] && ADMIN_SHELL="/bin/bash"
+ADMIN_CREATE_HOME="$(hp_parse_field admin.create_home)"
+[[ -z "$ADMIN_CREATE_HOME" ]] && ADMIN_CREATE_HOME="true"
+FLEET_FILE="$(hp_fleet_users_file)"
+FLEET_SHA="$(hp_users_fleet_sha256 "$FLEET_FILE")"
+USER_MGMT=0
+if hp_user_mgmt_enabled; then USER_MGMT=1; fi
+
+ADMIN_NEW=0
+ADMIN_PASSWORD=""
+
+# --- Phase 1: admin break-glass ---
+if hp_should_run_phase 1 && [[ "$USER_MGMT" -eq 1 ]]; then
+    echo "==> Phase 1: admin break-glass ($ADMIN_NAME)"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  DRY-RUN: would ensure admin $ADMIN_NAME with managed sudoers"
+    else
+        if ! hp_admin_exists "$ADMIN_NAME"; then
+            hp_admin_create_account "$ADMIN_NAME" "$ADMIN_SHELL" "$ADMIN_CREATE_HOME"
+            ADMIN_NEW=1
+        fi
+        if [[ "$ADMIN_NEW" -eq 1 ]] || ! hp_admin_has_sudo "$ADMIN_NAME"; then
+            if [[ "$ADMIN_NEW" -eq 1 ]]; then
+                if [[ -n "${WORKSPACE_ADMIN_PASSWORD:-}" ]]; then
+                    ADMIN_PASSWORD="$WORKSPACE_ADMIN_PASSWORD"
+                else
+                    ADMIN_PASSWORD="$(hp_admin_generate_password)"
+                fi
+                hp_admin_set_password "$ADMIN_NAME" "$ADMIN_PASSWORD"
+                hp_admin_print_password_banner "$ADMIN_NAME" "$ADMIN_PASSWORD"
+            fi
+            hp_admin_install_sudoers_dropin "$ADMIN_NAME"
+            echo "  Installed $HP_SUDOERS_ADMIN"
+        else
+            echo "  SKIP: admin $ADMIN_NAME already has sudo"
+        fi
+    fi
+fi
+
+# --- Phase 2: password gate ---
+if hp_should_run_phase 2 && [[ "$USER_MGMT" -eq 1 ]]; then
+    echo "==> Phase 2: admin password gate"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  DRY-RUN: would verify admin password"
+    else
+        entered=""
+        if [[ -n "$ADMIN_PASSWORD" && "${GUARD_NONINTERACTIVE:-}" == "1" ]]; then
+            entered="$ADMIN_PASSWORD"
+        else
+            entered="$(hp_admin_prompt_password "Enter password for $ADMIN_NAME: ")" || exit 1
+        fi
+        if ! hp_admin_verify_password "$ADMIN_NAME" "$entered"; then
+            echo "ERROR: admin password verification failed" >&2
+            exit 1
+        fi
+        echo "  PASS: admin password verified"
+    fi
+fi
+
+# --- Phase 3: fleet hardening ---
+if hp_should_run_phase 3 && [[ "$USER_MGMT" -eq 1 ]]; then
+    echo "==> Phase 3: fleet user hardening"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  DRY-RUN: would ensure fleet users and strip sudo"
+    else
+        if [[ -f "$FLEET_FILE" ]]; then
+            hp_users_ensure_fleet_accounts "$FLEET_FILE"
+            local_user=""
+            while IFS= read -r local_user; do
+                [[ -z "$local_user" ]] && continue
+                [[ "$local_user" == "$ADMIN_NAME" ]] && continue
+                hp_sudo_strip_fleet_from_group "$local_user"
+            done < <(hp_users_list_fleet_names "$FLEET_FILE")
+            hp_sudo_remove_managed_agent_dropin
+            hp_sudo_scan_foreign_grants "$FLEET_FILE"
+        else
+            echo "WARN: fleet file missing: $FLEET_FILE" >&2
+        fi
+    fi
+fi
+
+# --- Phase 4: git / SSH identity ---
+if hp_should_run_phase 4; then
+    echo "==> Phase 4: git / SSH identity"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  DRY-RUN: would provision identities and install-home-lock"
+    else
+        if [[ -f "$FLEET_FILE" ]]; then
+            bash "$SCRIPT_DIR/provision-user-git-identity" --admin-from "$HP_CONFIG"
+        else
+            bash "$SCRIPT_DIR/provision-user-git-identity" --admin-from "$HP_CONFIG" --users-file /dev/null
+        fi
+        bash "$SCRIPT_DIR/install-home-lock"
+    fi
+fi
+
+# --- Phase 5: guard stack ---
+if hp_should_run_phase 5 && [[ "$SKIP_PHASE5" -eq 0 ]]; then
+    echo "==> Phase 5: guard stack"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  DRY-RUN: would build/install guard stack"
+    else
+        if [[ "$USER_MGMT" -eq 1 ]]; then
+            if [[ -f "$FLEET_FILE" ]] && hp_sudo_fleet_user_still_privileged "$FLEET_FILE"; then
+                echo "ERROR: fleet user still in group sudo after phase 3" >&2
+                exit 1
+            fi
+            hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
+        fi
+        if [[ ! -f "$REPO_ROOT/config/agent-git-identity" ]] \
+            && [[ -f "$REPO_ROOT/config/agent-git-identity.example" ]]; then
+            cp "$REPO_ROOT/config/agent-git-identity.example" "$REPO_ROOT/config/agent-git-identity"
+        fi
+        make -C "$REPO_ROOT" build-guard
+        make -C "$REPO_ROOT" install-guard-host-exec
+        install_lock="$(hp_parse_field guard_stack.install_lock)"
+        install_auditd="$(hp_parse_field guard_stack.install_auditd)"
+        if [[ "${install_lock:-true}" == "true" ]]; then
+            if ! make -C "$REPO_ROOT" install-lock; then
+                echo "WARN: install-lock skipped or failed" >&2
+            fi
+        fi
+        if [[ "${install_auditd:-true}" == "true" ]]; then
+            if ! make -C "$REPO_ROOT" install-auditd; then
+                echo "WARN: install-auditd skipped or failed" >&2
+            fi
+        fi
+        if [[ "$USER_MGMT" -eq 1 ]]; then
+            hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"
+        fi
+        echo "==> Host provision complete"
+        [[ -f "$HP_MARKER" ]] && echo "    marker: $HP_MARKER"
+    fi
+fi
+
+echo "------------------------------------------------------------"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "(dry-run: no system changes)"
+fi

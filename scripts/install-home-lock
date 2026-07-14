@@ -36,6 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$REPO_ROOT/config/guard_locked_paths.yaml"
 STATE_FILE="$REPO_ROOT/res/home-lock-state.yaml"
+LIB_DIR="$SCRIPT_DIR/lib"
 # Tests inject a fake passwd file via WORKSPACE_PASSWD_FILE so the
 # script can resolve numeric uid/gid for a non-root $HOME without
 # touching the real /etc/passwd.
@@ -109,20 +110,25 @@ expand_tilde() {
     esac
 }
 
-# Parse the absolute_file_paths block from guard_locked_paths.yaml into
-# a TAB-separated <expanded-path>\t<mode-octal> temp.
+# Parse absolute_file_paths + fleet users into TSV: raw-path, mode, type (file|dir).
 entries_tmp="$(mktemp -t home-lock-entries.XXXXXX)"; register_temp "$entries_tmp"
 awk '
     /^absolute_file_paths:/ { capture=1; next }
     /^[a-z_]+:/ { capture=0 }
     capture && /^  [~"][^:]+:/ {
         line=$0
-        sub(/^ *"/,"",line); sub(/":.*/,"",line)   # key = the path string
+        sub(/^ *"/,"",line); sub(/":.*/,"",line)
         mode=$0; sub(/^.*: /,"",mode); gsub(/[^0-7]/,"",mode)
         sub(/^0+/, "", mode); if (mode == "") mode = "0"
-        if (line && mode) printf "%s\t%s\n", line, mode
+        if (line && mode) printf "%s\t%s\tfile\n", line, mode
     }
-' "$CONFIG" | sort -u > "$entries_tmp"
+' "$CONFIG" > "$entries_tmp"
+if [[ -f "$LIB_DIR/expand-home-lock-users.sh" ]]; then
+    # shellcheck source=scripts/lib/expand-home-lock-users.sh
+    source "$LIB_DIR/expand-home-lock-users.sh" || exit 1
+    expand_home_lock_user_entries
+fi
+sort -u -t $'\t' -k1,1 -o "$entries_tmp" "$entries_tmp"
 total="$(wc -l < "$entries_tmp")"
 if [[ "$total" -eq 0 ]]; then
     echo "ERROR: no absolute_file_paths entries parsed from $CONFIG" >&2
@@ -168,28 +174,37 @@ fi
 # ----------------------------------------------------------------------
 # Per-entry lock.
 # ----------------------------------------------------------------------
-while IFS=$'\t' read -r raw mode; do
+while IFS=$'\t' read -r raw mode entry_type; do
     [[ -z "$raw" ]] && continue
+    entry_type="${entry_type:-file}"
     path="$(expand_tilde "$raw")"
-    echo "---- $path (mode $mode)"
+    echo "---- $path (mode $mode, $entry_type)"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo "  WOULD: mkdir -p parent, touch if missing, chown root:root, chmod $mode"
+        if [[ "$entry_type" == "dir" ]]; then
+            echo "  WOULD: mkdir -p, chown root:root, chmod $mode (directory)"
+        else
+            echo "  WOULD: mkdir -p parent, touch if missing, chown root:root, chmod $mode"
+        fi
         LOCKED=$((LOCKED+1))
         continue
     fi
 
-    parent="$(dirname "$path")"
-    if ! mkdir -p "$parent" 2>"$DEVNULL"; then
-        echo "  FAIL: mkdir -p $parent" >&2
-        FAILED=$((FAILED+1)); continue
-    fi
-
-    # Create-missing: an empty file so an attacker never has a window
-    # between "lock applied" and "file exists". touch is idempotent.
-    if ! touch "$path" 2>"$DEVNULL"; then
-        echo "  FAIL: touch $path" >&2
-        FAILED=$((FAILED+1)); continue
+    if [[ "$entry_type" == "dir" ]]; then
+        if ! mkdir -p "$path" 2>"$DEVNULL"; then
+            echo "  FAIL: mkdir -p $path" >&2
+            FAILED=$((FAILED+1)); continue
+        fi
+    else
+        parent="$(dirname "$path")"
+        if ! mkdir -p "$parent" 2>"$DEVNULL"; then
+            echo "  FAIL: mkdir -p $parent" >&2
+            FAILED=$((FAILED+1)); continue
+        fi
+        if ! touch "$path" 2>"$DEVNULL"; then
+            echo "  FAIL: touch $path" >&2
+            FAILED=$((FAILED+1)); continue
+        fi
     fi
 
     # Capture original owner/mode for the state record so uninstall

@@ -4,6 +4,7 @@ use std::process;
 
 use nix::unistd::geteuid;
 
+mod agent_identity;
 mod args;
 mod block;
 mod config_keys;
@@ -15,20 +16,6 @@ mod gitdir;
 mod gitdir {
     #[allow(dead_code)]
     pub fn lock() {}
-    pub fn hardened_git_env() -> Vec<(&'static str, &'static str)> {
-        vec![
-            ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_GLOBAL", "/dev/null"),
-            ("GIT_CONFIG_SYSTEM", "/dev/null"),
-            ("GIT_CONFIG_COUNT", "3"),
-            ("GIT_CONFIG_KEY_0", "safe.directory"),
-            ("GIT_CONFIG_VALUE_0", "*"),
-            ("GIT_CONFIG_KEY_1", "core.fsmonitor"),
-            ("GIT_CONFIG_VALUE_1", ""),
-            ("GIT_CONFIG_KEY_2", "core.hooksPath"),
-            ("GIT_CONFIG_VALUE_2", ""),
-        ]
-    }
 }
 mod log;
 
@@ -94,9 +81,7 @@ pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
 pub const GIT_ORIGINAL_PATH: &str = "/usr/bin/git.original";
 
 pub fn apply_safe_directory(cmd: &mut std::process::Command) {
-    cmd.env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", "safe.directory")
-        .env("GIT_CONFIG_VALUE_0", "*");
+    agent_identity::apply_agent_hardened_git_env(cmd, false);
 }
 
 pub fn push_safe_directory_env(envp: &mut Vec<std::ffi::CString>) {

@@ -197,7 +197,7 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
 
     envp.push(CString::new(format!("PATH={}", CHILD_PATH)).unwrap());
 
-    crate::push_safe_directory_env(&mut envp);
+    crate::agent_identity::push_agent_hardened_git_env(&mut envp, crate::is_config_privileged());
 
     if sudo {
         for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS

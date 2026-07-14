@@ -1,416 +1,454 @@
-# Specification: Sandbox Stack (Per-Workload Profile Picker)
+# Specification: Sandbox Stack (Standard Engine Integration)
 
-**Date:** 2026-07-08
+**Date:** 2026-07-14
 **Status:** DRAFT
 **Type:** Specification
 **Requirements:** [REQ-SANDBOX](../requirements/REQ-SANDBOX.md)
 **Threat Model:** [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md)
+**Gap analysis:** [GAP-ANALYSIS-HARD-NUKE](../GAP-ANALYSIS-HARD-NUKE.md)
 
 ---
 
-## 1. Architecture Overview
+## 1. Purpose and scope
 
-```
-  User invokes:
-    workspace-sandbox-launcher --profile <name> -- <command> [args...]
-                         |
-                         v
-               Read config/sandbox/profiles.yaml
-                         |
-         +---------------+---------------+
-         |               |               |
-         v               v               v
-    rootless         gvisor         firecracker
-    (Landlock +      (runsc          (microVM,
-     seccomp +       Sentry            KVM, guest
-     namespaces +    intercepts       kernel)
-     cgroups)        syscalls)
-         |               |               |
-         v               v               v
-    PR_SET_NO_NEW_PRIVS  --no-new-privs  (guest kernel
-    seccomp BPF filter   on runsc         enforces)
-    Landlock rules
-    user+mount+net ns
-    cgroup limits
-         |
-         v
-    execve(command)
-    (inside the sandbox)
-```
+Program II-B confines **untrusted agent shell and build commands** (`make`,
+`cargo`, `bash`, `interpreted runtime`, …) before they reach the host kernel or block
+devices. It does **not** replace Programs I, II-A, or III:
 
-The sandbox launcher picks an isolation tier per workload. The three tiers
-are listed in [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md)
-section 4. The user selects via `--profile`; there is no default profile.
+| Program | Role | Stays after sandbox deploy |
+|---------|------|----------------------------|
+| **I ,  Git guard** | Git argv/config/env policy, WORKSPACE-CI contract | Yes ,  runs inside sandbox via bind-mounted `/usr/bin/git` |
+| **II-A ,  Binary lock** | Host SUID/CAP wrappers, CVE arg rules | Yes ,  host defense when launcher is bypassed |
+| **II-B ,  Sandbox** (this spec) | Per-command process isolation | New ,  closes `/dev/sda` class gaps |
+| **III ,  Home lock** | Root-owned `~/.gitconfig`, `~/.ssh/*` | Yes ,  host inode policy outside sandbox |
+
+WORKSPACE-GUARD does **not** implement Landlock, seccomp BPF, namespace
+setup, or a userspace kernel. Those come from **standard OSS engines**.
+This repo ships a thin launcher, YAML policy, and install wiring only.
 
 ---
 
-## 2. Profile Selection
+## 2. Architecture
 
-### 2.1 Command-line interface
+```mermaid
+flowchart TB
+  subgraph agentPath [Agent command path]
+    cmd["make / cargo / bash / interpreted"]
+    launcher["workspace-sandbox-launcher"]
+    cmd --> launcher
+  end
+
+  subgraph engines [OSS engines - do not reimplement]
+    sandlock["Sandlock - rootless"]
+    runsc["gVisor runsc - gvisor"]
+    fc["Firecracker - firecracker"]
+  end
+
+  subgraph policy [WORKSPACE-GUARD policy - this repo]
+    aw["config/sandbox/agent-workspace.yaml"]
+    prof["config/sandbox/profiles.yaml"]
+    tunables["config/sandbox/rootless|gvisor|firecracker.*"]
+  end
+
+  subgraph domain [Domain guards - complementary]
+    git["/usr/bin/git workspace-guard"]
+    lock["install-lock SUID wrappers"]
+    home["install-home-lock"]
+  end
+
+  launcher --> prof
+  launcher --> aw
+  launcher -->|profile rootless| sandlock
+  launcher -->|profile gvisor| runsc
+  launcher -->|profile firecracker| fc
+  sandlock --> workload["execve workload"]
+  runsc --> workload
+  fc --> workload
+  workload -->|git only| git
+```
+
+**Invocation:**
 
 ```
-Usage: workspace-sandbox-launcher --profile <name> -- <command> [args...]
-       workspace-sandbox-launcher --profile auto -- <command> [args...]
+workspace-sandbox-launcher --profile <name|auto> -- <command> [args...]
+```
+
+| Profile | Engine | Binary | License | Cold start |
+|---------|--------|--------|---------|------------|
+| `rootless` | [Sandlock](https://github.com/multikernel/sandlock) | `sandlock` | Apache 2.0 | ~6 ms |
+| `gvisor` | [gVisor](https://github.com/google/gvisor) | `runsc` | Apache 2.0 | ~200 ms |
+| `firecracker` | [Firecracker](https://github.com/firecracker-microvm/firecracker) | `firecracker` | Apache 2.0 | ~125 ms |
+
+Tier selection follows [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md)
+section 4: rootless for routine IDE work; gVisor for untrusted LLM one-shots;
+Firecracker when host compromise cost is catastrophic.
+
+---
+
+## 3. `workspace-sandbox-launcher`
+
+### 3.1 Responsibility
+
+The launcher is a **thin delegator** (target ~200-400 lines Rust or bash).
+It MUST NOT install seccomp filters, Landlock rules, or namespaces itself.
+
+| Launcher duty | Owner |
+|---------------|-------|
+| Parse `--profile` and `--` separator | Launcher |
+| Resolve `auto` via `config/sandbox/profiles.yaml` | Launcher ([scripts/lib/sandbox-profile.sh](../../scripts/lib/sandbox-profile.sh)) |
+| Load `config/sandbox/agent-workspace.yaml` | Launcher |
+| Expand `${WORKSPACE}`, `${HOME}`, `${USER}` in policy paths | Launcher |
+| Translate policy → engine invocation | Launcher |
+| Exec `sandlock` / `runsc` / `firecracker` | Engine |
+| `waitpid`, map exit code, append launch log | Launcher |
+
+Install path: `/usr/local/bin/workspace-sandbox-launcher` (same path referenced
+by [config/systemd/workspace-agent@.service](../../config/systemd/workspace-agent@.service)).
+
+Build target (Makefile): `build-sandbox-launcher` copies or compiles the
+launcher; `install-sandbox` installs unit + launcher + policy files.
+
+### 3.2 CLI
+
+```
+Usage: workspace-sandbox-launcher --profile <name|auto> -- <command> [args...]
 
 Profiles:
-  rootless     Landlock + seccomp + namespaces + cgroups (~5ms cold start)
-  gvisor       gVisor runsc Sentry (~200ms cold start, no host kernel syscall)
-  firecracker  Firecracker microVM with separate guest kernel (~125ms cold start)
+  rootless     Sandlock ,  daily agent commands on shared kernel
+  gvisor       gVisor runsc ,  untrusted / high-risk commands
+  firecracker  Firecracker microVM ,  maximum isolation
+  auto         First match in config/sandbox/profiles.yaml on hostname -s
 ```
 
-### 2.2 Auto-selection (--profile auto)
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | Workload exit 0 |
+| 1-255 | Workload exit code propagated |
+| 2 | Missing/invalid profile, bad CLI, `auto` no match |
+| 3 | Engine or policy setup failed ,  **workload NOT started** |
+| 127 | Required engine binary not found |
 
-If `--profile auto` is passed, the launcher reads
-`config/sandbox/profiles.yaml` and matches the current hostname:
+### 3.3 Fail-closed rule
 
-```yaml
-# config/sandbox/profiles.yaml
-# Maps hostname patterns to sandbox profiles.
-# First match wins.
-
-profiles:
-  - pattern: ".*-agent"
-    profile: rootless
-
-  - pattern: ".*-untrusted"
-    profile: gvisor
-
-  - pattern: ".*-critical"
-    profile: firecracker
-
-  - pattern: ".*"
-    profile: rootless    # catch-all default for auto mode
-```
-
-If no pattern matches, the launcher exits 2 with an error. The user must
-pass an explicit `--profile` for hosts that do not match any pattern.
+If Sandlock, runsc, or Firecracker fails to start, or policy translation
+fails, the launcher exits **3** and does **not** exec the workload
+unconfined. Satisfies REQ-SBX-141.
 
 ---
 
-## 3. Rootless Profile (Landlock + seccomp + namespaces)
+## 4. Policy configuration
 
-### 3.1 Startup sequence
+All framework-specific rules live in YAML under `config/sandbox/`. Engines
+consume translated forms; policy is reviewed in git, not hardcoded in the
+launcher.
+
+### 4.1 `config/sandbox/agent-workspace.yaml`
+
+Host-wide confinement policy. The launcher maps this file to Sandlock policy
+for `rootless`; gVisor/Firecracker use the filesystem and network sections
+for bind mounts and `--network` flags.
+
+See [config/sandbox/agent-workspace.yaml](../../config/sandbox/agent-workspace.yaml).
+
+| Section | Purpose |
+|---------|---------|
+| `landlock.allow_read` | Paths readable inside sandbox |
+| `landlock.allow_write` | Paths writable inside sandbox |
+| `landlock.deny` | Explicit deny (`/dev`, `/sys/block`, `/boot`, …) |
+| `network.default` | `none` \| `host` |
+| `network.http` | Optional Sandlock HTTP ACLs (method/host/path) |
+| `bind_mounts` | Workspace and toolchain paths into gVisor/Firecracker |
+| `resources` | Memory, CPU, pids ,  overrides per-profile tunables |
+
+**Block-device rule (mandatory):** `/dev`, `/sys/block`, and `/dev/disk`
+MUST appear in `landlock.deny`. Sandlock deny-by-default blocks everything
+else not allow-listed, including `/dev/sda` and `/dev/nvme*`.
+
+### 4.2 `config/sandbox/profiles.yaml`
+
+Hostname → profile. First regex match wins. Used only when
+`--profile auto`. Algorithm: [scripts/lib/sandbox-profile.sh](../../scripts/lib/sandbox-profile.sh).
+
+### 4.3 Per-profile tunables
+
+| File | Engine | Contents |
+|------|--------|----------|
+| [config/sandbox/rootless.yaml](../../config/sandbox/rootless.yaml) | Sandlock | memory, CPU, pids, `net_host` → Sandlock network mode |
+| [config/sandbox/gvisor.yaml](../../config/sandbox/gvisor.yaml) | runsc | `platform`, `network`, debug flags |
+| `config/sandbox/firecracker.json` | Firecracker | guest kernel, rootfs, vCPU, memory |
+
+`make install-sandbox` validates that every profile named in `profiles.yaml`
+has a matching tunable file.
+
+---
+
+## 5. Profile: `rootless` (Sandlock)
+
+### 5.1 Principle
+
+The rootless profile **delegates entirely to Sandlock**. WORKSPACE-GUARD
+does not maintain a hand-rolled Landlock/seccomp/namespace implementation.
+
+Sandlock provides (per [references/sandlock-arxiv.html](../references/sandlock-arxiv.html)):
+
+- Landlock filesystem ACLs and deny-by-default paths
+- seccomp-bpf with optional seccomp-user-notify supervisor
+- User, mount, network, PID namespaces
+- `PR_SET_NO_NEW_PRIVS`
+- Optional `policy_fn` for runtime argv-based decisions
+- Optional HTTP-level network ACLs
+- Copy-on-write workspace (BranchFS) for reversible agent writes
+
+REQ-SBX-110 through REQ-SBX-116 are satisfied **by Sandlock** when the
+generated policy includes the workspace template in section 4.1 and the
+CVE syscall set in section 5.3.
+
+### 5.2 Launcher → Sandlock command
 
 ```
-1. fork()
-2. Child: unshare(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWPID)
-3. Child: set PR_SET_NO_NEW_PRIVS
-4. Child: install seccomp-bpf filter (section 3.3)
-5. Child: apply Landlock rules (section 3.4)
-6. Child: set cgroup limits (section 3.5)
-7. Child: set rlimits (section 3.6)
-8. Child: execve(command)
-9. Parent: waitpid() and report exit code
+sandlock run \
+  --policy /etc/workspace-guard/sandlock-policy.json \
+  -- <command> [args...]
 ```
 
-### 3.2 Namespace setup
+At install time the launcher renders
+`/etc/workspace-guard/sandlock-policy.json` from
+`agent-workspace.yaml` + `rootless.yaml`. The render step is the only
+custom code; the enforcement engine is Sandlock.
 
-- **User namespace**: new user namespace. The child maps its UID to 0 inside
-  the namespace but has no host privileges. This is the isolation boundary.
-- **Mount namespace**: new mount namespace with a private root. `/proc` is
-  mounted fresh. Host filesystem is not visible unless explicitly bind-mounted.
-- **Network namespace**: new network namespace with loopback only. No
-  external interfaces unless `--net-host` is passed.
-- **PID namespace**: new PID namespace. The child is PID 1.
+### 5.3 Required Sandlock policy content
 
-### 3.3 Seccomp-bpf filter
+The rendered policy MUST include at minimum:
 
-The seccomp filter uses `SCMP_ACT_ERRNO(EPERM)` for blocked syscalls. The
-filter is applied after `PR_SET_NO_NEW_PRIVS` so SUID binaries inside the
-sandbox cannot re-escalate.
+**Filesystem (Landlock):**
 
-Blocked syscalls:
+| Path | Read | Write |
+|------|------|-------|
+| `/etc` | yes | no |
+| `/etc/shadow`, `/etc/gshadow` | no | no |
+| `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64` | yes | no |
+| `/boot` | no | no |
+| `/root`, `/root/.ssh` | no | no |
+| `${WORKSPACE}` | yes | yes |
+| `/tmp` | yes | yes |
+| `~/.ssh` | no | no |
+| `/dev`, `/sys/block` | no | no |
 
-| Syscall | Blocked because |
+**Syscalls (seccomp):** deny at least the set in REQ-SBX-111 plus
+`socket(AF_ALG)` per REQ-SBX-112. Sandlock's default agent-oriented
+profiles meet this; the render step MUST NOT weaken them.
+
+**Resources:** from `rootless.yaml` ,  `memory_max`, `cpu_quota`, `pids_max`,
+`rlimits` (RLIMIT_CORE=0, RLIMIT_NOFILE=256).
+
+**Network:** loopback only unless `net_host: true` in `rootless.yaml`.
+
+### 5.4 Optional Sandlock features
+
+| Feature | When to enable |
 |---------|----------------|
-| `open_by_handle_at` | Shocker CVE-2014-0038 |
-| `mount`, `mount_setattr`, `umount2`, `pivot_root`, `move_mount`, `open_tree` | overlayfs CVE-2023-0386, mount injection |
-| `ptrace`, `process_vm_readv`, `process_vm_writev` | Process inspection/injection |
-| `bpf`, `perf_event_open`, `fanotify_init`, `userfaultfd` | Kernel observability / write primitives |
-| `io_uring_setup`, `io_uring_enter`, `io_uring_register` | io_uring attack surface |
-| `personality` | Personality flags can disable ASLR |
-| `kexec_load`, `kexec_file_load` | Kernel replacement |
-| `init_module`, `finit_module`, `delete_module`, `create_module` | Kernel modules |
-| `settimeofday`, `clock_settime` | Time manipulation |
+| `policy_fn` / stage hooks | `npm install` then test with tighter network |
+| HTTP ACLs | Restrict agent egress to package registries |
+| COW workspace | Dry-run agent edits before commit to disk |
 
-**AF_ALG socket block** (Copy Fail CVE-2026-31431):
+These are configured in `agent-workspace.yaml` under `stages:` and
+`network.http` when needed. Default vm-ws deploy leaves them off.
 
-The `socket` syscall is filtered with an argument check: if `domain ==
-AF_ALG` (38), return `EPERM`. This is implemented as a seccomp argument
-filter:
+### 5.5 Git guard inside Sandlock
 
-```c
-SCMP_ACT_ERRNO(EPERM), SCMP_SYS(socket),
-  SCMP_A0(SCMP_CMP_EQ, AF_ALG)
-```
+Bind-mount host paths into the Sandlock mount namespace:
 
-All other `socket()` domains are allowed (subject to the namespace having
-no interfaces, so most network operations fail naturally).
+- `/usr/bin/git` (workspace-guard)
+- `/usr/bin/git.original` (mode 0700 ,  visible only if caps allow)
+- Workspace tree
 
-### 3.4 Landlock rules
-
-Landlock restricts file access paths. The rules are:
-
-| Path | Read | Write | Reason |
-|------|------|-------|--------|
-| `/etc` | Y | N | Resolver, nsswitch, config files |
-| `/etc/shadow` | N | N | Password hashes |
-| `/etc/gshadow` | N | N | Group hashes |
-| `/root` | N | N | Root home |
-| `/root/.ssh` | N | N | Root SSH keys |
-| `/usr` | Y | N | System binaries and libraries |
-| `/bin`, `/sbin`, `/lib`, `/lib64` | Y | N | System dirs |
-| `/boot` | N | N | Kernel and boot files |
-| `~/.ssh` | N | N | User SSH keys |
-| Working directory | Y | Y | Agent needs read/write to its workspace |
-| `/tmp` | Y | Y | Temporary files (private tmpfs) |
-
-Landlock is a deny-by-default model: any path not explicitly allowed is
-denied. The rules above are the allow-list; everything else is denied.
-
-### 3.5 Cgroup limits
-
-```ini
-[Service]
-# cgroup v2 unified hierarchy
-MemoryMax=536870912        # 512 MiB
-CPUQuota=200%              # 2 cores (200000/100000)
-TasksMax=256               # max 256 processes
-IOWeight=50               # low block I/O priority
-```
-
-Values are configurable in `config/sandbox/rootless.yaml`:
-
-```yaml
-# config/sandbox/rootless.yaml
-memory_max: 536870912     # bytes
-cpu_quota: 200000          # microseconds per 100000 period (2 cores)
-pids_max: 256
-io_weight: 50
-net_host: false           # allow host network namespace?
-```
-
-### 3.6 Rlimits
-
-```c
-setrlimit(RLIMIT_CORE, 0);       // no core dumps
-setrlimit(RLIMIT_NOFILE, 256);    // max 256 file descriptors
-setrlimit(RLIMIT_NPROC, 256);     // max 256 processes
-setrlimit(RLIMIT_FSIZE, 1073741824);  // max 1 GiB file size
-```
+`git` invocations from inside the sandbox still hit Program I policy.
+Sandlock does not parse git argv.
 
 ---
 
-## 4. gVisor Profile (runsc)
+## 6. Profile: `gvisor` (runsc)
 
-### 4.1 Startup sequence
+### 6.1 Principle
+
+Delegate to `runsc`. No custom Sentry or syscall interception in this repo.
+
+### 6.2 Launcher → runsc command
 
 ```
-1. Pre-check: runsc binary is installed and version matches config
-2. runsc --platform=systrap --network=none run <command>
-   (or --network=host if config/sandbox/gvisor.yaml has net_host: true)
-3. runsc boots the Sentry process which intercepts all syscalls
-4. The workload runs with no direct host kernel syscalls
+runsc \
+  --root=/var/run/workspace-guard/runsc \
+  --platform=<platform> \
+  --network=<network> \
+  --no-new-privs \
+  run \
+  --bundle=<generated-oci-bundle> \
+  -- <command> [args...]
 ```
 
-### 4.2 runsc flags
+`<platform>` and `<network>` come from [config/sandbox/gvisor.yaml](../../config/sandbox/gvisor.yaml).
 
-```yaml
-# config/sandbox/gvisor.yaml
-platform: systrap          # or "ptrace" if systrap is unavailable
-network: none              # or "host"
-debug: false
-strace: false
-profile: false             # CPU profiling
-```
+### 6.3 OCI bundle generation
 
-### 4.3 Security properties
+The launcher generates a minimal OCI bundle per invocation:
 
-- The Sentry intercepts every syscall the workload makes. The host kernel
-  only sees the Sentry's syscalls (read, write, epoll, etc.), not the
-  workload's syscalls.
-- `--no-new-privs` is passed to runsc so `NoNewPrivileges` is enforced.
-- No file capabilities are granted to the workload.
-- The network is isolated (none) or bridged (host) per config.
+- **Root filesystem:** read-only host `/usr` + bind-mount `${WORKSPACE}` rw
+- **Mounts:** same deny intent as section 5.3 ,  no `/dev` block nodes in bundle
+- **Network:** `none` default; `host` only when config allows
+- **Capabilities:** empty set
+- **NoNewPrivileges:** true
 
-### 4.4 Limitations
+REQ-SBX-120 through REQ-SBX-122 satisfied by runsc.
 
-- I/O overhead: 10-30% on syscall-heavy workloads.
-- Not all syscalls are supported (some require platform-specific patches).
-- Does not protect against vulnerabilities in the Sentry itself (but the
-  Sentry surface is much smaller than the full host kernel).
+### 6.4 When to use
+
+Hostname pattern `.*-untrusted` or explicit `--profile gvisor` for
+LLM-generated one-liners, curl-to-bash, or unknown package scripts.
+Not for every `git status` ,  latency cost per [RESEARCH.md](../../RESEARCH.md) §5.2.
 
 ---
 
-## 5. Firecracker Profile (microVM)
+## 7. Profile: `firecracker` (microVM)
 
-### 5.1 Startup sequence
+### 7.1 Principle
+
+Delegate to the Firecracker VMM. No custom VMM code in this repo.
+
+### 7.2 Launcher → Firecracker command
 
 ```
-1. Pre-check: firecracker binary, vmlinux, and rootfs.ext4 exist
-2. Create a TAP device (or use --net=none)
-3. firecracker --no-api --config-file config/sandbox/firecracker.json
-4. Firecracker boots the guest kernel
-5. The workload runs inside the guest with a separate kernel
-6. On exit, the microVM is torn down
+firecracker --no-api --config-file <generated-config.json>
 ```
 
-### 5.2 Configuration
+Base template: `config/sandbox/firecracker.json`. Launcher patches:
 
-```json
-{
-  "boot-source": {
-    "kernel_image_path": "config/sandbox/vmlinux",
-    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off nomodules ro"
-  },
-  "drives": [{
-    "drive_id": "rootfs",
-    "path_on_host": "config/sandbox/rootfs.ext4",
-    "is_root_device": true,
-    "is_read_only": true
-  }],
-  "machine-config": {
-    "vcpu_count": 2,
-    "mem_size_mib": 512
-  },
-  "network-interfaces": []
-}
-```
+- Bind-mount workspace into guest via virtio-fs or pre-built rootfs overlay
+- `vcpu_count`, `mem_size_mib` from `agent-workspace.yaml` `resources`
+- Empty `network-interfaces` unless explicitly enabled
 
-### 5.3 Security properties
+### 7.3 Guest artifacts
 
-- Separate guest kernel: kernel exploits in the host kernel are not
-  reachable from the workload.
-- Read-only root filesystem: the workload cannot modify its own OS image.
-- No network interfaces by default: the workload has no network access
-  unless a TAP device is configured.
-- CPU and memory limits are enforced by the Firecracker VMM.
+| Artifact | Path | Maintained by |
+|----------|------|---------------|
+| Guest kernel | `config/sandbox/vmlinux` | `make fetch-sandbox-artifacts` or host package |
+| Rootfs image | `config/sandbox/rootfs.ext4` | same |
 
-### 5.4 Limitations
+REQ-SBX-130 through REQ-SBX-132 satisfied by Firecracker guest boundary.
 
-- Cold start: ~125ms (faster than gVisor's 200ms because it is a direct
-  KVM boot, not a syscall interceptor).
-- Requires KVM (hardware virtualization). Not available in nested
-  virtualization or some containers.
-- The guest kernel must be maintained and patched separately.
+### 7.4 When to use
+
+Hostname pattern `.*-critical` or operator override. Requires KVM.
+Not for nested virt / macOS hosts.
 
 ---
 
-## 6. Sandbox Audit
+## 8. Deployment surfaces
 
-### 6.1 Launch log
+### 8.1 IDE agent shells (primary ,  `vm-ws`, `host-exec`)
 
-Every sandbox launch is logged to `/var/log/workspace-sandbox.log`:
+Per [PLAN-GUARD-DEPLOYMENT-RECONCILIATION](../PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md):
 
+- Run `make install-guard-host-exec` (Program I).
+- **Do not** rely on `workspace-agent@` for IDE terminals.
+- **Do** wrap agent commands: IDE / MCP / Grok exec hook calls
+  `workspace-sandbox-launcher --profile auto --` before `make`, `cargo`,
+  `bash`, etc.
+
+Git continues to use `/usr/bin/git` directly or inside the sandbox;
+both paths hit the guard.
+
+### 8.2 Systemd long-running agents (`sandbox-service`)
+
+For workloads under `workspace-agent@.service`:
+
+- Run `make install-sandbox` (class `sandbox-service`).
+- Unit [config/systemd/workspace-agent@.service](../../config/systemd/workspace-agent@.service)
+  sets ambient caps for git guard, `PrivateDevices=yes`, seccomp, and
+  `ExecStart=workspace-sandbox-launcher --profile %i --`.
+- Systemd hardening **complements** Sandlock; it does not replace per-command
+  launcher delegation for commands spawned inside the unit.
+
+### 8.3 Install stack
+
+```bash
+make build-guard
+make build-sandbox-launcher
+sudo make install-guard-host-exec      # Program I ,  mandatory on vm-ws
+sudo make install-sandbox              # launcher + unit + policy render ,  IDE hook separate
+# Optional, same host:
+sudo make install-lock                 # Program II-A
+sudo make install-home-lock            # Program III
+sudo make install-auditd               # Program II-C
 ```
-2026-07-08T14:32:01Z|rootless|hostname-agent|pid=12345|cmd=cargo test|exit=0
-2026-07-08T14:33:15Z|gvisor|hostname-untrusted|pid=12367|cmd=bash -c run.sh|exit=1
-```
 
-### 6.2 Failure handling
-
-If the sandbox launcher fails to apply seccomp, Landlock, or namespace
-setup, it exits code 3 and does NOT exec the workload. The workload never
-runs unconfined. This is a hard failure.
-
-```
-FATAL: sandbox setup failed: seccomp filter install returned ENOMEM
-       workload NOT started. Fix the sandbox and re-run.
-```
+Sandlock, runsc, and firecracker binaries come from host packages or
+`make fetch-sandbox-engines` (apt/pinned releases documented in Makefile).
 
 ---
 
-## 7. Systemd Integration
+## 9. Audit and logging
 
-The systemd unit template at `config/systemd/workspace-agent@.service`
-codifies the capability and namespace settings for systemd-managed agent
-workloads:
+Every launch appends one line to `/var/log/workspace-sandbox.log`:
 
-```ini
-# config/systemd/workspace-agent@.service
-[Unit]
-Description=WORKSPACE Agent (%i)
-After=network.target
-
-[Service]
-Type=exec
-
-# Capability throttle (SPEC-CAP-THROTTLE section 6)
-CapabilityBoundingSet=
-NoNewPrivileges=yes
-
-# Address family restriction (AF_ALG block for Copy Fail)
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-
-# Filesystem protection
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-
-# Namespace isolation
-PrivateDevices=yes
-PrivateNetwork=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-ProtectProc=invisible
-RestrictSUIDSGID=yes
-LockPersonality=yes
-RestrictRealtime=yes
-RemoveIPC=yes
-
-# Resource limits
-MemoryMax=512M
-CPUQuota=200%
-TasksMax=256
-LimitCORE=0
-LimitNOFILE=256
-
-# Seccomp ( capaz / systemd seccomp filter )
-SystemCallFilter=~@mount @module @raw-io @debug @chroot @swap @clock @cpu-emulation
-SystemCallFilter=~open_by_handle_at io_uring_setup io_uring_enter io_uring_register
-SystemCallFilter=~personality kexec_load kexec_file_load init_module finit_module delete_module
-SystemCallFilter=~bpf perf_event_open fanotify_init userfaultfd ptrace process_vm_readv process_vm_writev
-
-# The %i instance name maps to the profile
-# (the wrapper script at /usr/local/bin/workspace-agent-wrapper
-# handles the profile selection and calls workspace-sandbox-launcher)
-ExecStart=/usr/local/bin/workspace-sandbox-launcher --profile %i -- 
-
-[Install]
-WantedBy=multi-user.target
+```
+2026-07-14T14:32:01Z|rootless|vm-ws|pid=12345|cmd=cargo test|exit=0
+2026-07-14T14:33:15Z|gvisor|vm-ws-untrusted|pid=12367|cmd=bash -c run.sh|exit=1
 ```
 
----
+Fields: ISO 8601 timestamp, profile, hostname, launcher PID, joined command,
+workload exit code. Satisfies REQ-SBX-140.
 
-## 8. Defense-in-Depth Map
-
-This spec implements the sandbox row of the defense-in-depth map from
-[RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md) section 5:
-
-| Vector | Rootless | gVisor | Firecracker |
-|--------|----------|--------|-------------|
-| Copy Fail (AF_ALG) | seccomp blocks `socket(AF_ALG)` | Sentry (no host syscall) | separate kernel |
-| Shocker (open_by_handle_at) | seccomp blocks syscall + cap drop | Sentry | separate kernel |
-| nftables (CAP_NET_ADMIN) | cap drop (bounding set empty) | no net_admin in runsc | no net in guest |
-| overlayfs (mount) | seccomp blocks `mount` + `mount_setattr` | Sentry | separate kernel |
-| Page-cache corruption (splice) | seccomp blocks `AF_ALG` | no host syscall | separate kernel |
-| ptrace re-entry | seccomp blocks `ptrace` + `NoNewPrivileges` | Sentry | separate kernel |
-| SUID re-escalation | `PR_SET_NO_NEW_PRIVS` | `--no-new-privs` | guest kernel |
-| ESP6 (CAP_NET_RAW) | cap drop (bounding set empty) | no net_raw in runsc | no raw in guest |
+Program I continues to log blocks to `~/.workspace-guard.log` independently.
 
 ---
 
-## 9. References
+## 10. Defense-in-depth map
 
-1. [references/sandlock-arxiv.html](../references/sandlock-arxiv.html): Sandlock rootless sandbox design
-2. [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md) section 4: sandbox isolation tiers
-3. [REQ-SANDBOX](../requirements/REQ-SANDBOX.md) section 3: REQ-SBX-* requirements
-4. [SPEC-CAP-THROTTLE](SPEC-CAP-THROTTLE.md) section 6: systemd CapabilityBoundingSet
-5. [SPEC-AUDIT](SPEC-AUDIT.md): auditd and drift detection
-6. [SPEC-HOME-LOCK](SPEC-HOME-LOCK.md): home-dir chown lock (closes the
-   direct-file-write vector that bypasses the `git config` command
-   intercept)
+Sandbox row from [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md) section 5.
+Engine column shows **who enforces**, not WORKSPACE-GUARD code.
+
+| Vector | rootless (Sandlock) | gvisor (runsc) | firecracker |
+|--------|---------------------|----------------|-------------|
+| Copy Fail (AF_ALG) | seccomp | Sentry | guest kernel |
+| Shocker (`open_by_handle_at`) | seccomp | Sentry | guest kernel |
+| nftables (CAP_NET_ADMIN) | no caps in child | Sentry | no guest net |
+| overlayfs (mount) | seccomp | Sentry | guest kernel |
+| Block device write (`/dev/sda`) | Landlock deny `/dev` | no device in bundle | no host `/dev` |
+| ptrace re-entry | seccomp + NNP | Sentry | guest kernel |
+| SUID re-escalation | NNP | `--no-new-privs` | guest kernel |
+| ESP6 (CAP_NET_RAW) | no caps | Sentry | no raw in guest |
+
+Rows marked N for binary-lock in the research matrix stay covered by
+Program II-A on the host. Rows for git abuse stay covered by Program I
+inside the sandbox.
+
+---
+
+## 11. What this spec does not build
+
+| Former plan | Replacement |
+|-------------|-------------|
+| Hand-rolled Landlock in Rust | Sandlock |
+| Hand-rolled seccomp BPF | Sandlock |
+| Hand-rolled namespace setup | Sandlock |
+| Custom userspace kernel | gVisor runsc |
+| Custom VMM | Firecracker |
+| Git argv/config policy in sandbox | Program I (unchanged) |
+| Host SUID wrappers | Program II-A (unchanged) |
+| `~/.gitconfig` chown | Program III (unchanged) |
+
+---
+
+## 12. References
+
+1. Sandlock ,  [references/sandlock-arxiv.html](../references/sandlock-arxiv.html);
+   source https://github.com/multikernel/sandlock (Apache 2.0)
+2. gVisor ,  https://github.com/google/gvisor (Apache 2.0)
+3. Firecracker ,  https://github.com/firecracker-microvm/firecracker (Apache 2.0)
+4. [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md) section 4 ,  tier selection
+5. [REQ-SANDBOX](../requirements/REQ-SANDBOX.md) ,  REQ-SBX-* (rootless reqs met via Sandlock)
+6. [SPEC-CAP-THROTTLE](SPEC-CAP-THROTTLE.md) section 6 ,  systemd bounding set
+7. [SPEC-GIT-GUARD](SPEC-GIT-GUARD.md) ,  Program I (complementary)
+8. [SPEC-BINARY-LOCK](SPEC-BINARY-LOCK.md) ,  Program II-A (complementary)
+9. [SPEC-HOME-LOCK](SPEC-HOME-LOCK.md) ,  Program III (complementary)
+10. [GAP-ANALYSIS-HARD-NUKE](../GAP-ANALYSIS-HARD-NUKE.md) ,  incident-driven gaps

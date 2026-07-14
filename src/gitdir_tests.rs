@@ -23,12 +23,14 @@ fn cpath_rejects_nul_byte() {
 
 #[test]
 fn hardened_git_env_contains_key_overrides() {
-    let env = hardened_git_env();
-    assert!(env.iter().any(|(k, _)| *k == "GIT_CONFIG_NOSYSTEM"));
-    assert!(env.iter().any(|(k, _)| *k == "GIT_CONFIG_KEY_1"));
+    let env = crate::agent_identity::hardened_git_env_pairs(false);
+    assert!(env.iter().any(|(k, _)| k == "GIT_CONFIG_NOSYSTEM"));
     assert!(env
         .iter()
-        .any(|(k, v)| *k == "GIT_CONFIG_VALUE_1" && v.is_empty()));
+        .any(|(k, v)| k == "GIT_CONFIG_KEY_1" && v == "core.fsmonitor"));
+    assert!(env
+        .iter()
+        .any(|(k, v)| k == "GIT_CONFIG_VALUE_1" && v.is_empty()));
 }
 
 #[test]

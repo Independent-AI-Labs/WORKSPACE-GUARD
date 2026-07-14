@@ -16,6 +16,10 @@ name = "workspace-guard"
 path = "src/main.rs"
 
 [[bin]]
+name = "workspace-git-ssh"
+path = "src/git_ssh.rs"
+
+[[bin]]
 name = "workspace-binary-guard"
 path = "src/binary_guard.rs"
 required-features = ["binary-guard"]

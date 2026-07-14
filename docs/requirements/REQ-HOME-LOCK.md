@@ -27,8 +27,9 @@ baseline covers files outside `.git/`.
 The home-dir lock closes that vector by chowning the user-controlled
 git and SSH config files outside the repo tree to `root:root` with a
 tight mode, so a non-root agent cannot write to them at all. Editing is
-still possible via `sudoedit <path>` (or `sudo vim <path>`), which does
-not require clearing the lock because the editor runs as root.
+still possible for operators in a root session (`sudoedit`, `sudo vim`, or
+direct root write), which does not require clearing the lock. AI agents
+never edit these paths.
 
 The threat model and the GTFOBins/cap-lock background are in
 [RESEARCH-SYSTEM-BINARIES](../RESEARCH-SYSTEM-BINARIES.md); the per-repo
@@ -174,8 +175,9 @@ binary lock this complements is in
   non-root AI agent (assuming it has no CAP_DAC_OVERRIDE) SHALL NOT
   be able to modify `~/.gitconfig`, `~/.config/git/config`,
   `~/.gitconfig.local`, `~/.ssh/authorized_keys`, or `~/.ssh/config`
-  directly via a file write. The agent MUST use `sudoedit` /
-  `sudo vim`, which require root (or a sudoers entry).
+  directly via a file write. Agents never edit these paths. Operators
+  change them from a root session only (SSH/su, `sudoedit`, or
+  equivalent operator channel).
 
 - **REQ-HL-401**: The lock shall NOT break ssh key authentication:
   private keys remain user-owned mode 0600 and `~/.ssh` remains
@@ -184,11 +186,11 @@ binary lock this complements is in
 - **REQ-HL-402**: The lock shall NOT break interactive shells:
   rc files remain user-owned.
 
-- **REQ-HL-403**: The lock shall NOT break `git config --global`
-  for legitimate operators: a root operator (or one with a sudoers
-  rule for `sudoedit`) can still edit `~/.gitconfig` via the
-  `sudoedit` channel. The git guard's `git config core.hooksPath`
-  BLOCK still applies inside the editor shell.
+- **REQ-HL-403**: The lock shall NOT break legitimate operator
+  maintenance: a root operator can still edit `~/.gitconfig` from a
+  root session. Agents never use `git config --global` or edit locked
+  home paths. The git guard's `git config core.hooksPath` BLOCK still
+  applies inside any non-root git invocation.
 
 ---
 

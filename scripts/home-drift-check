@@ -25,8 +25,11 @@
 
 set -euo pipefail
 
+DEVNULL=/dev/null
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
 RES_DIR="$REPO_ROOT/res"
 STATE_FILE="$RES_DIR/home-lock-state.yaml"
 DRIFT_REPORT="$RES_DIR/home-drift-report.yaml"
@@ -114,6 +117,29 @@ while IFS=$'\t' read -r path emode; do
         log "$msg"; gather "$path" "mode-changed" "$cls" "expected=$emode actual=$cur_mode"
     fi
 done < "$entries_tmp"
+
+# Rogue user-owned private keys under ~/.ssh (fabrication bypass).
+if [[ -f "$LIB_DIR/expand-home-lock-users.sh" ]]; then
+    # shellcheck source=scripts/lib/expand-home-lock-users.sh
+    source "$LIB_DIR/expand-home-lock-users.sh" || exit 1
+    while IFS= read -r user; do
+        [[ -z "$user" ]] && continue
+        home="$(getent passwd "$user" | awk -F: '{print $6}')"
+        [[ -z "$home" || ! -d "$home/.ssh" ]] && continue
+        shopt -s nullglob
+        for key in "$home/.ssh"/id_*; do
+            [[ -f "$key" ]] || continue
+            cur_uid="$(stat -c '%u' "$key" 2>"$DEVNULL")" || cur_uid="?"
+            if [[ "$cur_uid" != "0" ]]; then
+                CRITICAL=$((CRITICAL+1))
+                msg="CRITICAL: rogue user-owned SSH key $key (uid=$cur_uid)"
+                log "$msg"
+                gather "$key" "rogue-ssh-key" "CRITICAL" "uid=$cur_uid"
+            fi
+        done
+        shopt -u nullglob
+    done < <(list_home_lock_usernames)
+fi
 
 {
     echo ""

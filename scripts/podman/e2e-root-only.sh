@@ -38,10 +38,9 @@ tmpdir="$(mktemp -d)"
 chmod 755 "$tmpdir"
 cd "$tmpdir"
 git init -q
-# ALWAYS: sudo-gated identity keys require `sudo git config` (AT_SECURE).
-# Never GIT_AUTHOR_* env injection or plain git config.
-sudo git config user.email "podman-root-only@test.local"
-sudo git config user.name "Podman Root-Only"
+# Root session (euid 0): local repo config is operator bootstrap, not agent workflow.
+git config user.email "podman-root-only@test.local"
+git config user.name "Podman Root-Only"
 echo "test" > file.txt
 git add file.txt
 git commit -q -m "init"

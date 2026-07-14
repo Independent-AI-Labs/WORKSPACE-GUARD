@@ -265,19 +265,8 @@ fn lock_tree(path: &Path, git_dir: &Path) {
 
 fn resolve_git_dir() -> Option<PathBuf> {
     let mut cmd = Command::new(GIT_ORIGINAL_PATH);
-    cmd.env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_CONFIG_COUNT", "3")
-        .env("GIT_CONFIG_KEY_0", "safe.directory")
-        .env("GIT_CONFIG_VALUE_0", "*")
-        .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
-        .env("GIT_CONFIG_VALUE_1", "")
-        .env("GIT_CONFIG_KEY_2", "core.hooksPath")
-        .env("GIT_CONFIG_VALUE_2", "");
+    cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
+    crate::agent_identity::apply_agent_hardened_git_env(&mut cmd, false);
     let out = cmd
         .args(["rev-parse", "--absolute-git-dir"])
         .output()
@@ -380,24 +369,6 @@ fn lchown_root(path: &Path) -> std::io::Result<()> {
 fn chmod(path: &Path, mode: u32) -> std::io::Result<()> {
     let perms = fs::Permissions::from_mode(mode);
     fs::set_permissions(path, perms)
-}
-
-/// Return the hardened env overrides that neutralise `.git/config` payloads
-/// for the duration of a policy-check git.original sub-call. Used by
-/// `block.rs git_cmd()` to inject these into its subprocess.
-pub fn hardened_git_env() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("GIT_CONFIG_NOSYSTEM", "1"),
-        ("GIT_CONFIG_GLOBAL", "/dev/null"),
-        ("GIT_CONFIG_SYSTEM", "/dev/null"),
-        ("GIT_CONFIG_COUNT", "3"),
-        ("GIT_CONFIG_KEY_0", "safe.directory"),
-        ("GIT_CONFIG_VALUE_0", "*"),
-        ("GIT_CONFIG_KEY_1", "core.fsmonitor"),
-        ("GIT_CONFIG_VALUE_1", ""),
-        ("GIT_CONFIG_KEY_2", "core.hooksPath"),
-        ("GIT_CONFIG_VALUE_2", ""),
-    ]
 }
 
 #[cfg(test)]

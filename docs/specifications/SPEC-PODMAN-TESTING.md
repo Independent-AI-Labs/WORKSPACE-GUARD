@@ -160,17 +160,20 @@ Install:
 bash /projects/CI/scripts/bootstrap-workspace-guard install
 ```
 
-sanity check (fresh repo). Sudo-gated identity keys (`user.email`, `user.name`) **must**
-be set via `sudo git config` (AT_SECURE on the guard wrapper). Env-var injection
-(`GIT_AUTHOR_*`, etc.) and plain `git config` without sudo are never valid in
-harness or production sanity check paths.
+sanity check (fresh repo). Tier 2 runs as container root: repo identity may be
+set with root-local `git config` (operator bootstrap). Tier 3 runs
+`provision-host` (admin break-glass, agent sudo strip, per-user git/SSH,
+home-lock, guard stack) before agent tests. Guard injects `GIT_CONFIG_*` from
+locked `~/.gitconfig`.
+Agents never run `git config` for `user.*`. Env-var injection
+(`GIT_AUTHOR_*`, etc.) is never valid in harness or production paths.
 
 ```bash
 tmpdir=$(mktemp -d)
 cd "$tmpdir"
 git init -q
-sudo git config user.email "podman@test.local"
-sudo git config user.name "Podman Test"
+git config user.email "podman@test.local"
+git config user.name "Podman Test"
 echo test > file.txt && git add file.txt && git commit -q -m "init"
 git status          # expect success
 git reset --hard    # expect failure (blocked)
@@ -196,16 +199,16 @@ podman run --rm --privileged \
   bash scripts/podman/e2e-capability.sh
 ```
 
-`scripts/podman/e2e-capability.sh`:
+`scripts/podman/e2e-host-exec.sh`:
 
-1. Create `agent` user (uid 1001) if missing.
-2. `export GUARD_NONINTERACTIVE=1`; default capability build.
-3. `bash /projects/CI/scripts/bootstrap-workspace-guard install`
+1. Create `agent` user (uid 1001) if missing; add to `sudo` (simulates fleet misconfig).
+2. Copy `host-provision.yaml` / `home-lock-users.yaml` from `.example`.
+3. `export GUARD_NONINTERACTIVE=1` + `WORKSPACE_ADMIN_PASSWORD`; run `provision-host`
+   (admin break-glass, sudo strip, identities, guard stack).
 4. Verify `getcap /usr/bin/git` includes `cap_setpcap`, `cap_chown`,
    `cap_dac_override`, `cap_fowner`, `cap_fsetid`.
-5. Verify `/usr/bin/git.original` is `0700 root:root`.
-6. As `agent`: same sanity check repo as Tier 2 (`git status` pass,
-   `git reset --hard` blocked).
+5. Verify `agent` ∉ `sudo` and `/usr/lib/workspace-guard/host-provision.ok` exists.
+6. As `agent`: sanity check repo (`git status` pass, `git reset --hard` blocked).
 7. As `agent`: `/usr/bin/git.original` must fail (not executable).
 8. `bash scripts/podman/e2e-policy-matrix.sh` (plumbing, switch, bypass vectors).
 9. `bash /projects/CI/scripts/bootstrap-workspace-guard uninstall`
@@ -236,6 +239,8 @@ init:           bootstrap-homebrew + install-system-deps --install
 init-check:     install-system-deps --check (config/system-deps.yaml)
 test-podman:    init-check + scripts/test-in-podman.sh (all tiers)
 test-podman-quick: init-check + TEST_PODMAN_QUICK=1 + scripts/test-in-podman.sh
+test-podman-provision: init-check + scripts/podman/run-tier3-provision.sh (phases 0-4)
+check-push:     lint + check + test + test-podman-provision (Linux pre-push)
 
 build-guard:      bash ../CI/scripts/bootstrap-workspace-guard build-only
 install-guard:    sudo bash ../CI/scripts/bootstrap-workspace-guard install-only
@@ -250,12 +255,12 @@ ready + base image pull) before Tier 0.
 
 ## 12. Pre-commit Integration
 
-| Hook | Darwin behaviour |
-|------|------------------|
-| `cargo-fmt` | SKIP (Tier 1 covers) |
-| `cargo-clippy` | SKIP (Tier 1 covers) |
-| `ci-check-push` | `make test-podman` |
-| `verify-coverage` | SKIP (Tier 1 `make test`; coverage disabled in thresholds) |
+| Hook | Darwin behaviour | Linux behaviour |
+|------|------------------|-----------------|
+| `cargo-fmt` | SKIP (Tier 1 covers) | `cargo fmt --check` |
+| `cargo-clippy` | SKIP (Tier 1 covers) | `cargo clippy` |
+| `ci-check-push` | `make test-podman` (includes host-provision in Tier 3) | `make check-push` (includes `test-podman-provision`) |
+| `verify-coverage` | SKIP (Tier 1 `make test`; coverage disabled in thresholds) | `ci_verify_coverage` |
 
 ---
 

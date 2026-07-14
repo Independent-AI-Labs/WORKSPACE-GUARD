@@ -177,17 +177,18 @@ test-shell: ## Run the bats shell test suite (NOT gated in check-push).
 	bats tests/shell/
 
 .PHONY: check-push
-check-push: ## Pre-push quality gate: fmt + clippy + check (both feature combos) + tests (both feature combos).
+check-push: ## Pre-push quality gate: fmt + clippy + check + tests + host-provision Podman E2E (Linux).
 	@$(MAKE) lint
 	@$(MAKE) check
 	@$(MAKE) test
+	@$(MAKE) test-podman-provision
 
 # ═══════════════════════════════════════════════════════════════════════
 # Podman test harness (macOS + Linux hosts without native Linux kernel)
 # See docs/specifications/SPEC-PODMAN-TESTING.md
 # ═══════════════════════════════════════════════════════════════════════
 
-.PHONY: test-podman test-podman-quick test-qemu-guest
+.PHONY: test-podman test-podman-quick test-podman-provision test-qemu-guest
 .PHONY: build-guard install-guard install-guard-host-exec uninstall-guard check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
@@ -195,6 +196,9 @@ test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
 
 test-podman-quick: init-check ## Podman harness Tiers 0-2 only (skip capability E2E)
 	TEST_PODMAN_QUICK=1 bash scripts/test-in-podman.sh
+
+test-podman-provision: init-check ## Podman host-provision E2E only (phases 0-4, privileged)
+	bash scripts/podman/run-tier3-provision.sh
 
 test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in guest)
 	bash scripts/qemu/e2e-guest.sh
@@ -315,6 +319,24 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 	fi
 	@test -x scripts/uninstall-lock-runtime && bash scripts/uninstall-lock-runtime \
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
+
+.PHONY: provision-host install-host-stack
+provision-host: ## Full host bootstrap: admin, sudo strip, identities, guard stack (ROOT)
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "ERROR: provision-host needs root: sudo make provision-host" >&2; exit 1; \
+	fi
+	@test -x scripts/provision-host && bash scripts/provision-host \
+		|| { echo "ERROR: scripts/provision-host missing" >&2; exit 1; }
+
+install-host-stack: provision-host ## Alias: provision-host (recommended fleet install)
+
+.PHONY: provision-git-identities
+provision-git-identities: ## Provision per-user gitconfig + SSH keys from config/home-lock-users.yaml (ROOT)
+	@if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: provision-git-identities needs root: sudo make provision-git-identities" >&2; exit 1; \
+	fi
+	@test -x scripts/provision-user-git-identity && bash scripts/provision-user-git-identity \
+		|| { echo "ERROR: scripts/provision-user-git-identity missing" >&2; exit 1; }
 
 .PHONY: install-home-lock
 install-home-lock: ## Lock the absolute_file_paths entries in config/guard_locked_paths.yaml (ROOT)

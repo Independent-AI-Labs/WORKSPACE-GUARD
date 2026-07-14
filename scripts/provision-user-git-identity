@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# provision-user-git-identity: root-only per-user git identity + SSH keys.
+# See docs/specifications/SPEC-GIT-IDENTITY.md
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+USERS_FILE="${WORKSPACE_HOME_LOCK_USERS_FILE:-$REPO_ROOT/config/home-lock-users.yaml}"
+ADMIN_FROM=""
+SSH_KEY_ROOT="${WORKSPACE_GUARD_STATE_DIR:-/usr/lib/workspace-guard}/ssh-keys"
+DEVNULL=/dev/null
+
+usage() {
+    cat <<EOF
+Usage: $0 [--dry-run] [--admin-from PATH] [--users-file PATH]
+Provision per-user .gitconfig, .ssh/config, and ed25519 keys from
+config/home-lock-users.yaml (gitignored; copy from .example first).
+Optional --admin-from config/host-provision.yaml for break-glass admin.
+Then run: sudo make install-home-lock
+EOF
+}
+
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        --admin-from) ADMIN_FROM="${2:?}"; shift 2 ;;
+        --users-file) USERS_FILE="${2:?}"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$(id -u)" != "0" ]]; then
+    echo "ERROR: provision-user-git-identity needs root" >&2
+    exit 2
+fi
+if [[ ! -f "$USERS_FILE" && -z "$ADMIN_FROM" ]]; then
+    echo "ERROR: $USERS_FILE missing and no --admin-from" >&2
+    echo "       cp config/home-lock-users.yaml.example config/home-lock-users.yaml" >&2
+    exit 2
+fi
+if ! command -v ssh-keygen >/dev/null; then
+    echo "ERROR: ssh-keygen not found" >&2
+    exit 2
+fi
+
+parse_users_file() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    awk '
+        BEGIN { n=""; e=""; g="" }
+        /^[[:space:]]*-[[:space:]]*name:/ {
+            if (n != "") print n "\t" g "\t" e
+            v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/["'\'']/, "", v); n=v; g=""; e=""
+        }
+        /^[[:space:]]*git_name:/ {
+            v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/["'\'']/, "", v); g=v
+        }
+        /^[[:space:]]*git_email:/ {
+            v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/["'\'']/, "", v); e=v
+        }
+        END { if (n != "") print n "\t" g "\t" e }
+    ' "$file"
+}
+
+parse_admin_from_host_provision() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    export HP_CONFIG="$file" HP_REPO_ROOT="$REPO_ROOT"
+    # shellcheck source=scripts/lib/host-provision-parse.sh
+    source "$SCRIPT_DIR/lib/host-provision-parse.sh" || return 1
+    local name git_name git_email
+    name="$(hp_admin_name)"
+    git_name="$(hp_parse_field admin.git_name)"
+    git_email="$(hp_parse_field admin.git_email)"
+    [[ -n "$name" && -n "$git_name" && -n "$git_email" ]] && printf '%s\t%s\t%s\n' "$name" "$git_name" "$git_email"
+}
+
+provision_one_user() {
+    local username="$1" git_name="$2" git_email="$3"
+    local home key_dir key_path pub_path
+
+    home="$(getent passwd "$username" | awk -F: '{print $6}')"
+    if [[ -z "$home" ]]; then
+        echo "ERROR: UNIX user $username not found in passwd" >&2
+        return 1
+    fi
+
+    key_dir="$SSH_KEY_ROOT/$username"
+    key_path="$key_dir/id_ed25519"
+    pub_path="$key_path.pub"
+
+    echo "---- $username ($home)"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "  WOULD: ssh-keygen, write .gitconfig, .ssh/config"
+        return 0
+    fi
+
+    mkdir -p "$key_dir" "$home/.ssh"
+    if ! chmod 700 "$home/.ssh" 2>"$DEVNULL"; then
+        echo "WARN: chmod 700 $home/.ssh failed" >&2
+    fi
+
+    if [[ ! -f "$key_path" ]]; then
+        ssh-keygen -t ed25519 -N "" -C "$git_email" -f "$key_path" </dev/null
+    else
+        echo "  SKIP: key exists $key_path"
+    fi
+    chmod 600 "$key_path"
+    chown root:root "$key_path" "$pub_path" 2>"$DEVNULL" || chown root:root "$key_path"
+
+    cat > "$home/.gitconfig" <<EOF
+[user]
+	name = $git_name
+	email = $git_email
+EOF
+
+    cat > "$home/.ssh/config" <<EOF
+Host *
+	IdentitiesOnly yes
+	IdentityFile $key_path
+	StrictHostKeyChecking accept-new
+EOF
+
+    echo "  gitconfig: $home/.gitconfig"
+    echo "  ssh config: $home/.ssh/config"
+    echo "  public key: $pub_path (register on git host)"
+}
+
+provisioned=0
+
+_user_listed_in_fleet_file() {
+    local name="$1" file="$2"
+    [[ -f "$file" ]] || return 1
+    awk -v want="$name" '
+        /^[[:space:]]*-[[:space:]]*name:/ {
+            v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/["'\'']/, "", v)
+            if (v == want) { found=1 }
+        }
+        END { exit !found }
+    ' "$file"
+}
+
+while IFS=$'\t' read -r username git_name git_email; do
+    [[ -z "$username" ]] && continue
+    if [[ -z "$git_name" || -z "$git_email" ]]; then
+        echo "ERROR: user $username missing git_name or git_email in $USERS_FILE" >&2
+        exit 1
+    fi
+    provision_one_user "$username" "$git_name" "$git_email"
+    provisioned=$((provisioned + 1))
+done < <(parse_users_file "$USERS_FILE")
+
+if [[ -n "$ADMIN_FROM" ]]; then
+    while IFS=$'\t' read -r username git_name git_email; do
+        [[ -z "$username" ]] && continue
+        if _user_listed_in_fleet_file "$username" "$USERS_FILE"; then
+            echo "  SKIP admin $username (already in fleet file)"
+            continue
+        fi
+        provision_one_user "$username" "$git_name" "$git_email"
+        provisioned=$((provisioned + 1))
+    done < <(parse_admin_from_host_provision "$ADMIN_FROM")
+fi
+
+echo "------------------------------------------------------------"
+echo "Provisioned $provisioned user(s). Next: sudo make install-home-lock"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "(dry-run: no files written)"
+fi

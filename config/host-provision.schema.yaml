@@ -1,0 +1,43 @@
+# Schema for host-provision.yaml
+config: host_provision
+description: "Host bootstrap: admin break-glass, fleet sudo strip, guard stack. Live file config/host-provision.yaml is gitignored; commit host-provision.yaml.example only."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+  - path: user_management.enabled
+    type: boolean
+    required: true
+    default: true
+    description: "When false, skip admin/sudo phases; install-guard-host-exec gate disabled."
+  - path: admin.name
+    type: string
+    required: true
+    default: admin
+  - path: admin.shell
+    type: string
+    required: false
+    default: /bin/bash
+  - path: admin.create_home
+    type: boolean
+    required: false
+    default: true
+  - path: admin.git_name
+    type: string
+    required: true
+  - path: admin.git_email
+    type: string
+    required: true
+  - path: fleet_users_file
+    type: string
+    required: true
+    default: config/home-lock-users.yaml
+  - path: guard_stack.install_lock
+    type: boolean
+    required: false
+    default: true
+  - path: guard_stack.install_auditd
+    type: boolean
+    required: false
+    default: true

@@ -4,10 +4,10 @@
 # (see docs/specifications/SPEC-SANDBOX.md section 2.2). First match
 # wins; patterns are anchored on the full hostname via `[[ $host =~ $pat ]]`.
 #
-# Profiles (SPEC-SANDBOX.md section 1):
-#   rootless     Landlock + seccomp + namespaces + cgroups (~5ms cold start)
-#   gvisor       gVisor runsc Sentry (~200ms cold start, no host kernel syscall)
-#   firecracker  Firecracker microVM with separate guest kernel (~125ms cold start)
+# Profiles (SPEC-SANDBOX.md section 2):
+#   rootless     Sandlock (Apache 2.0) ,  ~6ms cold start
+#   gvisor       gVisor runsc ,  ~200ms cold start
+#   firecracker  Firecracker microVM ,  ~125ms cold start
 
 profiles:
   - pattern: ".*-agent"

@@ -85,7 +85,7 @@ repos:
   - repo: local
     hooks:
       - id: ci-check-push
-        name: Pre-push Quality Gate (fmt + clippy + check + tests)
+        name: Pre-push Quality Gate (fmt + clippy + check + tests + host-provision E2E)
         entry: "bash -c 'if [ \"$(uname -s)\" = Darwin ]; then make test-podman; else make check-push; fi'"
         language: system
         stages: [pre-push]

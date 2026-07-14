@@ -1,0 +1,22 @@
+# Copy to config/host-provision.yaml (gitignored) and edit per host.
+#   cp config/host-provision.yaml.example config/host-provision.yaml
+# Schema: config/host-provision.schema.yaml
+# See: docs/specifications/SPEC-HOST-PROVISION.md
+
+version: 1
+
+user_management:
+  enabled: true
+
+admin:
+  name: admin
+  shell: /bin/bash
+  create_home: true
+  git_name: "Host Admin"
+  git_email: admin@example.local
+
+fleet_users_file: config/home-lock-users.yaml
+
+guard_stack:
+  install_lock: true
+  install_auditd: true
