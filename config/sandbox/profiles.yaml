@@ -19,5 +19,5 @@ profiles:
   - pattern: ".*-critical"
     profile: firecracker
 
-  - pattern: ".+"
-    profile: rootless    # catch-all default for auto mode (non-empty hostname)
+  - pattern: ".*"
+    profile: rootless    # catch-all default for auto mode

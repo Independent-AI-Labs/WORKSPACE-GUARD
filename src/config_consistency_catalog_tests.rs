@@ -78,7 +78,7 @@ fn sandbox_last_entry_is_catch_all_rootless() {
     let doc = load_yaml("config/sandbox/profiles.yaml");
     let seq = doc.get("profiles").unwrap().as_sequence().unwrap();
     let last = seq.last().expect("profiles non-empty");
-    assert_eq!(last.get("pattern").unwrap().as_str().unwrap(), ".+");
+    assert_eq!(last.get("pattern").unwrap().as_str().unwrap(), ".*");
     assert_eq!(last.get("profile").unwrap().as_str().unwrap(), "rootless");
 }
 
