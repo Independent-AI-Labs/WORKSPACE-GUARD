@@ -54,11 +54,19 @@ GITLEAKS_BIN := $(WORKSPACE_ROOT)/$(BOOT_NAME)/bin/gitleaks
 
 SUDO := $(shell if [ "$$(id -u)" -eq 0 ]; then echo ""; else echo "sudo"; fi)
 
+# =============================================================================
+# Help
+# =============================================================================
+
 .PHONY: help
 help: ## Show this help
 	@echo "WORKSPACE-GUARD Makefile"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# =============================================================================
+# Init & Preflight
+# =============================================================================
 
 .PHONY: init-check
 init-check: ## Check system dependencies (via CI resolver + config/system-deps.yaml)
@@ -91,6 +99,10 @@ preflight: ## Verify required tooling is present
 	@test -f "$(CI_DIR)/scripts/generate-hooks" || { echo "ERROR: WORKSPACE-CI/scripts/generate-hooks missing"; exit 1; }
 	@echo "Preflight OK (WORKSPACE-CI at $(CI_DIR))"
 
+# =============================================================================
+# Installation
+# =============================================================================
+
 .PHONY: install-gitleaks
 install-gitleaks: ## Bootstrap gitleaks binary to ${WORKSPACE_ROOT}/${BOOT_NAME}/bin
 	@mkdir -p "$(dir $(GITLEAKS_BIN))"
@@ -122,6 +134,10 @@ install-hooks: ## Regenerate native git hooks from .pre-commit-config.yaml
 sync: ## Sync dependencies + reinstall hooks
 	@cargo fetch
 	$(MAKE) install-hooks
+
+# =============================================================================
+# Quality Gates
+# =============================================================================
 
 .PHONY: check
 check: ## Run cargo check (all feature combinations)
@@ -178,6 +194,10 @@ test-shell: ## Run the bats shell test suite (NOT gated in check-push).
 	fi
 	bats tests/shell/
 
+# =============================================================================
+# Pre-push Quality Gate
+# =============================================================================
+
 .PHONY: check-push
 check-push: ## Pre-push quality gate: fmt + clippy + check + tests + host-provision Podman E2E (Linux).
 	@$(MAKE) lint
@@ -185,10 +205,11 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + host-provis
 	@$(MAKE) test
 	@$(MAKE) test-podman-provision
 
-# ═══════════════════════════════════════════════════════════════════════
-# Podman test harness (macOS + Linux hosts without native Linux kernel)
+# Podman test harness: macOS + Linux hosts without native Linux kernel.
 # See docs/specifications/SPEC-PODMAN-TESTING.md
-# ═══════════════════════════════════════════════════════════════════════
+# =============================================================================
+# Podman Test Harness
+# =============================================================================
 
 .PHONY: test-podman test-podman-quick test-podman-provision test-qemu-guest
 .PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard purge-guard-state check-guard check-guard-host-exec
@@ -204,6 +225,10 @@ test-podman-provision: init-check ## Podman host-provision E2E only (phases 0-4,
 
 test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in guest)
 	bash scripts/qemu/e2e-guest.sh
+
+# =============================================================================
+# Git Guard
+# =============================================================================
 
 build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
@@ -256,6 +281,10 @@ check-guard: ## REMOVED - use check-guard-host-exec
 check-guard-host-exec: ## Check host-exec git-guard installation status
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
 
+# =============================================================================
+# Build
+# =============================================================================
+
 .PHONY: build
 build: ## Build release binary (default + root-only)
 	cargo build --release
@@ -264,6 +293,10 @@ build: ## Build release binary (default + root-only)
 .PHONY: build-binary-guard
 build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins table)
 	cargo build --release --features binary-guard --bin workspace-binary-guard
+
+# =============================================================================
+# Cleanup & Compliance
+# =============================================================================
 
 .PHONY: clean
 clean: ## Clean build artifacts
@@ -277,18 +310,15 @@ clippy: ## Run cargo clippy
 compliance: ## Run the WORKSPACE-CI compliance audit on this repo
 	bash $(CI_DIR)/scripts/compliance-report .
 
-# ═══════════════════════════════════════════════════════════════════════
-# Binary Lockdown + Sandbox + Audit program
-# The targets below extend the git-guard pattern to every SUID and
-# capability-bearing binary on the host. See docs/specifications/SPEC-*.md
+# Binary lockdown + sandbox + audit program. Extends git-guard to every
+# SUID and capability-bearing binary on the host. See docs/specifications/SPEC-*.md
 # and docs/requirements/REQ-SANDBOX.md for the program contract.
 #
 # DEVNULL redirect target: referenced as $(DEVNULL) in recipes so the raw
 # Makefile text never spells out the stderr-to-null redirect literal that
 # the error-swallow checker would flag. The expanded recipe still sinks
 # stderr to the null device where that is the intended behaviour.
-
-DEVNULL := /dev/null
+#
 # Flow (end to end):
 #   make sync-gtfobins   -> res/*.yaml baselines (no root needed)
 #   make install-lock    -> contain-via-guard the SUID set (ROOT)
@@ -296,7 +326,11 @@ DEVNULL := /dev/null
 #   make install-sandbox -> install sandbox profile + systemd unit (ROOT)
 #   make drift-check     -> compare live surface to baseline (no root)
 #   make uninstall-lock  -> rollback containment (ROOT)
-# ═══════════════════════════════════════════════════════════════════════
+# =============================================================================
+# Binary Lockdown & Sandbox
+# =============================================================================
+
+DEVNULL := /dev/null
 
 .PHONY: sync-gtfobins sync-gtfobins-linux
 sync-gtfobins: ## Fetch GTFOBins + konstruktoid, scan live SUID/CAP, write res/ baselines + refresh .gitleaksignore
@@ -357,6 +391,10 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 .PHONY: guard-%
 guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	bash scripts/guard-operator.sh '$*'
+
+# =============================================================================
+# Host Provision
+# =============================================================================
 
 .PHONY: provision-host install-host-stack
 provision-host: ## Full host bootstrap: admin, fleet sudo audit, identities, guard stack (ROOT)
