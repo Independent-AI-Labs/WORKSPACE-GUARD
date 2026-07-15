@@ -36,7 +36,6 @@ fn blocked_subcommands_in_config() {
     for sub in [
         "reset",
         "clean",
-        "restore",
         "update-ref",
         "read-tree",
         "symbolic-ref",
@@ -218,6 +217,25 @@ fn switch_discard_changes_blocked() {
 fn checkout_not_in_blocked_list() {
     assert!(!BLOCKED_SUBCOMMANDS.contains(&"checkout"));
     assert!(SUDO_GATED_SUBCOMMANDS.contains(&"checkout"));
+}
+
+#[test]
+fn restore_is_sudo_gated_not_blocked() {
+    assert!(!BLOCKED_SUBCOMMANDS.contains(&"restore"));
+    assert!(SUDO_GATED_SUBCOMMANDS.contains(&"restore"));
+}
+
+#[test]
+fn sudo_gated_restore_allowed_for_root() {
+    let state = empty_state("restore");
+    let argv_os = argv(&["git", "restore", "README.md"]);
+    let root = crate::is_config_privileged();
+    let result = check_blocked(&state, "restore", &argv_os, "/nonexistent-git", None);
+    if root {
+        assert!(result.is_ok(), "root should be allowed: {:?}", result);
+    } else {
+        assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    }
 }
 
 #[test]

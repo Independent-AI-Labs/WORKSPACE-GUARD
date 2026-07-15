@@ -33,7 +33,7 @@
 #                            listed here: chowning them would break ssh and
 #                            interactive shells. Edit via `sudoedit <path>`
 #                            (root owns them; root reads and writes them
-#                            directly, no unlock/relock dance required).
+#                            directly, no lock/relock dance required).
 
 version: 1
 

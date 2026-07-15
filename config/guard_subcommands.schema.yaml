@@ -9,7 +9,7 @@
 #   description:   one-line summary of the config's purpose
 #   fields:        ordered list of field descriptors
 #     path:          dot-notation path; [] suffix denotes a list
-#     type:          yaml | string | integer | boolean | list | list<T> | map | object
+#     type:          yaml | string | integer | boolean | list | list<T> | map
 #     required:      true | false (defaults to false)
 #     default:       default value when omitted (omit if none)
 #     description:   human-readable description of the field

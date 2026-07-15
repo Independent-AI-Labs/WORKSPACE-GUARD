@@ -1,6 +1,6 @@
 # Exhaustive destructive-git attack surface derived from git.git source
 # (command-list.txt, builtin/checkout.c, builtin/restore.c, plumbing builtins).
-# Consumed by src/attack_surface_tests.rs — complements guard_policy_matrix.yaml.
+# Consumed by src/attack_surface_tests.rs; complements guard_policy_matrix.yaml.
 #
 # Schema matches guard_policy_matrix.yaml:
 #   id, argv, expect (blocked|allowed), reason_contains?, sudo_only?
@@ -101,31 +101,31 @@ cases:
     expect: blocked
     reason_contains: force branch switch
 
-  # --- restore.c (blocked subcommand — restore-equivalent) ---
+  # --- restore.c (sudo-gated subcommand) ---
   - id: atk-restore-worktree
     argv: [git, restore, README.md]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: sudo-gated
 
   - id: atk-restore-source-head
     argv: [git, restore, --source=HEAD, README.md]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: sudo-gated
 
   - id: atk-restore-staged
     argv: [git, restore, --staged, README.md]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: sudo-gated
 
   - id: atk-restore-worktree-flag
     argv: [git, restore, --worktree, README.md]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: sudo-gated
 
   - id: atk-restore-dot
     argv: [git, restore, .]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: sudo-gated
 
   # --- reset.c (blocked) ---
   - id: atk-reset-hard
@@ -275,6 +275,11 @@ cases:
     argv: [git, submodule, update, --init]
     expect: blocked
     reason_contains: sudo-gated
+
+  - id: atk-restore-root
+    argv: [git, restore, README.md]
+    expect: allowed
+    sudo_only: true
 
   # --- partial rules ---
   - id: atk-rm-destructive

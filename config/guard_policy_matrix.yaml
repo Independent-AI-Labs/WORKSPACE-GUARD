@@ -27,11 +27,6 @@ cases:
     expect: blocked
     reason_contains: destructive subcommand
 
-  - id: restore-worktree
-    argv: [git, restore, .]
-    expect: blocked
-    reason_contains: destructive subcommand
-
   - id: gc-aggressive
     argv: [git, gc, --prune=now]
     expect: blocked
@@ -161,6 +156,16 @@ cases:
 
   - id: submodule-root-allowed
     argv: [git, submodule, update, --init]
+    expect: allowed
+    sudo_only: true
+
+  - id: restore-non-root
+    argv: [git, restore, README.md]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: restore-root-allowed
+    argv: [git, restore, README.md]
     expect: allowed
     sudo_only: true
 

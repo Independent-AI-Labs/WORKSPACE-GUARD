@@ -16,7 +16,6 @@ version: 1
 blocked:
   - reset
   - clean
-  - restore
   - gc
   - prune
   - bisect
@@ -44,6 +43,7 @@ sudo_gated:
   - submodule
   - checkout
   - switch
+  - restore
 
 partial:
   - rm
