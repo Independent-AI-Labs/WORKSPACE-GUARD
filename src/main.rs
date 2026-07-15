@@ -308,3 +308,7 @@ mod config_consistency_catalog;
 #[cfg(test)]
 #[path = "policy_matrix_tests.rs"]
 mod policy_matrix_tests;
+
+#[cfg(test)]
+#[path = "attack_surface_tests.rs"]
+mod attack_surface_tests;

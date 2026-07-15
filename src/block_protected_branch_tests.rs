@@ -88,7 +88,7 @@ fn protected_branch_pull_ff_only_allowed() {
 
 #[test]
 fn protected_branch_merge_without_ff_only_blocked_for_non_root() {
-    if crate::is_sudo() {
+    if crate::is_config_privileged() {
         return;
     }
     let Some(git) = find_git() else {

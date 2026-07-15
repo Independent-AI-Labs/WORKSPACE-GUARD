@@ -6,7 +6,7 @@
 #   version : schema version (currently 1)
 #   cases   : list of { id, argv, expect, reason_contains?, sudo_only? }
 #     expect: blocked | allowed
-#     sudo_only: when true, case applies only when is_sudo() is true
+#     sudo_only: when true, case applies only when is_config_privileged() (euid 0)
 
 version: 1
 
@@ -113,6 +113,26 @@ cases:
     expect: blocked
     reason_contains: destructive subcommand
 
+  - id: plumbing-checkout-index
+    argv: [git, checkout-index, -f, -a]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-update-index
+    argv: [git, update-index, --force-remove, stale.txt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-merge-file
+    argv: [git, merge-file, base.txt, ours.txt, theirs.txt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: plumbing-merge-index
+    argv: [git, merge-index, -o, HEAD, merge.msg]
+    expect: blocked
+    reason_contains: destructive subcommand
+
   # --- sudo-gated subcommands ---
   - id: checkout-non-root
     argv: [git, checkout, main]
@@ -149,6 +169,31 @@ cases:
     argv: [git, checkout, --, .]
     expect: blocked
     reason_contains: checkout
+
+  - id: checkout-head-file
+    argv: [git, checkout, HEAD, --, README.md]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: checkout-head-file-no-sep
+    argv: [git, checkout, HEAD, README.md]
+    expect: blocked
+    reason_contains: tree-ish path restore
+
+  - id: checkout-single-file
+    argv: [git, checkout, README.md]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: checkout-patch-discard
+    argv: [git, checkout, -p, README.md]
+    expect: blocked
+    reason_contains: patch discard
+
+  - id: checkout-pathspec-from-file
+    argv: [git, checkout, --pathspec-from-file, paths.txt]
+    expect: blocked
+    reason_contains: pathspec-from-file
 
   - id: checkout-discard-force
     argv: [git, checkout, -f, main]

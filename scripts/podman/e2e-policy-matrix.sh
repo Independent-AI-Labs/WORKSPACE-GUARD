@@ -52,6 +52,11 @@ assert_blocked "symbolic-ref" git symbolic-ref HEAD refs/heads/x
 assert_blocked "switch (sudo-gated)" git switch main
 assert_blocked "checkout (sudo-gated)" git checkout main
 assert_blocked "checkout -f" git checkout -f main
+assert_blocked "checkout HEAD -- file" git checkout HEAD -- README.md
+assert_blocked "checkout file" git checkout README.md
+assert_blocked "restore file" git restore README.md
+assert_blocked "checkout-index" git checkout-index -f -a
+assert_blocked "update-index --force-remove" git update-index --force-remove stale.txt
 assert_blocked "switch --discard-changes" git switch --discard-changes
 assert_blocked "switch -C" git switch -C forced-branch
 assert_blocked "stash drop" git stash drop

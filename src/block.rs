@@ -15,8 +15,8 @@ pub fn check_blocked(
     git_path: &str,
     cwd: Option<&str>,
 ) -> Result<(), GuardError> {
-    let sudo = crate::is_sudo();
-    let config_privileged = crate::is_config_privileged();
+    let operator_root = crate::is_config_privileged();
+    let config_privileged = operator_root;
     if subcommand == "config" {
         // Only block git config when setting a dangerous key.
         // Legitimate git config (user.name, user.email, etc.) is allowed.
@@ -57,7 +57,15 @@ pub fn check_blocked(
             }
         }
     } else if SUDO_GATED_SUBCOMMANDS.contains(&subcommand) {
-        if !sudo {
+        // Destructive checkout/switch before sudo-gate: agents must see the
+        // discard reason, not a generic non-root denial.
+        if let Some(kind) = destructive_checkout_or_switch(subcommand, argv_os) {
+            return Err(GuardError::Blocked {
+                reason: format!("git {} ({})", subcommand, kind),
+                hint: "Destructive checkout/switch is forbidden for all users".into(),
+            });
+        }
+        if !operator_root {
             return Err(GuardError::Blocked {
                 reason: format!(
                     "sudo-gated subcommand: git {} (non-root denied)",
@@ -67,12 +75,6 @@ pub fn check_blocked(
                     "Run with sudo: 'sudo git {}' (root-only operation)",
                     subcommand
                 ),
-            });
-        }
-        if let Some(kind) = destructive_checkout_or_switch(subcommand, argv_os) {
-            return Err(GuardError::Blocked {
-                reason: format!("git {} ({})", subcommand, kind),
-                hint: "Destructive checkout/switch is forbidden for all users".into(),
             });
         }
     } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
@@ -92,7 +94,7 @@ pub fn check_blocked(
         });
     }
 
-    if subcommand == "stash" && (state.has_stash_drop || state.has_stash_clear) && !sudo {
+    if subcommand == "stash" && (state.has_stash_drop || state.has_stash_clear) && !operator_root {
         let what = if state.has_stash_drop {
             "drop"
         } else {
@@ -221,7 +223,7 @@ pub fn check_blocked(
     }
 
     if subcommand == "merge"
-        && !sudo
+        && !operator_root
         && is_protected_branch(git_path, cwd)
         && !state.has_ff_only
         && !state.has_merge_abort
@@ -290,6 +292,9 @@ fn is_protected_branch(git_path: &str, cwd: Option<&str>) -> bool {
 
 /// Detect checkout/switch variants that discard worktree state. Blocked even
 /// for root: sudo-gating covers branch switches, not reset-equivalent discards.
+///
+/// Mirrors git checkout.c cases (2) and (3): restore from index/tree-ish and
+/// `checkout <tree-ish>` plus pathspecs (with or without `--`) overwrite the worktree.
 fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Option<&'static str> {
     if subcommand != "checkout" && subcommand != "switch" {
         return None;
@@ -301,6 +306,7 @@ fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Opt
         .collect();
     let mut past_sep = false;
     let mut seen_sub = false;
+    let mut positionals_before_sep: Vec<String> = Vec::new();
     for s in &args {
         if s == "git" {
             continue;
@@ -320,6 +326,15 @@ fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Opt
             if s == "-f" || s == "--force" {
                 return Some("force discard");
             }
+            if s == "-p" || s == "--patch" {
+                return Some("patch discard");
+            }
+            if s == "--pathspec-from-file" || s.starts_with("--pathspec-from-file=") {
+                return Some("pathspec-from-file");
+            }
+            if s == "--pathspec-file-nul" {
+                return Some("pathspec-file-nul");
+            }
             if subcommand == "switch"
                 && (s == "-C"
                     || s == "-B"
@@ -331,14 +346,50 @@ fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Opt
             if subcommand == "checkout" && (s == "-B" || s.starts_with("-B")) {
                 return Some("force branch switch");
             }
-            if !s.starts_with('-') && (s == "." || s == "*") {
-                return Some("pathspec discard");
+            if !s.starts_with('-') {
+                if s == "." || s == "*" {
+                    return Some("pathspec discard");
+                }
+                positionals_before_sep.push(s.clone());
             }
-        } else if s == "." || s == "*" || s.ends_with("/*") {
+        } else if !s.starts_with('-') {
+            // checkout.c case (3): any pathspec after `--` overwrites worktree.
+            return Some("pathspec discard");
+        }
+    }
+
+    if subcommand == "checkout" {
+        if positionals_before_sep.len() >= 2 {
+            // checkout.c case (3) without separator: tree-ish then pathspecs
+            return Some("tree-ish path restore");
+        }
+        if positionals_before_sep.len() == 1 && looks_like_pathspec(&positionals_before_sep[0]) {
+            // checkout.c case (2): restore tracked paths from index.
             return Some("pathspec discard");
         }
     }
     None
+}
+
+/// Heuristic for checkout case (2): single pathspec without `--`.
+/// Branch names like `feature/foo` are allowed; `README.md` and `HEAD:path` are not.
+fn looks_like_pathspec(s: &str) -> bool {
+    if s == "." || s == "*" {
+        return true;
+    }
+    if s.contains(':') {
+        return true;
+    }
+    if s.starts_with('.') && s != ".." {
+        return true;
+    }
+    let last = s.rsplit('/').next().unwrap_or(s);
+    if let Some(dot) = last.find('.') {
+        if dot > 0 && dot < last.len() - 1 {
+            return true;
+        }
+    }
+    false
 }
 
 fn extract_revert_target(argv_os: &[OsString]) -> String {

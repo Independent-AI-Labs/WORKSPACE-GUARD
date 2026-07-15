@@ -1,0 +1,487 @@
+# Exhaustive destructive-git attack surface derived from git.git source
+# (command-list.txt, builtin/checkout.c, builtin/restore.c, plumbing builtins).
+# Consumed by src/attack_surface_tests.rs — complements guard_policy_matrix.yaml.
+#
+# Schema matches guard_policy_matrix.yaml:
+#   id, argv, expect (blocked|allowed), reason_contains?, sudo_only?
+
+version: 1
+
+cases:
+  # --- checkout.c case (3): tree-ish -- pathspec (restore-equivalent) ---
+  - id: atk-checkout-head-readme
+    argv: [git, checkout, HEAD, --, README.md]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-head-ts
+    argv: [git, checkout, HEAD, --, src/lib/project-registry.ts]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-commitish-file
+    argv: [git, checkout, abc1234, --, file.txt]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-head-file-no-sep
+    argv: [git, checkout, HEAD, README.md]
+    expect: blocked
+    reason_contains: tree-ish path restore
+
+  - id: atk-checkout-origin-main-file
+    argv: [git, checkout, origin/main, --, README.md]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-treeish-colon-path
+    argv: [git, checkout, HEAD:README.md]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  # --- checkout.c case (2): restore from index ---
+  - id: atk-checkout-single-file
+    argv: [git, checkout, README.md]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-hidden-file
+    argv: [git, checkout, .env]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-dot-path
+    argv: [git, checkout, .]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-star
+    argv: [git, checkout, "*"]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-nested-path
+    argv: [git, checkout, src/foo/bar.ts]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  # --- checkout.c interactive / pathspec-from-file ---
+  - id: atk-checkout-patch
+    argv: [git, checkout, -p, README.md]
+    expect: blocked
+    reason_contains: patch discard
+
+  - id: atk-checkout-patch-long
+    argv: [git, checkout, --patch, file.txt]
+    expect: blocked
+    reason_contains: patch discard
+
+  - id: atk-checkout-pathspec-from-file
+    argv: [git, checkout, --pathspec-from-file, paths.txt]
+    expect: blocked
+    reason_contains: pathspec-from-file
+
+  - id: atk-checkout-pathspec-file-nul
+    argv: [git, checkout, --pathspec-file-nul, --pathspec-from-file, paths.txt]
+    expect: blocked
+    reason_contains: pathspec-file-nul
+
+  - id: atk-checkout-force
+    argv: [git, checkout, -f, main]
+    expect: blocked
+    reason_contains: force discard
+
+  - id: atk-checkout-force-long
+    argv: [git, checkout, --force, main]
+    expect: blocked
+    reason_contains: force discard
+
+  - id: atk-checkout-force-create
+    argv: [git, checkout, -B, newbranch]
+    expect: blocked
+    reason_contains: force branch switch
+
+  # --- restore.c (blocked subcommand — restore-equivalent) ---
+  - id: atk-restore-worktree
+    argv: [git, restore, README.md]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-restore-source-head
+    argv: [git, restore, --source=HEAD, README.md]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-restore-staged
+    argv: [git, restore, --staged, README.md]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-restore-worktree-flag
+    argv: [git, restore, --worktree, README.md]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-restore-dot
+    argv: [git, restore, .]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- reset.c (blocked) ---
+  - id: atk-reset-hard
+    argv: [git, reset, --hard]
+    expect: blocked
+    reason_contains: --hard
+
+  - id: atk-reset-mixed
+    argv: [git, reset, HEAD~1]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-reset-soft
+    argv: [git, reset, --soft, HEAD~1]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- plumbing: checkout-index.c ---
+  - id: atk-checkout-index-force-all
+    argv: [git, checkout-index, -f, -a]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-checkout-index-force
+    argv: [git, checkout-index, --force, README.md]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-checkout-index-all
+    argv: [git, checkout-index, -a]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- plumbing: update-index.c ---
+  - id: atk-update-index-force-remove
+    argv: [git, update-index, --force-remove, stale.txt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-update-index-refresh
+    argv: [git, update-index, --refresh]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-update-index-add
+    argv: [git, update-index, --add, evil.txt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- plumbing: merge-file.c / merge-index.c ---
+  - id: atk-merge-file
+    argv: [git, merge-file, base.txt, ours.txt, theirs.txt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-merge-index
+    argv: [git, merge-index, -o, HEAD, merge.msg]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- plumbing: read-tree.c (reset-equivalent) ---
+  - id: atk-read-tree-reset
+    argv: [git, read-tree, -u, --reset, HEAD]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-read-tree-merge
+    argv: [git, read-tree, -m, HEAD, branch]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- plumbing: update-ref / symbolic-ref / write-tree / commit-tree ---
+  - id: atk-update-ref
+    argv: [git, update-ref, refs/heads/main, deadbeef]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-symbolic-ref
+    argv: [git, symbolic-ref, HEAD, refs/heads/other]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-write-tree
+    argv: [git, write-tree]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-commit-tree
+    argv: [git, commit-tree, deadbeef, -m, msg]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  # --- clean.c ---
+  - id: atk-clean-force
+    argv: [git, clean, -fd]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-clean-n-flag-blocked
+    argv: [git, clean, -fdn]
+    expect: blocked
+    reason_contains: "-n"
+
+  # --- switch.c destructive ---
+  - id: atk-switch-discard
+    argv: [git, switch, --discard-changes]
+    expect: blocked
+    reason_contains: switch
+
+  - id: atk-switch-force-create
+    argv: [git, switch, -C, forced]
+    expect: blocked
+    reason_contains: switch
+
+  - id: atk-switch-force-recreate
+    argv: [git, switch, -B, forced]
+    expect: blocked
+    reason_contains: switch
+
+  # --- sudo-gated: must require euid 0, not AT_SECURE alone ---
+  - id: atk-checkout-branch-non-root
+    argv: [git, checkout, main]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: atk-checkout-branch-root
+    argv: [git, checkout, main]
+    expect: allowed
+    sudo_only: true
+
+  - id: atk-checkout-slash-branch-non-root
+    argv: [git, checkout, feature/foo]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: atk-checkout-slash-branch-root
+    argv: [git, checkout, feature/foo]
+    expect: allowed
+    sudo_only: true
+
+  - id: atk-switch-non-root
+    argv: [git, switch, main]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  - id: atk-submodule-non-root
+    argv: [git, submodule, update, --init]
+    expect: blocked
+    reason_contains: sudo-gated
+
+  # --- partial rules ---
+  - id: atk-rm-destructive
+    argv: [git, rm, file.txt]
+    expect: blocked
+    reason_contains: git rm
+
+  - id: atk-rm-cached-ok
+    argv: [git, rm, --cached, file.txt]
+    expect: allowed
+
+  - id: atk-stash-drop
+    argv: [git, stash, drop]
+    expect: blocked
+    reason_contains: stash
+
+  - id: atk-stash-clear
+    argv: [git, stash, clear]
+    expect: blocked
+    reason_contains: stash
+
+  - id: atk-push-force
+    argv: [git, push, --force, origin, main]
+    expect: blocked
+    reason_contains: push --force
+
+  - id: atk-push-delete
+    argv: [git, push, --delete, origin, feature]
+    expect: blocked
+    reason_contains: push --delete
+
+  - id: atk-commit-amend
+    argv: [git, commit, --amend]
+    expect: blocked
+    reason_contains: amend
+
+  - id: atk-rebase-destructive
+    argv: [git, rebase, main]
+    expect: blocked
+    reason_contains: rebase
+
+  - id: atk-rebase-continue-ok
+    argv: [git, rebase, --continue]
+    expect: allowed
+
+  - id: atk-branch-force-delete
+    argv: [git, branch, -D, feature]
+    expect: blocked
+    reason_contains: branch -D
+
+  - id: atk-tag-force
+    argv: [git, tag, -f, v1]
+    expect: blocked
+    reason_contains: tag -f
+
+  - id: atk-tag-delete
+    argv: [git, tag, -d, v1]
+    expect: blocked
+    reason_contains: tag -d
+
+  # --- global destructive flags (args.rs) ---
+  - id: atk-global-hard
+    argv: [git, --hard]
+    expect: blocked
+    reason_contains: --hard
+
+  - id: atk-hard-after-separator
+    argv: [git, fetch, --, --hard]
+    expect: blocked
+    reason_contains: --hard
+
+  - id: atk-no-verify
+    argv: [git, commit, --no-verify, -m, x]
+    expect: blocked
+    reason_contains: --no-verify
+
+  - id: atk-upload-pack
+    argv: [git, --upload-pack, /bin/sh, clone, url]
+    expect: blocked
+    reason_contains: upload-pack
+
+  - id: atk-exec-flag
+    argv: [git, --exec, /tmp/evil, fetch]
+    expect: blocked
+    reason_contains: exec
+
+  # --- hook bypass env ---
+  - id: atk-env-skip
+    argv: [git, status]
+    expect: blocked
+    reason_contains: SKIP
+    env:
+      SKIP: "1"
+
+  - id: atk-env-pre-commit-allow
+    argv: [git, commit, -m, x]
+    expect: blocked
+    reason_contains: PRE_COMMIT_ALLOW_NO_CONFIG
+    env:
+      PRE_COMMIT_ALLOW_NO_CONFIG: "1"
+
+  # --- safe pass-through (must not false-positive) ---
+  - id: atk-status-ok
+    argv: [git, status]
+    expect: allowed
+
+  - id: atk-diff-ok
+    argv: [git, diff]
+    expect: allowed
+
+  - id: atk-log-ok
+    argv: [git, log, --oneline, -5]
+    expect: allowed
+
+  - id: atk-show-ok
+    argv: [git, show, HEAD]
+    expect: allowed
+
+  - id: atk-add-ok
+    argv: [git, add, file.txt]
+    expect: allowed
+
+  - id: atk-commit-ok
+    argv: [git, commit, -m, msg]
+    expect: allowed
+
+  - id: atk-fetch-ok
+    argv: [git, fetch, origin]
+    expect: allowed
+
+  - id: atk-pull-ff-only-ok
+    argv: [git, pull, --ff-only]
+    expect: allowed
+
+  - id: atk-merge-abort-ok
+    argv: [git, merge, --abort]
+    expect: allowed
+
+  - id: atk-cherry-pick-ok
+    argv: [git, cherry-pick, abc1234]
+    expect: allowed
+
+  - id: atk-apply-ok
+    argv: [git, apply, patch.diff]
+    expect: allowed
+
+  - id: atk-config-safe-ok
+    argv: [git, config, core.bare]
+    expect: allowed
+
+  - id: atk-config-dangerous
+    argv: [git, config, core.hooksPath, /evil]
+    expect: blocked
+    reason_contains: dangerous config
+
+  # --- additional blocked subcommands (command-list.txt) ---
+  - id: atk-gc
+    argv: [git, gc, --prune=now]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-prune
+    argv: [git, prune]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-bisect
+    argv: [git, bisect, start]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-filter-branch
+    argv: [git, filter-branch, --all]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-filter-repo
+    argv: [git, filter-repo, --force]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-worktree
+    argv: [git, worktree, add, ../wt]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-reflog
+    argv: [git, reflog, expire, --all]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-replace
+    argv: [git, replace, -d, HEAD]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-lfs
+    argv: [git, lfs, prune]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-daemon
+    argv: [git, daemon, --reuseaddr]
+    expect: blocked
+    reason_contains: destructive subcommand
+
+  - id: atk-fast-import
+    argv: [git, fast-import]
+    expect: blocked
+    reason_contains: destructive subcommand
