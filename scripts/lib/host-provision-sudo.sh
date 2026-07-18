@@ -54,10 +54,11 @@ hp_sudo_ticket_path() {
 hp_sudo_has_cached_ticket() {
     local user="${1:?user}"
 
-    if hp_sudo_ticket_path "$user" >/dev/null 2>&1; then
+    local _ticket=""
+    if _ticket="$(hp_sudo_ticket_path "$user")"; then
         return 0
     fi
-    if command -v runuser >/dev/null 2>&1 && getent passwd "$user" >/dev/null 2>&1; then
+    if command -v runuser && getent passwd "$user"; then
         local _sv_rc=0
         runuser -u "$user" -- sudo -n -v 2>"$DEVNULL" || _sv_rc=$?
         if [[ $_sv_rc -eq 0 ]]; then
@@ -70,7 +71,7 @@ hp_sudo_has_cached_ticket() {
 hp_sudo_revoke_cached_ticket() {
     local user="${1:?user}"
 
-    if command -v runuser >/dev/null 2>&1 && getent passwd "$user" >/dev/null 2>&1; then
+    if command -v runuser && getent passwd "$user"; then
         local _sk_rc=0
         runuser -u "$user" -- sudo -k 2>"$DEVNULL" || _sk_rc=$?
         if [[ $_sk_rc -ne 0 ]]; then
@@ -90,7 +91,7 @@ hp_sudo_revoke_cached_ticket() {
 hp_sudo_privilege_state() {
     local user="${1:?user}" listing="" rc=0
 
-    if ! getent passwd "$user" >/dev/null 2>&1; then
+    if ! getent passwd "$user"; then
         printf 'verify_failed\n'
         return 0
     fi
@@ -105,7 +106,7 @@ hp_sudo_privilege_state() {
         return 0
     fi
 
-    if ! command -v sudo >/dev/null 2>&1; then
+    if ! command -v sudo; then
         printf 'verify_failed\n'
         return 0
     fi
@@ -132,7 +133,7 @@ hp_sudo_privilege_state() {
 hp_user_in_group() {
     local user="$1" group="$2" groups="" rc=0
 
-    if ! getent passwd "$user" >/dev/null 2>&1; then
+    if ! getent passwd "$user"; then
         echo "ERROR: user $user not found in passwd" >&2
         return 1
     fi
@@ -149,7 +150,7 @@ hp_user_in_group() {
 
 hp_sudo_listing_for_user() {
     local user="${1:?user}" listing="" rc=0
-    if ! command -v sudo >/dev/null 2>&1; then
+    if ! command -v sudo; then
         echo "ERROR: sudo binary missing" >&2
         return 1
     fi
@@ -305,7 +306,7 @@ hp_sudo_managed_strip_is_allowlisted() {
 
 hp_sudo_validate_dropin() {
     local file="${1:?file}"
-    if ! command -v visudo >/dev/null 2>&1; then
+    if ! command -v visudo; then
         echo "ERROR: visudo required to validate $file" >&2
         return 1
     fi
@@ -373,11 +374,11 @@ hp_sudo_remove_managed_agent_dropin() {
 hp_sudo_strip_fleet_from_group() {
     local user="$1" rc=0
 
-    if ! getent passwd "$user" >/dev/null 2>&1; then
+    if ! getent passwd "$user"; then
         echo "ERROR: cannot strip group sudo for missing user $user" >&2
         return 1
     fi
-    if ! getent group sudo >/dev/null 2>&1; then
+    if ! getent group sudo; then
         echo "ERROR: group sudo does not exist on this host" >&2
         return 1
     fi

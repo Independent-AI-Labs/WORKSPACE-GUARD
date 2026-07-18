@@ -15,7 +15,7 @@ to iterate quickly without a dedicated Linux box.
 
 **Authoritative** capability and policy-matrix E2E on real guest `/` runs inside
 WORKSPACE-VM QEMU guests only (`make test-vm-guard`). See
-[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../../docs/REQ-VM-HYPERVISOR.md) §FR-7.
+[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../../docs/requirements/REQ-VM-HYPERVISOR.md) §FR-7.
 
 ```
 Host (Darwin or Linux)

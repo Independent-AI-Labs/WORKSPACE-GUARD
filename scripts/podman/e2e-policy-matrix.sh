@@ -35,7 +35,9 @@ assert_blocked() {
     local label="$1"
     shift
     local rc=0
-    "$@" >/dev/null 2>&1 || rc=$?
+    local out
+    out="$("$@" 2>&1)" || rc=$?
+    printf '%s\n' "$out"
     if [[ $rc -eq 0 ]]; then
         echo "FAIL: $label was not blocked" >&2
         _fail=1
@@ -67,7 +69,9 @@ assert_blocked "fetch -- --hard" git fetch -- --hard
 # Alternate git bypass vector (seeded by tier3 harness).
 if [[ -e /usr/local/bin/git ]]; then
     rc=0
-    /usr/local/bin/git --version >/dev/null 2>&1 || rc=$?
+    local vout
+    vout="$(/usr/local/bin/git --version 2>&1)" || rc=$?
+    printf '%s\n' "$vout"
     if [[ $rc -eq 0 ]]; then
         echo "FAIL: agent could execute /usr/local/bin/git" >&2
         _fail=1

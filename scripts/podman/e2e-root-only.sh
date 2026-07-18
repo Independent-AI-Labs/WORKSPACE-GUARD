@@ -45,14 +45,15 @@ echo "test" > file.txt
 git add file.txt
 git commit -q -m "init"
 
-if ! git status >/dev/null; then
+if ! git status; then
     echo "ERROR: git status failed under root-only guard" >&2
     exit 1
 fi
 echo "PASS: git status succeeded"
 
 _reset_rc=0
-git reset --hard >/dev/null 2>&1 || _reset_rc=$?
+_reset_out="$(git reset --hard 2>&1)" || _reset_rc=$?
+printf '%s\n' "$_reset_out"
 if [[ $_reset_rc -eq 0 ]]; then
     echo "ERROR: git reset --hard was not blocked" >&2
     exit 1

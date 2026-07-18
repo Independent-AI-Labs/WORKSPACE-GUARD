@@ -24,7 +24,7 @@ hp_operator_print_fleet_sudo_danger() {
 hp_operator_audit_fleet_user() {
     local user="${1:?user}" admin="${2:-admin}" state
 
-    if ! getent passwd "$user" >/dev/null 2>&1; then
+    if ! getent passwd "$user"; then
         hp_operator_bold_yellow "WARN: fleet user '$user' is configured but UNIX account does not exist yet"
         return 0
     fi

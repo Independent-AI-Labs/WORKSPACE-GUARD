@@ -138,5 +138,5 @@ sudo bash /opt/workspace/projects/WORKSPACE-GUARD/scripts/qemu/e2e-guest.sh
 
 Podman Tier 3 (`make test-podman`) is a faster dev sanity check in a privileged
 container; it does not replace the QEMU gate. See
-[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../docs/REQ-VM-HYPERVISOR.md) §FR-7 and
-[SPEC-VM-HYPERVISOR](../../../docs/SPEC-VM-HYPERVISOR.md) §12.
+[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../docs/requirements/REQ-VM-HYPERVISOR.md) §FR-7 and
+[SPEC-VM-HYPERVISOR](../../../docs/specifications/SPEC-VM-HYPERVISOR.md) §12.

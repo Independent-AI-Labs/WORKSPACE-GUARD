@@ -49,12 +49,12 @@ hp_admin_break_glass_ready() {
 
 hp_admin_exists() {
     local name="${1:?name}"
-    getent passwd "$name" >/dev/null 2>&1
+    getent passwd "$name"
 }
 
 hp_admin_has_sudo() {
     local name="${1:?name}" groups="" rc=0
-    if getent group sudo >/dev/null 2>&1; then
+    if getent group sudo; then
         groups="$(id -nG "$name" 2>&1)" || rc=$?
         if [[ "$rc" -eq 0 ]] && printf '%s\n' "$groups" | tr ' ' '\n' | grep -qx sudo; then
             return 0
@@ -72,11 +72,11 @@ hp_admin_has_sudo() {
 }
 
 hp_admin_generate_password() {
-    if command -v openssl >/dev/null 2>&1; then
+    if command -v openssl; then
         openssl rand -base64 24
         return 0
     fi
-    if command -v perl >/dev/null 2>&1; then
+    if command -v perl; then
         perl -e 'print join("", map { ("A".."Z","a".."z",0..9)[rand 62] } 1..32), "\n"'
         return 0
     fi
@@ -152,7 +152,7 @@ hp_admin_install_sudoers_dropin() {
         echo "$name ALL=(ALL:ALL) ALL"
         echo "$HP_MARKER_END"
     } > "$tmp"
-    if ! command -v visudo >/dev/null 2>&1; then
+    if ! command -v visudo; then
         rm -f "$tmp"
         echo "ERROR: visudo required to install admin sudoers drop-in" >&2
         return 1
@@ -180,7 +180,7 @@ hp_admin_verify_password() {
         echo "ERROR: WORKSPACE_ADMIN_PASSWORD_VERIFY=skip refused (password gate cannot be bypassed)" >&2
         return 1
     fi
-    if command -v perl >/dev/null 2>&1; then
+    if command -v perl; then
         perl - "$name" "$pass" <<'PERL'
 use strict;
 use warnings;

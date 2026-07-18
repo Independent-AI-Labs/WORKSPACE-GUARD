@@ -161,4 +161,4 @@ model exercised in Tier 2.
 - [SPEC-PODMAN-TESTING](../specifications/SPEC-PODMAN-TESTING.md): implementation
 - [REQ-GIT-GUARD](REQ-GIT-GUARD.md): guard functional requirements
 - [ROOT-ONLY-MODE.md](../ROOT-ONLY-MODE.md): root-only threat model
-- [PORTABILITY.md](../../../CI/docs/PORTABILITY.md): shell portability
+- [PORTABILITY.md](../../../CI/docs/specifications/SPEC-PORTABILITY.md): shell portability

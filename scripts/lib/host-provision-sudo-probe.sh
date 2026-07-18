@@ -3,11 +3,11 @@
 hp_sudo_live_runuser_probe() {
     local user="${1:?user}" out="" rc=0 ticket_path=""
 
-    if ! command -v runuser >/dev/null 2>&1; then
+    if ! command -v runuser; then
         echo "    live_probe: runuser unavailable" >&2
         return 0
     fi
-    if ! getent passwd "$user" >/dev/null 2>&1; then
+    if ! getent passwd "$user"; then
         echo "    live_probe: user $user missing" >&2
         return 0
     fi
@@ -40,7 +40,7 @@ hp_sudo_print_privilege_sources() {
 
     groups="$(id -nG "$user" 2>&1)" || groups="(id -nG failed: $groups)"
     echo "    id -nG $user: $groups" >&2
-    if getent group sudo >/dev/null 2>&1; then
+    if getent group sudo; then
         echo "    getent group sudo: $(getent group sudo)" >&2
     fi
 
@@ -66,14 +66,15 @@ hp_sudo_print_privilege_sources() {
                 | sed 's/^/        /' >&2
         fi
     done
-    if command -v sudo >/dev/null 2>&1; then
+    if command -v sudo; then
         listing="$(sudo -l -U "$user" 2>&1)" || rc=$?
         echo "    - policy: sudo -l -U ${user} as root (exit $rc):" >&2
         printf '%s\n' "$listing" | sed 's/^/      /' >&2
     else
         echo "    - policy: sudo -l -U ${user}: ERROR (sudo binary missing)" >&2
     fi
-    if hp_sudo_ticket_path "$user" >/dev/null 2>&1 \
+    local _ticket=""
+    if _ticket="$(hp_sudo_ticket_path "$user")" \
         || hp_sudo_has_cached_ticket "$user"; then
         echo "    - session: cached sudo ticket active" >&2
     else

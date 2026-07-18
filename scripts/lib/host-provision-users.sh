@@ -13,7 +13,7 @@ hp_users_list_fleet_names() {
 
 hp_users_ensure_account() {
     local user="$1" shell="${2:-/bin/bash}"
-    if getent passwd "$user" >/dev/null 2>&1; then
+    if getent passwd "$user"; then
         echo "  OK: UNIX user $user already exists (unchanged)"
         return 0
     fi
@@ -22,7 +22,7 @@ hp_users_ensure_account() {
         echo "ERROR: useradd failed for $user (exit $?)" >&2
         return 1
     fi
-    if ! getent passwd "$user" >/dev/null 2>&1; then
+    if ! getent passwd "$user"; then
         echo "ERROR: useradd reported success but $user missing from passwd" >&2
         return 1
     fi

@@ -60,9 +60,9 @@ SUDO := $(shell if [ "$$(id -u)" -eq 0 ]; then echo ""; else echo "sudo"; fi)
 
 .PHONY: help
 help: ## Show this help
-	@echo "WORKSPACE-GUARD Makefile"
-	@echo ""
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	echo "WORKSPACE-GUARD Makefile"
+	echo ""
+	awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # =============================================================================
 # Init & Preflight
@@ -74,30 +74,30 @@ init-check: ## Check system dependencies (via CI resolver + config/system-deps.y
 
 .PHONY: init
 init: ## Install system-level dependencies (platform-aware via config/system-deps.yaml)
-	@echo "==> Installing Homebrew + GNU tools (macOS only)..."
-	@bash "$(CI_DIR)/scripts/bootstrap-homebrew"
-	@echo "==> Installing system packages (from config/system-deps.yaml)..."
+	echo "==> Installing Homebrew + GNU tools (macOS only)..."
+	bash "$(CI_DIR)/scripts/bootstrap-homebrew"
+	echo "==> Installing system packages (from config/system-deps.yaml)..."
 	bash "$(CI_DIR)/scripts/install-system-deps" --install --boot-dir "$(CI_BOOT_BIN)"
-	@echo "==> Installing Rust toolchain (if missing)..."
-	@if ! command -v cargo > /dev/null 2>&1; then \
+	echo "==> Installing Rust toolchain (if missing)..."
+	if ! command -v cargo; then \
 		bash "$(CI_DIR)/scripts/bootstrap-rust"; \
 	fi
-	@echo "==> Installing Rust components (clippy, rustfmt)..."
-	@rustup component add clippy rustfmt
-	@echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
-	@$(MAKE) install-gitleaks
-	@echo "==> Bootstrapping Podman (Linux VM test harness)..."
-	@bash "$(CI_DIR)/scripts/bootstrap-podman"
-	@bash scripts/podman/ensure-machine.sh
-	@echo "==> System dependencies installed."
+	echo "==> Installing Rust components (clippy, rustfmt)..."
+	rustup component add clippy rustfmt
+	echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
+	$(MAKE) install-gitleaks
+	echo "==> Bootstrapping Podman (Linux VM test harness)..."
+	bash "$(CI_DIR)/scripts/bootstrap-podman"
+	bash scripts/podman/ensure-machine.sh
+	echo "==> System dependencies installed."
 
 .PHONY: preflight
 preflight: ## Verify required tooling is present
-	@command -v git   > /dev/null 2>&1 || { echo "ERROR: git not on PATH"; exit 1; }
-	@command -v cargo > /dev/null 2>&1 || { echo "ERROR: cargo not on PATH"; exit 1; }
-	@test -d "$(CI_DIR)" || { echo "ERROR: WORKSPACE-CI not found at $(CI_DIR)"; exit 1; }
-	@test -f "$(CI_DIR)/scripts/generate-hooks" || { echo "ERROR: WORKSPACE-CI/scripts/generate-hooks missing"; exit 1; }
-	@echo "Preflight OK (WORKSPACE-CI at $(CI_DIR))"
+	command -v git || { echo "ERROR: git not on PATH"; exit 1; }
+	command -v cargo || { echo "ERROR: cargo not on PATH"; exit 1; }
+	test -d "$(CI_DIR)" || { echo "ERROR: WORKSPACE-CI not found at $(CI_DIR)"; exit 1; }
+	test -f "$(CI_DIR)/scripts/generate-hooks" || { echo "ERROR: WORKSPACE-CI/scripts/generate-hooks missing"; exit 1; }
+	echo "Preflight OK (WORKSPACE-CI at $(CI_DIR))"
 
 # =============================================================================
 # Installation
@@ -105,34 +105,34 @@ preflight: ## Verify required tooling is present
 
 .PHONY: install-gitleaks
 install-gitleaks: ## Bootstrap gitleaks binary to ${WORKSPACE_ROOT}/${BOOT_NAME}/bin
-	@mkdir -p "$(dir $(GITLEAKS_BIN))"
+	mkdir -p "$(dir $(GITLEAKS_BIN))"
 	WORKSPACE_ROOT="$(WORKSPACE_ROOT)" GITLEAKS_BIN="$(GITLEAKS_BIN)" \
 		bash "$(CI_DIR)/scripts/bootstrap-gitleaks"
 
 .PHONY: install
 install: preflight install-gitleaks install-hooks ## Full install: deps + gitleaks + hooks
-	@:
+	:
 
 .PHONY: install-ci
 install-ci: preflight install-gitleaks ## CI install: gitleaks + no hooks (CI env already set up)
-	@:
+	:
 
 .PHONY: install-hooks
 install-hooks: ## Regenerate native git hooks from .pre-commit-config.yaml
-	@if [ -d .git/hooks ] && ! [ -w .git/hooks ] && [ "$$(id -u)" != "0" ]; then \
+	if [ -d .git/hooks ] && ! [ -w .git/hooks ] && [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: .git/hooks is not writable (locked by gitdir::lock in capability mode)." >&2; \
 		echo "       Hook installation requires root: sudo make install-hooks" >&2; \
 		echo "       (or run before the guard is installed / in root-only mode)" >&2; \
 		exit 1; \
 	fi
-	@if [ -x "$(CI_DIR)/scripts/cleanup-precommit" ]; then \
+	if [ -x "$(CI_DIR)/scripts/cleanup-precommit" ]; then \
 		bash "$(CI_DIR)/scripts/cleanup-precommit"; \
 	fi
 	bash $(CI_DIR)/scripts/generate-hooks
 
 .PHONY: sync
 sync: ## Sync dependencies + reinstall hooks
-	@cargo fetch
+	cargo fetch
 	$(MAKE) install-hooks
 
 # =============================================================================
@@ -156,15 +156,15 @@ type-check: ## Rust has no separate type-check; run cargo check
 
 .PHONY: test test-unit test-integration-cap test-integration-root
 test: ## Run cargo test (all feature combinations; integration gated by euid)
-	@$(MAKE) test-unit
-	@if [ "$(_OS)" = "Darwin" ]; then \
+	$(MAKE) test-unit
+	if [ "$(_OS)" = "Darwin" ]; then \
 		echo "SKIP: integration tests on Darwin (Linux-only; use make test-podman)"; \
 	elif [ "$$(id -u)" -ne 0 ]; then \
 		$(MAKE) test-integration-cap; \
 	else \
 		echo "SKIP: capability integration tests (require non-root; use scripts/podman/tier1-test.sh in container)"; \
 	fi
-	@if [ "$(_OS)" = "Darwin" ]; then \
+	if [ "$(_OS)" = "Darwin" ]; then \
 		: ; \
 	elif [ "$$(id -u)" -eq 0 ]; then \
 		$(MAKE) test-integration-root; \
@@ -173,7 +173,7 @@ test: ## Run cargo test (all feature combinations; integration gated by euid)
 	fi
 
 test-unit: ## Unit/binary tests only (both feature combinations)
-	@if [ "$(_OS)" != "Darwin" ]; then \
+	if [ "$(_OS)" != "Darwin" ]; then \
 		cargo test --workspace --bins; \
 		cargo test --no-default-features --features root-only --bins; \
 	else \
@@ -188,7 +188,7 @@ test-integration-root: ## Root-only integration tests (root)
 
 .PHONY: test-shell
 test-shell: ## Run the bats shell test suite (NOT gated in check-push).
-	@if ! command -v bats >/dev/null 2>&1; then \
+	if ! command -v bats; then \
 		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
 		exit 1; \
 	fi
@@ -200,10 +200,10 @@ test-shell: ## Run the bats shell test suite (NOT gated in check-push).
 
 .PHONY: check-push
 check-push: ## Pre-push quality gate: fmt + clippy + check + tests + host-provision Podman E2E (Linux).
-	@$(MAKE) lint
-	@$(MAKE) check
-	@$(MAKE) test
-	@$(MAKE) test-podman-provision
+	$(MAKE) lint
+	$(MAKE) check
+	$(MAKE) test
+	$(MAKE) test-podman-provision
 
 # Podman test harness: macOS + Linux hosts without native Linux kernel.
 # See docs/specifications/SPEC-PODMAN-TESTING.md
@@ -244,7 +244,7 @@ _GUARD_RELEASE_SSH := $(REPO_ROOT)/target/release/workspace-git-ssh
 _GUARD_RELEASE_MODE := $(REPO_ROOT)/target/release/workspace-guard.mode
 
 _install-host-stack-phase5-build:
-	@if [ "$(GUARD_SKIP_BUILD)" = "1" ]; then \
+	if [ "$(GUARD_SKIP_BUILD)" = "1" ]; then \
 		:; \
 	elif [ "$(INSTALL_LOCK)" = "true" ]; then \
 		$(MAKE) build-host-stack; \
@@ -254,12 +254,12 @@ _install-host-stack-phase5-build:
 
 install-host-stack-phase5: _install-host-stack-phase5-build ## Build + install guard + optional lock/auditd
 	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
-	@if [ "$(INSTALL_LOCK)" = "true" ]; then GUARD_SKIP_BUILD=1 $(MAKE) install-lock; fi
-	@if [ "$(INSTALL_AUDITD)" = "true" ]; then $(MAKE) install-auditd; fi
+	if [ "$(INSTALL_LOCK)" = "true" ]; then GUARD_SKIP_BUILD=1 $(MAKE) install-lock; fi
+	if [ "$(INSTALL_AUDITD)" = "true" ]; then $(MAKE) install-auditd; fi
 
 install-guard: ## REMOVED - use install-guard-host-exec
-	@echo "ERROR: make install-guard is removed. Use: make install-guard-host-exec" >&2
-	@exit 1
+	echo "ERROR: make install-guard is removed. Use: make install-guard-host-exec" >&2
+	exit 1
 
 _INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
 install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
@@ -275,8 +275,8 @@ reconcile-guard-host-exec: build-guard ## Force rebuild + reinstall git guard an
 	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
 
 check-guard: ## REMOVED - use check-guard-host-exec
-	@echo "ERROR: make check-guard is removed. Use: make check-guard-host-exec" >&2
-	@exit 1
+	echo "ERROR: make check-guard is removed. Use: make check-guard-host-exec" >&2
+	exit 1
 
 check-guard-host-exec: ## Check host-exec git-guard installation status
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
@@ -335,23 +335,23 @@ DEVNULL := /dev/null
 .PHONY: sync-gtfobins sync-gtfobins-linux
 sync-gtfobins: ## Fetch GTFOBins + konstruktoid, scan live SUID/CAP, write res/ baselines + refresh .gitleaksignore
 	bash scripts/sync-gtfobins
-	@$(MAKE) --no-print-directory gitleaks-ignore-regen
+	$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not sync on Darwin for commit)
-	@_podman=""; \
-	if command -v real-podman >/dev/null 2>&1; then _podman=real-podman; \
-	elif command -v podman >/dev/null 2>&1; then _podman=podman; \
+	_podman=""; \
+	if command -v real-podman; then _podman=real-podman; \
+	elif command -v podman; then _podman=podman; \
 	else echo "ERROR: podman not found. Run: make init"; exit 1; fi; \
 	$$_podman run --rm \
 		-v "$(abspath $(REPO_ROOT)/..):/projects:rw" \
 		-w /projects/WORKSPACE-GUARD \
 		$${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04} \
 		bash scripts/sync-gtfobins
-	@$(MAKE) --no-print-directory gitleaks-ignore-regen
+	$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 .PHONY: gitleaks-ignore-regen
 gitleaks-ignore-regen: ## Regenerate .gitleaksignore fingerprints for docs/references/ cached content
-	@bash scripts/regen-gitleaksignore
+	bash scripts/regen-gitleaksignore
 
 .PHONY: sync-gtfobins-verify
 sync-gtfobins-verify: ## Re-fetch sources and emit SHA-256 manifest of canonical references
@@ -368,24 +368,24 @@ drift-check-quiet: ## Same as drift-check but stdout only on CRITICAL; /usr/lib/
 .PHONY: install-lock
 _INSTALL_LOCK_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-binary-guard)
 install-lock: $(_INSTALL_LOCK_DEPS) ## Contain-via-guard every SUID binary per res/binary-lock.yaml (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-lock needs root: sudo make install-lock" >&2; exit 1; \
 	fi
-	@echo "==> Installing binary lock per res/binary-lock.yaml..."
-	@# The generic guard binary is built once (build-binary-guard dep above);
-	@# install-lock-runtime copies that single binary to every contained path.
-	@# Mirrors docs/specifications/SPEC-BINARY-LOCK.md section 4.2
-	@# (copy -> chown root:root -> chmod 0700 .real ->
-	@# chattr +i -> stage guard -> dpkg-divert --rename -> mv guard -> <path>).
-	@test -x scripts/install-lock-runtime && bash scripts/install-lock-runtime \
+	echo "==> Installing binary lock per res/binary-lock.yaml..."
+	# The generic guard binary is built once (build-binary-guard dep above);
+	# install-lock-runtime copies that single binary to every contained path.
+	# Mirrors docs/specifications/SPEC-BINARY-LOCK.md section 4.2
+	# (copy -> chown root:root -> chmod 0700 .real ->
+	# chattr +i -> stage guard -> dpkg-divert --rename -> mv guard -> <path>).
+	test -x scripts/install-lock-runtime && bash scripts/install-lock-runtime \
 		|| { echo "NOTICE: scripts/install-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-lock
 uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID path (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-lock needs root: sudo make uninstall-lock" >&2; exit 1; \
 	fi
-	@test -x scripts/uninstall-lock-runtime && bash scripts/uninstall-lock-runtime \
+	test -x scripts/uninstall-lock-runtime && bash scripts/uninstall-lock-runtime \
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: guard-%
@@ -398,48 +398,48 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 
 .PHONY: provision-host install-host-stack
 provision-host: ## Full host bootstrap: admin, fleet sudo audit, identities, guard stack (ROOT)
-	@if [ "$$(id -u)" -ne 0 ]; then \
+	if [ "$$(id -u)" -ne 0 ]; then \
 		echo "ERROR: provision-host needs root: sudo make provision-host" >&2; exit 1; \
 	fi
-	@if [ ! -x scripts/provision-host ]; then \
+	if [ ! -x scripts/provision-host ]; then \
 		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
 	fi
-	@bash scripts/provision-host
+	bash scripts/provision-host
 
 install-host-stack: provision-host ## Alias: provision-host (recommended fleet install)
 
 .PHONY: provision-host-preflight
 provision-host-preflight: ## Read-only host provision state report (ROOT)
-	@if [ "$$(id -u)" -ne 0 ]; then \
+	if [ "$$(id -u)" -ne 0 ]; then \
 		echo "ERROR: provision-host-preflight needs root: sudo make provision-host-preflight" >&2; exit 1; \
 	fi
-	@if [ ! -x scripts/provision-host ]; then \
+	if [ ! -x scripts/provision-host ]; then \
 		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
 	fi
-	@bash scripts/provision-host --preflight
+	bash scripts/provision-host --preflight
 
 .PHONY: provision-git-identities
 provision-git-identities: ## Provision per-user gitconfig + SSH keys from config/home-lock-users.yaml (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: provision-git-identities needs root: sudo make provision-git-identities" >&2; exit 1; \
 	fi
-	@test -x scripts/provision-user-git-identity && bash scripts/provision-user-git-identity \
+	test -x scripts/provision-user-git-identity && bash scripts/provision-user-git-identity \
 		|| { echo "ERROR: scripts/provision-user-git-identity missing" >&2; exit 1; }
 
 .PHONY: install-home-lock
 install-home-lock: ## Lock the absolute_file_paths entries in config/guard_locked_paths.yaml (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-home-lock needs root: sudo make install-home-lock" >&2; exit 1; \
 	fi
-	@test -x scripts/install-home-lock && bash scripts/install-home-lock \
+	test -x scripts/install-home-lock && bash scripts/install-home-lock \
 		|| { echo "NOTICE: scripts/install-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-home-lock
 uninstall-home-lock: ## Rollback home lock: restore original owner/mode per /usr/lib/workspace-guard/home-lock-state.yaml (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-home-lock needs root: sudo make uninstall-home-lock" >&2; exit 1; \
 	fi
-	@test -x scripts/uninstall-home-lock && bash scripts/uninstall-home-lock \
+	test -x scripts/uninstall-home-lock && bash scripts/uninstall-home-lock \
 		|| { echo "NOTICE: scripts/uninstall-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: home-drift-check
@@ -452,10 +452,10 @@ home-drift-check-quiet: ## Same as home-drift-check but stdout only on CRITICAL
 
 .PHONY: install-auditd
 install-auditd: ## Install auditd rules + generated per-binary execve watches (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-auditd needs root: sudo make install-auditd" >&2; exit 1; \
 	fi
-	@if test -d /etc/audit/rules.d; then \
+	if test -d /etc/audit/rules.d; then \
 		install -m 0640 config/auditd/99-workspace-guard.rules /etc/audit/rules.d/ \
 			&& augenrules --load \
 			&& echo "==> auditd rules installed and loaded"; \
@@ -465,17 +465,17 @@ install-auditd: ## Install auditd rules + generated per-binary execve watches (R
 
 .PHONY: install-sandbox
 install-sandbox: ## Install sandbox profile + systemd unit (ROOT)
-	@if [ "$$(id -u)" != "0" ]; then \
+	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-sandbox needs root: sudo make install-sandbox" >&2; exit 1; \
 	fi
-	@install -Dm 0644 config/systemd/workspace-agent@.service /etc/systemd/system/workspace-agent@.service
-	@if systemctl daemon-reload 2>$(DEVNULL); then :; else echo "NOTICE: systemctl daemon-reload failed (non-systemd host?)"; fi
-	@echo "==> sandbox systemd unit installed:"
-	@echo "    systemctl start workspace-agent@rootless|gvisor|firecracker"
+	install -Dm 0644 config/systemd/workspace-agent@.service /etc/systemd/system/workspace-agent@.service
+	if systemctl daemon-reload 2>$(DEVNULL); then :; else echo "NOTICE: systemctl daemon-reload failed (non-systemd host?)"; fi
+	echo "==> sandbox systemd unit installed:"
+	echo "    systemctl start workspace-agent@rootless|gvisor|firecracker"
 
 .PHONY: sandbox-check
 sandbox-check: ## Dry-run: report which sandbox profile auto-selection would pick on this host
-	@host=$$(hostname); \
+	host=$$(hostname); \
 	out=$$(source scripts/lib/sandbox-profile.sh && select_profile "$$host" config/sandbox/profiles.yaml); rc=$$?; \
 	if [ $$rc -eq 0 ]; then \
 		printf 'host=%s -> profile=%s\n' "$$host" "$$out"; \

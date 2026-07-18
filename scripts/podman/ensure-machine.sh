@@ -7,11 +7,11 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 
 resolve_podman() {
-    if command -v real-podman >/dev/null 2>&1; then
+    if command -v real-podman; then
         echo "real-podman"
         return 0
     fi
-    if command -v podman >/dev/null 2>&1; then
+    if command -v podman; then
         echo "podman"
         return 0
     fi
@@ -23,8 +23,9 @@ PODMAN="$(resolve_podman)"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
     _info_rc=0
-    "$PODMAN" info >/dev/null 2>&1 || _info_rc=$?
+    _info_out="$("$PODMAN" info 2>&1)" || _info_rc=$?
     if [[ $_info_rc -ne 0 ]]; then
+        printf '%s\n' "$_info_out" >&2
         echo "==> Podman Machine not running: starting..."
         _has_machine=0
         _list_out="$(mktemp)"

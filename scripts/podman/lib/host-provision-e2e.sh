@@ -19,7 +19,7 @@ hp_e2e_guard_root() {
 hp_e2e_prepare_git_safe_directory() {
     local guard_root
     guard_root="$(hp_e2e_guard_root)"
-    if command -v git >/dev/null 2>&1; then
+    if command -v git; then
         if ! git config --global --add safe.directory "$guard_root" 2>"$DEVNULL"; then
             echo "WARN: git safe.directory not set for $guard_root" >&2
         fi
@@ -82,11 +82,11 @@ EOF
 }
 
 hp_e2e_setup_fleet_user() {
-    if ! id "$HP_E2E_AGENT_USER" >/dev/null 2>&1; then
+    if ! id "$HP_E2E_AGENT_USER"; then
         useradd -m -u "$HP_E2E_AGENT_UID" -s /bin/bash "$HP_E2E_AGENT_USER"
         echo "Created user $HP_E2E_AGENT_USER (uid $HP_E2E_AGENT_UID)"
     fi
-    if getent group sudo >/dev/null 2>&1; then
+    if getent group sudo; then
         if ! usermod -aG sudo "$HP_E2E_AGENT_USER" 2>"$DEVNULL"; then
             echo "WARN: usermod -aG sudo failed for $HP_E2E_AGENT_USER" >&2
         fi
@@ -149,7 +149,7 @@ hp_e2e_assert_post_phase4() {
     local marker ssh_key
     marker="$(hp_e2e_marker_path)"
 
-    if ! id "$HP_E2E_ADMIN_NAME" >/dev/null 2>&1; then
+    if ! id "$HP_E2E_ADMIN_NAME"; then
         echo "ERROR: admin user $HP_E2E_ADMIN_NAME missing after phase 1" >&2
         return 1
     fi

@@ -44,7 +44,7 @@ echo "==> Tier 3: provision-host phase 5 (guard stack)..."
 bash "$_GUARD_ROOT/scripts/provision-host" --phase 5
 
 echo "==> Tier 3: verifying installation..."
-if ! command -v getcap >/dev/null 2>&1; then
+if ! command -v getcap; then
     echo "ERROR: getcap not available" >&2
     exit 1
 fi
@@ -115,7 +115,7 @@ _agent_check="$(mktemp)"
 cat > "$_agent_check" <<'EOS'
 set -euo pipefail
 cd "$1"
-if ! git --version >/dev/null; then
+if ! git --version; then
     echo "ERROR: git --version failed for agent user" >&2
     exit 1
 fi
@@ -123,7 +123,7 @@ echo "PASS: agent git --version succeeded"
 echo "test" > file.txt
 git add file.txt
 git commit -q -m "init"
-if ! git status >/dev/null; then
+if ! git status; then
     echo "ERROR: git status failed for agent user" >&2
     exit 1
 fi
@@ -137,14 +137,16 @@ else
     echo "PASS: Podman gitdir ownership lock skipped (container limitation)"
 fi
 _reset_rc=0
-git reset --hard >/dev/null 2>&1 || _reset_rc=$?
+_reset_out="$(git reset --hard 2>&1)" || _reset_rc=$?
+printf '%s\n' "$_reset_out"
 if [[ $_reset_rc -eq 0 ]]; then
     echo "ERROR: agent git reset --hard was not blocked" >&2
     exit 1
 fi
 echo "PASS: agent git reset --hard blocked"
 _orig_rc=0
-/usr/bin/git.original --version >/dev/null 2>&1 || _orig_rc=$?
+_orig_out="$(/usr/bin/git.original --version 2>&1)" || _orig_rc=$?
+printf '%s\n' "$_orig_out"
 if [[ $_orig_rc -eq 0 ]]; then
     echo "ERROR: agent could execute /usr/bin/git.original" >&2
     exit 1

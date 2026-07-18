@@ -9,7 +9,7 @@ _TESTAGENT_UID="${WORKSPACE_GUARD_TESTAGENT_UID:-1002}"
 _CARGO_BIN="/root/.cargo/bin"
 
 ensure_testagent() {
-    if id "$_TESTAGENT_USER" >/dev/null 2>&1; then
+    if id "$_TESTAGENT_USER"; then
         return 0
     fi
     useradd -m -u "$_TESTAGENT_UID" -s /bin/bash "$_TESTAGENT_USER"

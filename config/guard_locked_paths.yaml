@@ -48,6 +48,12 @@ individual_file_paths:
 
 glob_patterns:
   "*_exceptions.yaml": 0o644
+  ".markdown_docs_exceptions.yaml": 0o644
+  "coverage_thresholds.yaml": 0o644
+  "file_length_limits.yaml": 0o644
+  "dead_code.yaml": 0o644
+  "*_excludes.yaml": 0o644
+  "exemption_files.yaml": 0o644
 
 absolute_file_paths:
   "~/.gitconfig": 0o644
