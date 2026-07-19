@@ -490,3 +490,15 @@ cases:
     argv: [git, fast-import]
     expect: blocked
     reason_contains: destructive subcommand
+  # --- item 20: ambiguous single pathspec existing on disk (dotless) ---
+  # NOTE: cwd-sensitive: blocked only because ./Makefile exists in the
+  # crate root where cargo test runs.
+  - id: atk-checkout-existing-dotless-file
+    argv: [git, checkout, Makefile]
+    expect: blocked
+    reason_contains: pathspec discard
+
+  - id: atk-checkout-existing-dotless-dir
+    argv: [git, checkout, src]
+    expect: blocked
+    reason_contains: pathspec discard

@@ -475,3 +475,38 @@ fn bypass_env_pre_commit_allow_no_config_blocked() {
 
 #[path = "block_protected_branch_tests.rs"]
 mod protected_branch_tests;
+
+#[test]
+fn checkout_dotless_existing_file_blocked() {
+    // Item 20: ambiguous single pathspec that exists on disk is treated as
+    // a path (git resolves the ambiguity as a pathspec too). Absolute path
+    // keeps the test cwd-independent.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("LICENSE");
+    std::fs::write(&file, b"x").unwrap();
+    let state = empty_state("checkout");
+    let argv_os = argv(&["git", "checkout", file.to_str().unwrap()]);
+    let result = check_blocked(&state, "checkout", &argv_os, "/nonexistent-git", None);
+    assert!(
+        matches!(result, Err(GuardError::Blocked { .. })),
+        "checkout of existing dotless file must be blocked: {:?}",
+        result
+    );
+}
+#[test]
+fn checkout_dotless_nonexistent_name_allowed() {
+    // No dot, no leading dot, no colon, and nothing on disk: parsed as a
+    // branch name and allowed (sudo-gated, not universally blocked).
+    let state = empty_state("checkout");
+    let argv_os = argv(&["git", "checkout", "no-such-branch-or-file-xyz"]);
+    let result = check_blocked(&state, "checkout", &argv_os, "/nonexistent-git", None);
+    // checkout itself is sudo-gated for non-root; what must not happen is a
+    // "pathspec discard" classification for a name absent from disk.
+    if let Err(GuardError::Blocked { reason, .. }) = &result {
+        assert!(
+            !reason.contains("pathspec"),
+            "branch-looking name absent from disk must not be path-blocked: {:?}",
+            result
+        );
+    }
+}

@@ -363,8 +363,15 @@ fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Opt
             // checkout.c case (3) without separator: tree-ish then pathspecs
             return Some("tree-ish path restore");
         }
-        if positionals_before_sep.len() == 1 && looks_like_pathspec(&positionals_before_sep[0]) {
+        if positionals_before_sep.len() == 1
+            && (looks_like_pathspec(&positionals_before_sep[0])
+                || path_exists_on_disk(&positionals_before_sep[0]))
+        {
             // checkout.c case (2): restore tracked paths from index.
+            // Ambiguous single names (Makefile, LICENSE, src/init) are
+            // treated as paths when they exist on disk: git resolves the
+            // ambiguity as a pathspec too, so the branch interpretation
+            // must not be the one that slips through.
             return Some("pathspec discard");
         }
     }
@@ -390,6 +397,13 @@ fn looks_like_pathspec(s: &str) -> bool {
         }
     }
     false
+}
+
+/// True when `s` names a file that exists relative to the current
+/// directory (where git resolves pathspecs). symlink_metadata so dangling
+/// symlinks still count.
+fn path_exists_on_disk(s: &str) -> bool {
+    std::fs::symlink_metadata(s).is_ok()
 }
 
 fn extract_revert_target(argv_os: &[OsString]) -> String {
