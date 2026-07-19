@@ -124,7 +124,7 @@ fn deployment_clean_repo_has_no_violations() {
     let dir = unique_temp_dir("deploy-clean");
     init_repo(&dir);
     let uid = nix::unistd::geteuid().as_raw();
-    let violations = deployment_violations(&dir, 0, uid, false);
+    let violations = deployment_violations(&dir, uid, uid, false);
     assert!(violations.is_empty(), "unexpected: {:?}", violations);
 }
 
@@ -169,7 +169,7 @@ fn deployment_exec_bit_mismatch_is_violation() {
     assert!(run_git(&dir, &["commit", "-qm", "add tool"]));
     fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
     let uid = nix::unistd::geteuid().as_raw();
-    let violations = deployment_violations(&dir, 0, uid, false);
+    let violations = deployment_violations(&dir, uid, uid, false);
     assert!(
         violations.iter().any(|v| v.contains("100755")),
         "unexpected: {:?}",
