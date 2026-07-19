@@ -82,6 +82,8 @@ struct LockedPathsConfig {
     glob_patterns: std::collections::HashMap<String, u32>,
     #[serde(default)]
     absolute_file_paths: std::collections::HashMap<String, u32>,
+    #[serde(default)]
+    prune_dir_names: Vec<String>,
 }
 
 // --- binary-guard codegen structs ----------------------------------------
@@ -324,6 +326,7 @@ fn main() {
         .collect();
     globs.sort_by(|a, b| a.0.cmp(b.0));
     emit_str_u32_pairs(&mut code, "LOCKED_GLOB_PATTERNS", &globs);
+    emit_str_list(&mut code, "LOCK_PRUNE_DIR_NAMES", &locked.prune_dir_names);
     let mut absolute: Vec<(&str, u32)> = locked
         .absolute_file_paths
         .iter()

@@ -138,6 +138,10 @@ pub fn lock() {
 ///   - `exact` (no *)  → match files with exactly that name
 ///
 /// Skips `.git/` to avoid re-walking the already-locked git directory.
+fn is_pruned_dir(name: &str) -> bool {
+    name == ".git" || crate::LOCK_PRUNE_DIR_NAMES.contains(&name)
+}
+
 fn lock_glob_files(root: &Path, pattern: &str, mode: u32) {
     match fs::symlink_metadata(root) {
         Ok(meta) if meta.is_symlink() => {
@@ -151,7 +155,7 @@ fn lock_glob_files(root: &Path, pattern: &str, mode: u32) {
                         Some(n) => n.to_owned(),
                         None => continue,
                     };
-                    if path.is_dir() && file_name != ".git" {
+                    if path.is_dir() && !is_pruned_dir(&file_name) {
                         lock_glob_files(&path, pattern, mode);
                     } else if path.is_file() && glob_match(pattern, &file_name) {
                         lock_file(&path, mode);
@@ -193,7 +197,7 @@ fn lock_glob_trees(root: &Path, pattern: &str) {
                         Some(n) => n.to_owned(),
                         None => continue,
                     };
-                    if path.is_dir() && file_name != ".git" {
+                    if path.is_dir() && !is_pruned_dir(&file_name) {
                         lock_glob_trees(&path, pattern);
                     }
                 }

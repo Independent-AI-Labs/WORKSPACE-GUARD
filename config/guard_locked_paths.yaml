@@ -46,6 +46,23 @@ recursive_tree_glob_patterns:
 individual_file_paths:
   ".gitmodules": 0o644
 
+# prune_dir_names: directory names the recursive glob scans
+# (glob_patterns, recursive_tree_glob_patterns) never descend into.
+# These trees are huge, regenerated, and carry no policy files; walking
+# them made every guarded git invocation O(worktree size) once the lock
+# ran per-call (item 21). .git is always pruned (locked separately).
+prune_dir_names:
+  - node_modules
+  - .next
+  - target
+  - .venv
+  - venv
+  - dist
+  - build
+  - .turbo
+  - .cache
+  - __pycache__
+
 glob_patterns:
   "*_exceptions.yaml": 0o644
   ".markdown_docs_exceptions.yaml": 0o644
