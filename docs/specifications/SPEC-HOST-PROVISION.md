@@ -176,7 +176,7 @@ Keys live under `/usr/lib/workspace-guard/ssh-keys/<user>/id_ed25519` (root
 
 From repo root, as root:
 
-1. `make install-host-stack-phase5` (always runs `build-guard` or `build-host-stack`)
+1. `make install-guard-stack` (always runs `build-guard` or `build-host-stack`)
 2. Fleet sudo state unchanged by provision (audit only)
 
 Phase 5 runs with `GUARD_PROVISION_CONTEXT=1` so `install-guard-host-exec` does

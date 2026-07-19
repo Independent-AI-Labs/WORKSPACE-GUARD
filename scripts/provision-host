@@ -268,7 +268,7 @@ if hp_should_run_phase 5 && [[ "$SKIP_PHASE5" -eq 0 ]]; then
         install_auditd="$(hp_parse_field guard_stack.install_auditd)"
         GUARD_PROVISION_CONTEXT=1 \
             INSTALL_LOCK="${install_lock:-false}" INSTALL_AUDITD="${install_auditd:-false}" \
-            make -C "$REPO_ROOT" install-host-stack-phase5
+            make -C "$REPO_ROOT" install-guard-stack
         if [[ "$USER_MGMT" -eq 1 ]]; then
             hp_install_system_config "$HP_CONFIG"
             hp_write_marker "$ADMIN_NAME" "$FLEET_SHA" "true"

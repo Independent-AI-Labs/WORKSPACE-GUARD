@@ -56,7 +56,7 @@ if [[ ! -f "$STATE_FILE" ]]; then
 fi
 
 HAVE_CHATTR=0
-if command -v chattr >/dev/null 2>&1; then HAVE_CHATTR=1; fi
+if command -v chattr; then HAVE_CHATTR=1; fi
 
 paths_tmp="$(mktemp -t lock-uninstall-paths.XXXXXX)"
 trap 'rm -f "$paths_tmp"' EXIT
@@ -89,7 +89,7 @@ while IFS= read -r path; do
             echo "  WOULD: chattr -i $real"
         fi
         echo "  WOULD: rm -f $real"
-        if command -v dpkg-divert >/dev/null 2>&1; then
+        if command -v dpkg-divert; then
             if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
                 echo "  WOULD: dpkg-divert --remove --rename $path"
             fi
@@ -108,7 +108,7 @@ while IFS= read -r path; do
             FAILED=$((FAILED+1)); continue
         fi
     fi
-    if command -v dpkg-divert >/dev/null 2>&1; then
+    if command -v dpkg-divert; then
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
             if ! dpkg-divert --remove --rename "$path" 2>"$DEVNULL"; then
                 echo "  WARN: dpkg-divert --remove $path failed (manual cleanup needed)" >&2

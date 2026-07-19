@@ -107,7 +107,7 @@ fi
 echo "==> Guard binary: $GUARD_BIN"
 
 HAVE_CHATTR=0
-if command -v chattr >/dev/null 2>&1; then HAVE_CHATTR=1; fi
+if command -v chattr; then HAVE_CHATTR=1; fi
 
 # log MSG: emit to stdout + append to LOG_FILE (if writable).
 log() { printf '%s\n' "$*"; }
@@ -287,7 +287,7 @@ while IFS= read -r path; do
     #     the original to <path>.distrib (required for package-owned
     #     files). After this, <path> is briefly empty.
     div_flag=false
-    if command -v dpkg-divert >/dev/null 2>&1; then
+    if command -v dpkg-divert; then
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
             div_flag=true
         else
@@ -311,10 +311,10 @@ while IFS= read -r path; do
     fi
 
     # 3j. Warm check: <path> should now be the guard binary.
-    if ! "$path" --version 2>"$DEVNULL" >/dev/null; then
-        if ! "$path" --help 2>"$DEVNULL" >/dev/null; then
-            if ! "$path" 2>"$DEVNULL" </dev/null >/dev/null; then
-                echo "  WARN: $path warm-check failed (post-install)" >&2
+    if ! _warm_out="$("$path" --version 2>&1)"; then
+        if ! _warm_out="$("$path" --help 2>&1)"; then
+            if ! _warm_out="$("$path" </dev/null 2>&1)"; then
+                echo "  WARN: $path warm-check failed (post-install): $_warm_out" >&2
             fi
         fi
     fi

@@ -40,7 +40,7 @@ if [[ ! -f "$USERS_FILE" && -z "$ADMIN_FROM" ]]; then
     echo "       cp config/home-lock-users.yaml.example config/home-lock-users.yaml" >&2
     exit 2
 fi
-if ! command -v ssh-keygen >/dev/null; then
+if ! command -v ssh-keygen; then
     echo "ERROR: ssh-keygen not found" >&2
     exit 2
 fi

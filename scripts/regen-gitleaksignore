@@ -23,7 +23,7 @@ repo_root=$(git rev-parse --show-toplevel 2>"$DEVNULL") || {
 
 cd "$repo_root"
 
-if ! command -v gitleaks >/dev/null 2>&1; then
+if ! command -v gitleaks; then
   echo "regen-gitleaksignore: gitleaks not on PATH" >&2
   exit 1
 fi

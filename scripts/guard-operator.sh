@@ -82,7 +82,7 @@ guard_up() {
     if _guard_needs_install; then
         if _user_mgmt_enabled && [[ -f "$MARKER" ]]; then
             echo "==> guard-up: installing guard stack (provision marker present)"
-            GUARD_PROVISION_CONTEXT=1 make -C "$REPO_ROOT" install-host-stack-phase5
+            GUARD_PROVISION_CONTEXT=1 make -C "$REPO_ROOT" install-guard-stack
         else
             echo "==> guard-up: installing git guard"
             make -C "$REPO_ROOT" install-guard-host-exec

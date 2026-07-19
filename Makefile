@@ -235,7 +235,7 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
 
-.PHONY: install-host-stack-phase5 _install-host-stack-phase5-build
+.PHONY: install-guard-stack _install-guard-stack-build
 INSTALL_LOCK ?= false
 INSTALL_AUDITD ?= false
 
@@ -243,7 +243,7 @@ _GUARD_RELEASE_BIN := $(REPO_ROOT)/target/release/workspace-guard
 _GUARD_RELEASE_SSH := $(REPO_ROOT)/target/release/workspace-git-ssh
 _GUARD_RELEASE_MODE := $(REPO_ROOT)/target/release/workspace-guard.mode
 
-_install-host-stack-phase5-build:
+_install-guard-stack-build:
 	if [ "$(GUARD_SKIP_BUILD)" = "1" ]; then \
 		:; \
 	elif [ "$(INSTALL_LOCK)" = "true" ]; then \
@@ -252,7 +252,7 @@ _install-host-stack-phase5-build:
 		$(MAKE) build-guard; \
 	fi
 
-install-host-stack-phase5: _install-host-stack-phase5-build ## Build + install guard + optional lock/auditd
+install-guard-stack: _install-guard-stack-build ## Build + install guard + optional lock/auditd
 	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
 	if [ "$(INSTALL_LOCK)" = "true" ]; then GUARD_SKIP_BUILD=1 $(MAKE) install-lock; fi
 	if [ "$(INSTALL_AUDITD)" = "true" ]; then $(MAKE) install-auditd; fi

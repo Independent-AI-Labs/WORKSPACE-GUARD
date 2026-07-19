@@ -145,7 +145,7 @@ EOF
 @test "provision-host writes marker after phase 5 install" {
     local script phase5_line marker_line
     script="$GUARD_ROOT/scripts/provision-host"
-    phase5_line="$(grep -n 'install-host-stack-phase5' "$script" | head -1 | cut -d: -f1)"
+    phase5_line="$(grep -n 'install-guard-stack' "$script" | head -1 | cut -d: -f1)"
     marker_line="$(grep -n 'hp_write_marker' "$script" | awk -F: -v p="$phase5_line" '$1 > p {print $1}' | head -1)"
     [[ -n "$marker_line" && "$marker_line" -gt "$phase5_line" ]]
 }
