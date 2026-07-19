@@ -309,6 +309,9 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 }
 
 #[cfg(test)]
+pub static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 #[path = "config_consistency_tests.rs"]
 mod config_consistency;
 

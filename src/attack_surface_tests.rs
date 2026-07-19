@@ -72,6 +72,9 @@ fn evaluate_case(case: &AttackSurfaceCase) -> Result<(), String> {
         }
     }
 
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     set_env(case);
     let result = evaluate_case_inner(case);
     clear_env(case);
