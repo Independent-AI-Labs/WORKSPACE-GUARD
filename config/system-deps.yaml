@@ -52,6 +52,11 @@ requires:
     description: e2fsprogs (chattr/e2fs tools)
     platforms: [linux]
 
+  - check_cmd: systemd-run
+    apt_package: systemd
+    description: systemd (systemd-run for timed config relock)
+    platforms: [linux]
+
   - check_cmd: file
     apt_package: file
     description: file (file-type detection)

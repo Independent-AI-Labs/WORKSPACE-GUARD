@@ -9,6 +9,7 @@ use nix::unistd::geteuid;
 mod agent_identity;
 mod args;
 mod block;
+mod ci_integrity;
 mod config_keys;
 mod exec;
 #[cfg(feature = "capability-mode")]

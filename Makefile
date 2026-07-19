@@ -412,6 +412,39 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	bash scripts/guard-operator.sh '$*'
 
 # =============================================================================
+# Consumer Config Lock (timed unseal for root-owned immutable configs)
+# =============================================================================
+# Consumer repos (e.g. WORKSPACE-WEB-CONTENT) keep config/*.yaml root-owned
+# and chattr +i. These intents unseal them for a bounded window; relock is
+# scheduled via systemd-run (dependency: config/system-deps.yaml -> systemd,
+# checked/bootstrapped by make init / make init-check).
+
+CONFIG_LOCK_REPO ?= $(abspath $(REPO_ROOT)/../WORKSPACE-WEB-CONTENT)
+CONFIG_LOCK_MINUTES ?= 10
+
+.PHONY: config-lock config-unseal config-relock config-lock-status
+config-lock: ## Lock consumer config/*.yaml now (root:root + immutable); cancels pending relock timer (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: config-lock needs root: sudo make config-lock" >&2; exit 1; \
+	fi
+	bash scripts/config-lock.sh lock "$(CONFIG_LOCK_REPO)"
+
+config-unseal: ## Timed unseal of consumer config/*.yaml; auto-relock after CONFIG_LOCK_MINUTES (default 10) (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: config-unseal needs root: sudo make config-unseal" >&2; exit 1; \
+	fi
+	bash scripts/config-lock.sh unseal "$(CONFIG_LOCK_REPO)" "$(CONFIG_LOCK_MINUTES)"
+
+config-relock: ## Relock consumer config/*.yaml immediately and cancel the timed relock (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: config-relock needs root: sudo make config-relock" >&2; exit 1; \
+	fi
+	bash scripts/config-lock.sh relock "$(CONFIG_LOCK_REPO)"
+
+config-lock-status: ## Show per-file lock state and pending relock timer for consumer config/*.yaml
+	bash scripts/config-lock.sh status "$(CONFIG_LOCK_REPO)"
+
+# =============================================================================
 # Host Provision
 # =============================================================================
 

@@ -299,6 +299,8 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         ));
     }
 
+    crate::ci_integrity::check_ci_integrity(&toplevel, &wsroot)?;
+
     let ci_script = format!("{}/{}", wsroot, CONTRACT_SCRIPT);
     if !Path::new(&ci_script).exists() {
         return Err(GuardError::ContractFailed(format!(
