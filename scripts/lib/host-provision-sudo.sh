@@ -58,7 +58,7 @@ hp_sudo_has_cached_ticket() {
     if _ticket="$(hp_sudo_ticket_path "$user")"; then
         return 0
     fi
-    if command -v runuser && getent passwd "$user"; then
+    if _runuser_probe="$(command -v runuser 2>&1)" && _passwd_probe="$(getent passwd "$user" 2>&1)"; then
         local _sv_rc=0
         runuser -u "$user" -- sudo -n -v 2>"$DEVNULL" || _sv_rc=$?
         if [[ $_sv_rc -eq 0 ]]; then
@@ -71,7 +71,7 @@ hp_sudo_has_cached_ticket() {
 hp_sudo_revoke_cached_ticket() {
     local user="${1:?user}"
 
-    if command -v runuser && getent passwd "$user"; then
+    if _runuser_probe="$(command -v runuser 2>&1)" && _passwd_probe="$(getent passwd "$user" 2>&1)"; then
         local _sk_rc=0
         runuser -u "$user" -- sudo -k 2>"$DEVNULL" || _sk_rc=$?
         if [[ $_sk_rc -ne 0 ]]; then
@@ -91,7 +91,7 @@ hp_sudo_revoke_cached_ticket() {
 hp_sudo_privilege_state() {
     local user="${1:?user}" listing="" rc=0
 
-    if ! getent passwd "$user"; then
+    if ! _passwd_probe="$(getent passwd "$user" 2>&1)"; then
         printf 'verify_failed\n'
         return 0
     fi
@@ -106,7 +106,7 @@ hp_sudo_privilege_state() {
         return 0
     fi
 
-    if ! command -v sudo; then
+    if ! _sudo_probe="$(command -v sudo 2>&1)"; then
         printf 'verify_failed\n'
         return 0
     fi
