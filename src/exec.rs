@@ -301,11 +301,11 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
 
     let ci_script = format!("{}/{}", wsroot, CONTRACT_SCRIPT);
     if !Path::new(&ci_script).exists() {
-        eprintln!(
-            "WARNING: WORKSPACE-CI contract check script not found at {}",
+        return Err(GuardError::ContractFailed(format!(
+            "WORKSPACE-CI contract check script not found at {}: \
+             failing closed (contract cannot be verified)",
             ci_script
-        );
-        return Ok(());
+        )));
     }
 
     let child = std::process::Command::new("/bin/bash")
@@ -339,11 +339,11 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
             if elapsed >= timeout_ms {
                 let _ = kill(pid, Some(Signal::SIGKILL));
                 let _ = waitpid(Some(pid), None);
-                eprintln!(
-                    "WARNING: WORKSPACE-CI contract check timed out after {}ms: skipping",
+                return Err(GuardError::ContractFailed(format!(
+                    "WORKSPACE-CI contract check timed out after {}ms: \
+                     failing closed (contract cannot be verified)",
                     timeout_ms
-                );
-                return Ok(());
+                )));
             }
             std::thread::sleep(std::time::Duration::from_millis(CONTRACT_POLL_MS));
             elapsed += CONTRACT_POLL_MS;
