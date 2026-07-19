@@ -222,3 +222,29 @@ fn sudo_gated_env_warnings_non_sudo_drops_with_message() {
     let msgs_sudo = collect_sudo_gated_env_warnings(true);
     assert!(msgs_sudo.is_empty());
 }
+
+#[test]
+fn root_owned_regular_accepts_system_binary() {
+    let path = std::path::Path::new("/usr/bin/git");
+    if path.exists() {
+        assert!(root_owned_regular(path));
+    }
+}
+
+#[test]
+fn root_owned_regular_rejects_agent_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("owned-by-test-user");
+    std::fs::write(&file, b"x").unwrap();
+    assert!(!root_owned_regular(&file));
+}
+
+#[test]
+fn root_owned_regular_rejects_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("real");
+    let link = dir.path().join("link");
+    std::fs::write(&target, b"x").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    assert!(!root_owned_regular(&link));
+}

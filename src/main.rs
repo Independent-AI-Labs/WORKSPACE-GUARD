@@ -1,4 +1,6 @@
 use std::ffi::OsString;
+#[cfg(all(target_os = "linux", not(feature = "root-only")))]
+use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::process;
 
@@ -172,6 +174,15 @@ enum DeploymentClass {
 
 #[cfg(not(feature = "root-only"))]
 fn read_deployment_class() -> DeploymentClass {
+    // Fail closed unless the file is a regular root-owned file: an
+    // agent-writable deployment-class would let the workload pick its
+    // own class.
+    let trusted = std::fs::symlink_metadata(DEPLOYMENT_CLASS_FILE)
+        .map(|m| m.is_file() && m.st_uid() == 0)
+        .unwrap_or(false);
+    if !trusted {
+        return DeploymentClass::Unknown;
+    }
     let raw = std::fs::read_to_string(DEPLOYMENT_CLASS_FILE)
         .unwrap_or_default()
         .trim()

@@ -369,9 +369,37 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     )))
 }
 
+/// True when `path` is a regular, non-symlink file owned by uid 0.
+/// Runtime trust gate for files the guard honors but an agent could
+/// otherwise rewrite (mirrors verify_git_original's ownership rule).
+fn root_owned_regular(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => meta.is_file() && meta.st_uid() == 0,
+        Err(_) => false,
+    }
+}
+
+/// Test seam: unit tests write enforcement fixtures as the test user, so
+/// the ownership gate is compiled out under cfg(test). Production builds
+/// always enforce it.
+fn enforcement_file_trusted(path: &Path) -> bool {
+    #[cfg(test)]
+    {
+        let _ = path;
+        true
+    }
+    #[cfg(not(test))]
+    {
+        root_owned_regular(path)
+    }
+}
+
 fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
     let enforce_path = Path::new(wsroot).join(ENFORCEMENT_CONFIG);
     if !enforce_path.exists() {
+        return false;
+    }
+    if !enforcement_file_trusted(&enforce_path) {
         return false;
     }
     let content = match fs::read_to_string(&enforce_path) {

@@ -139,20 +139,25 @@ sync: ## Sync dependencies + reinstall hooks
 # Quality Gates
 # =============================================================================
 
+# Agent dev-loop commands (check/lint/test) write to a separate target dir:
+# target/release stays root-owned (build targets are root-gated) so an agent
+# cannot stage a trojaned binary for a later root install to consume.
+_AGENT_TARGET := $(REPO_ROOT)/target/agent
+
 .PHONY: check
 check: ## Run cargo check (all feature combinations)
-	cargo check --workspace
-	cargo check --no-default-features --features root-only
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo check --workspace
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo check --no-default-features --features root-only
 
 .PHONY: lint
 lint: ## Run cargo fmt --check + clippy
 	cargo fmt --all -- --check
-	cargo clippy --workspace --all-targets -- -D warnings
-	cargo clippy --no-default-features --features root-only --all-targets -- -D warnings
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo clippy --workspace --all-targets -- -D warnings
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo clippy --no-default-features --features root-only --all-targets -- -D warnings
 
 .PHONY: type-check
 type-check: ## Rust has no separate type-check; run cargo check
-	cargo check --workspace
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo check --workspace
 
 .PHONY: test test-unit test-integration-cap test-integration-root
 test: ## Run cargo test (all feature combinations; integration gated by euid)
@@ -174,17 +179,17 @@ test: ## Run cargo test (all feature combinations; integration gated by euid)
 
 test-unit: ## Unit/binary tests only (both feature combinations)
 	if [ "$(_OS)" != "Darwin" ]; then \
-		cargo test --workspace --bins; \
-		cargo test --no-default-features --features root-only --bins; \
+		CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --workspace --bins; \
+		CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --bins; \
 	else \
 		echo "SKIP: cargo unit tests on Darwin (Linux-only; use make test-podman)"; \
 	fi
 
 test-integration-cap: ## Capability-mode integration tests (non-root)
-	cargo test --test integration_test
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --test integration_test
 
 test-integration-root: ## Root-only integration tests (root)
-	cargo test --no-default-features --features root-only --test integration_test
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --test integration_test
 
 .PHONY: test-shell
 test-shell: ## Run the bats shell test suite (NOT gated in check-push).
@@ -230,7 +235,11 @@ test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in g
 # Git Guard
 # =============================================================================
 
-build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap)
+build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: build-guard needs root (install consumes target/ artifacts): sudo make build-guard" >&2; \
+		exit 1; \
+	fi
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
@@ -286,13 +295,23 @@ check-guard-host-exec: ## Check host-exec git-guard installation status
 # =============================================================================
 
 .PHONY: build
-build: ## Build release binary (default + root-only)
+build: ## Build release binary (default + root-only) (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: build needs root (install consumes target/ artifacts): sudo make build" >&2; \
+		exit 1; \
+	fi
 	cargo build --release
 	cargo build --release --no-default-features --features root-only
+	chown -R root:root "$(REPO_ROOT)/target"
 
 .PHONY: build-binary-guard
-build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins table)
+build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins table) (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: build-binary-guard needs root (install consumes target/ artifacts): sudo make build-binary-guard" >&2; \
+		exit 1; \
+	fi
 	cargo build --release --features binary-guard --bin workspace-binary-guard
+	chown -R root:root "$(REPO_ROOT)/target"
 
 # =============================================================================
 # Cleanup & Compliance
