@@ -13,7 +13,11 @@
 
 version: 1
 
-nofile: 256
+# 256 starves legitimate hook chains: git push -> pre-push -> make
+# check-push -> podman/crun EMFILEs under a 256-fd clamp (observed:
+# crun "open /proc/self/cgroup: Too many open files"). 4096 still caps
+# runaway payloads while letting container/build tooling run.
+nofile: 4096
 core: 0
 contract_timeout_ms: 2000
 contract_poll_ms: 50
