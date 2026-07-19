@@ -17,17 +17,17 @@ ignore_paths:
 # constants referenced only from test files (which dangle intentionally
 # skips) belong here.
 ignored_names:
-  - "main"
-  - "cli"
-  - "WORKSPACE_MARKERS"
+  - 'main'
+  - 'cli'
+  - 'WORKSPACE_MARKERS'
 
 # Regex patterns for names to ignore (matched against fn/var/class names)
 ignored_name_patterns:
-  - "^__.*__$"
-  - "^test_"
-  - "^Test"
-  - "^fixture_"
-  - "^conftest$"
+  - '^__.*__$'
+  - '^test_'
+  - '^Test'
+  - '^fixture_'
+  - '^conftest$'
 
 # Files excluded from REPORTING dead code but still scanned for references.
 # Tests and conftest modules are never "dead" but their imports matter.
