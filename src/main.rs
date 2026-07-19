@@ -298,7 +298,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         // Best-effort; never blocks a pass.
         // Root-only builds are no-ops (user is already root).
         #[cfg(feature = "capability-mode")]
-        gitdir::lock();
+        gitdir::lock(argv_os);
 
         if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
             exec::check_workspace_ci_contract(sub)?;

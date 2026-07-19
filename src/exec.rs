@@ -250,21 +250,21 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
                 Ok(WaitStatus::Exited(_, code)) => {
                     #[cfg(feature = "capability-mode")]
                     {
-                        crate::gitdir::lock();
+                        crate::gitdir::lock(argv_os);
                     }
                     std::process::exit(code);
                 }
                 Ok(WaitStatus::Signaled(_, sig, _)) => {
                     #[cfg(feature = "capability-mode")]
                     {
-                        crate::gitdir::lock();
+                        crate::gitdir::lock(argv_os);
                     }
                     std::process::exit(128 + sig as i32);
                 }
                 _ => {
                     #[cfg(feature = "capability-mode")]
                     {
-                        crate::gitdir::lock();
+                        crate::gitdir::lock(argv_os);
                     }
                     std::process::exit(1);
                 }

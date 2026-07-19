@@ -59,7 +59,7 @@
 
 #![cfg(feature = "capability-mode")]
 
-use std::ffi::CString;
+use std::ffi::{CString, OsString};
 use std::fs;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
@@ -79,7 +79,7 @@ const HOOK_FILE_MODE: u32 = 0o755;
 /// Mode for directories: traversable by all, root can create entries.
 const DIR_MODE: u32 = 0o755;
 
-pub fn lock() {
+pub fn lock(argv_os: &[OsString]) {
     // Skip only for a real root operator (root can chown anything back, so
     // the lock would just impede them). is_sudo()/AT_SECURE is the wrong
     // gate here: file-capability host-exec sets AT_SECURE for every agent
@@ -88,7 +88,7 @@ pub fn lock() {
     if nix::unistd::geteuid().as_raw() == 0 {
         return;
     }
-    let git_dir = match resolve_git_dir() {
+    let git_dir = match resolve_git_dir(argv_os) {
         Some(p) => p,
         None => return,
     };
@@ -273,11 +273,42 @@ fn lock_tree(path: &Path, git_dir: &Path) {
     }
 }
 
-fn resolve_git_dir() -> Option<PathBuf> {
+/// Extract the leading global options that change WHERE git locates the
+/// repository (-C <path>, --git-dir, --work-tree) so the lock resolves the
+/// same git dir the real git child will operate on. Without this, a call
+/// like `git -C /other/repo status` would lock the repo under the guard's
+/// own cwd (or none) instead of the target repo (observed: post-exec
+/// relock was a no-op for every `-C` invocation, errors discarded).
+fn repo_location_args(argv_os: &[OsString]) -> Vec<OsString> {
+    let mut out = Vec::new();
+    let mut it = argv_os.iter().skip(1);
+    while let Some(a) = it.next() {
+        let bytes = a.as_bytes();
+        if bytes == b"-C" || bytes == b"--git-dir" || bytes == b"--work-tree" {
+            if let Some(v) = it.next() {
+                out.push(a.clone());
+                out.push(v.clone());
+            }
+        } else if bytes.starts_with(b"--git-dir=") || bytes.starts_with(b"--work-tree=") {
+            out.push(a.clone());
+        }
+    }
+    out
+}
+
+fn resolve_git_dir(argv_os: &[OsString]) -> Option<PathBuf> {
     let mut cmd = Command::new(GIT_ORIGINAL_PATH);
     cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
     crate::agent_identity::apply_agent_hardened_git_env(&mut cmd, false);
+    // Preserve repo-location env overrides; env_clear would drop them and
+    // the lock would resolve the cwd repo instead of the intended one.
+    for var in ["GIT_DIR", "GIT_WORK_TREE"] {
+        if let Some(v) = std::env::var_os(var) {
+            cmd.env(var, v);
+        }
+    }
     let out = cmd
+        .args(repo_location_args(argv_os))
         .args(["rev-parse", "--absolute-git-dir"])
         .output()
         .ok()?;
@@ -384,3 +415,7 @@ fn chmod(path: &Path, mode: u32) -> std::io::Result<()> {
 #[cfg(test)]
 #[path = "gitdir_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "gitdir_glob_tests.rs"]
+mod glob_tests;
