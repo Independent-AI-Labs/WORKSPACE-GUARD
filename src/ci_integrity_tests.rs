@@ -119,12 +119,19 @@ fn parse_ls_files_extracts_mode_and_path() {
     assert_eq!(entries[1], ("100644".to_string(), "README.md".to_string()));
 }
 
+fn actual_uids(dir: &Path) -> (u32, u32) {
+    use std::os::unix::fs::MetadataExt;
+    let git_uid = fs::metadata(dir.join(".git")).unwrap().uid();
+    let file_uid = fs::metadata(dir.join("f.txt")).unwrap().uid();
+    (git_uid, file_uid)
+}
+
 #[test]
 fn deployment_clean_repo_has_no_violations() {
     let dir = unique_temp_dir("deploy-clean");
     init_repo(&dir);
-    let uid = nix::unistd::geteuid().as_raw();
-    let violations = deployment_violations(&dir, uid, uid, false);
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid, file_uid, false);
     assert!(violations.is_empty(), "unexpected: {:?}", violations);
 }
 
@@ -148,9 +155,8 @@ fn divergence_behind_warns_but_passes() {
 fn deployment_wrong_owner_is_violation() {
     let dir = unique_temp_dir("deploy-owner");
     init_repo(&dir);
-    let wrong_uid = nix::unistd::geteuid().as_raw() + 1;
-    // .git is root-locked by the guard; wrong file uid still flags tracked files.
-    let violations = deployment_violations(&dir, wrong_uid, wrong_uid, false);
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid + 1, file_uid + 1, false);
     assert!(
         violations.iter().any(|v| v.contains(".git owned by uid")),
         "unexpected: {:?}",
@@ -168,8 +174,8 @@ fn deployment_exec_bit_mismatch_is_violation() {
     assert!(run_git(&dir, &["add", "tool.sh"]));
     assert!(run_git(&dir, &["commit", "-qm", "add tool"]));
     fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
-    let uid = nix::unistd::geteuid().as_raw();
-    let violations = deployment_violations(&dir, uid, uid, false);
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid, file_uid, false);
     assert!(
         violations.iter().any(|v| v.contains("100755")),
         "unexpected: {:?}",
