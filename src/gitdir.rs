@@ -69,7 +69,7 @@ use std::process::Command;
 
 use nix::unistd::{chown, Gid, Uid};
 
-use crate::{is_sudo, CHILD_PATH, GIT_ORIGINAL_PATH};
+use crate::{CHILD_PATH, GIT_ORIGINAL_PATH};
 
 /// Mode for regular files: world-readable, root-writable only.
 const FILE_MODE: u32 = 0o644;
@@ -80,7 +80,12 @@ const HOOK_FILE_MODE: u32 = 0o755;
 const DIR_MODE: u32 = 0o755;
 
 pub fn lock() {
-    if is_sudo() {
+    // Skip only for a real root operator (root can chown anything back, so
+    // the lock would just impede them). is_sudo()/AT_SECURE is the wrong
+    // gate here: file-capability host-exec sets AT_SECURE for every agent
+    // git invocation, which disabled the lock in exactly the deployment it
+    // protects (observed: .git/index left agent-owned and agent-writable).
+    if nix::unistd::geteuid().as_raw() == 0 {
         return;
     }
     let git_dir = match resolve_git_dir() {
