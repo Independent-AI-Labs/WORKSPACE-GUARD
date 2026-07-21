@@ -88,15 +88,25 @@ cancel_timer() {
 
 lock_files() {
     local repo="$1"; shift
-    local f locked=0
+    local f locked=0 bad=0
     for f in "$@"; do
         [[ -f "$f" ]] || { log "skip (missing): $f"; continue; }
-        chown root:root "$f"
+        chown root:root "$f" || { log "ERROR: chown root:root failed: $f"; bad=1; continue; }
         if have_chattr; then
-            chattr +i "$f" || log "WARN: chattr +i failed: $f"
+            chattr +i "$f" || { log "ERROR: chattr +i failed: $f"; bad=1; continue; }
         fi
         locked=$((locked + 1))
     done
+    for f in "$@"; do
+        [[ -f "$f" ]] || continue
+        if [[ "$(stat -c '%U:%G' "$f")" != "root:root" ]]; then
+            log "ERROR: verify failed, not root:root: $f"; bad=1
+        fi
+        if have_chattr && ! is_immutable "$f"; then
+            log "ERROR: verify failed, not immutable: $f"; bad=1
+        fi
+    done
+    [[ $bad -eq 0 ]] || fail "lock verification failed for $repo/config"
     log "locked $locked file(s) under $repo/config (root:root, immutable)"
 }
 
@@ -110,45 +120,60 @@ do_lock() {
     lock_files "$repo" "${files[@]}"
 }
 
+writable_by() {
+    local user="$1" f="$2"
+    if have_cmd sudo; then
+        sudo -u "$user" test -w "$f"
+    else
+        su -s /bin/sh -c "test -w \"$f\"" "$user"
+    fi
+}
+
 do_unseal() {
     local repo="$1" minutes="${2:-10}"
     require_root
     [[ "$minutes" =~ ^[0-9]+$ ]] || fail "minutes must be a non-negative integer, got: $minutes"
     local sf owner f
     sf="$(state_file "$repo")"
+    local resumed=0
     if [[ -f "$sf" ]]; then
-        log "already unsealed (state: $sf)"
-        local _timers
-        if _timers="$(systemctl list-timers "$(unit_name "$repo").timer" --no-pager 2>&1)"; then
-            printf '%s\n' "$_timers"
-        else
-            log "list-timers ${repo}: ${_timers:-none pending}"
-        fi
-        exit 0
+        log "existing unseal state found; re-applying permissions (state: $sf)"
+        resumed=1
     fi
     owner="$(repo_owner "$repo")"
+    local owner_user="${owner%%:*}"
     mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
     : > "$sf"
-    local count=0 f_abs
+    local count=0 bad=0 f_abs
     while IFS= read -r f; do
         f_abs="$f"
-        if is_immutable "$f_abs" || [[ "$(stat -c '%U' "$f_abs")" == "root" ]]; then
-            if have_chattr; then
-                local _ci_out
-                _ci_out="$(chattr -i "$f_abs" 2>&1)" || log "WARN: chattr -i failed: $f_abs: $_ci_out"
-            fi
-            chown "$owner" "$f_abs"
-            printf '%s\n' "$f_abs" >> "$sf"
-            count=$((count + 1))
+        if have_chattr && is_immutable "$f_abs"; then
+            chattr -i "$f_abs" || { log "ERROR: chattr -i failed: $f_abs"; bad=1; continue; }
         fi
+        chown "$owner" "$f_abs" || { log "ERROR: chown $owner failed: $f_abs"; bad=1; continue; }
+        chmod u+rw "$f_abs" || { log "ERROR: chmod u+rw failed: $f_abs"; bad=1; continue; }
+        printf '%s\n' "$f_abs" >> "$sf"
+        count=$((count + 1))
     done < <(config_files "$repo")
-    if [[ $count -eq 0 ]]; then
-        rm -f "$sf"
-        log "nothing to unseal: no root-owned/immutable files in $repo/config"
-        exit 0
-    fi
+    [[ $count -gt 0 ]] || fail "no config/*.yaml in $repo"
+    while IFS= read -r f; do
+        if is_immutable "$f"; then
+            log "ERROR: verify failed, still immutable: $f"; bad=1
+        fi
+        if [[ "$(stat -c '%U:%G' "$f")" != "$owner" ]]; then
+            log "ERROR: verify failed, owner mismatch: $f"; bad=1
+        fi
+        if ! writable_by "$owner_user" "$f"; then
+            log "ERROR: verify failed, not writable by $owner_user: $f"; bad=1
+        fi
+    done < "$sf"
+    [[ $bad -eq 0 ]] || fail "unseal verification failed for $repo/config; NOT scheduling relock"
     printf 'owner=%s\n' "$owner" >> "$sf"
     log "unsealed $count file(s) -> $owner (state: $sf)"
+    if [[ $resumed -eq 1 ]]; then
+        log "existing timer left as-is; check: make config-lock-status"
+        exit 0
+    fi
     if [[ "$minutes" -gt 0 ]]; then
         have_cmd systemd-run || fail "systemd-run missing (make init installs it); use 'unseal $repo 0' + manual relock"
         local unit

@@ -10,9 +10,10 @@ use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::{getuid, Pid, User};
 
 use crate::{
-    args::ArgState, GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT,
-    CONTRACT_TIMEOUT_MS, CORE_LIMIT, ENFORCEMENT_CONFIG, GIT_ORIGINAL, NOFILE_LIMIT,
-    WORKSPACE_MARKERS,
+    args::ArgState,
+    wsroot::{find_partial_workspace_root, find_workspace_root},
+    GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT, CONTRACT_TIMEOUT_MS,
+    CORE_LIMIT, ENFORCEMENT_CONFIG, GIT_ORIGINAL, NOFILE_LIMIT, WORKSPACE_MARKERS,
 };
 
 #[cfg(feature = "capability-mode")]
@@ -288,7 +289,16 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
     let wsroot = find_workspace_root(&toplevel);
     let wsroot = match wsroot {
         Some(w) => w,
-        None => return Ok(()),
+        None => {
+            if let Some(partial) = find_partial_workspace_root(&toplevel) {
+                return Err(GuardError::ContractFailed(format!(
+                    "workspace markers incomplete at {}: expected all of {:?}; \
+                     failing closed (possible marker tampering)",
+                    partial, WORKSPACE_MARKERS
+                )));
+            }
+            return Ok(());
+        }
     };
 
     if check_vendored_tier_bypass(&wsroot, &toplevel) {
@@ -483,18 +493,6 @@ fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
     }
 
     false
-}
-
-fn find_workspace_root(toplevel: &str) -> Option<String> {
-    let mut cur = std::path::PathBuf::from(toplevel);
-    loop {
-        if WORKSPACE_MARKERS.iter().all(|m| cur.join(m).exists()) {
-            return Some(cur.to_string_lossy().to_string());
-        }
-        if !cur.pop() {
-            return None;
-        }
-    }
 }
 
 #[cfg(test)]

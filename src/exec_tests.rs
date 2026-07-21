@@ -248,3 +248,45 @@ fn root_owned_regular_rejects_symlink() {
     std::os::unix::fs::symlink(&target, &link).unwrap();
     assert!(!root_owned_regular(&link));
 }
+
+fn make_workspace_markers(dir: &std::path::Path, markers: &[&str]) {
+    for m in markers {
+        let p = dir.join(m);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::create_dir_all(&p).unwrap();
+    }
+}
+
+#[test]
+fn full_markers_find_workspace_root() {
+    let dir = tempfile::tempdir().unwrap();
+    make_workspace_markers(dir.path(), WORKSPACE_MARKERS);
+    let top = format!("{}/projects/CI", dir.path().to_string_lossy());
+    assert_eq!(
+        find_workspace_root(&top),
+        Some(dir.path().to_string_lossy().to_string())
+    );
+}
+
+#[test]
+fn partial_markers_miss_full_but_hit_partial() {
+    let dir = tempfile::tempdir().unwrap();
+    let some: Vec<&str> = WORKSPACE_MARKERS.iter().take(1).cloned().collect();
+    make_workspace_markers(dir.path(), &some);
+    let top = format!("{}/projects/CI", dir.path().to_string_lossy());
+    assert_eq!(find_workspace_root(&top), None);
+    assert_eq!(
+        find_partial_workspace_root(&top),
+        Some(dir.path().to_string_lossy().to_string())
+    );
+}
+
+#[test]
+fn no_markers_hit_neither() {
+    let dir = tempfile::tempdir().unwrap();
+    let top = dir.path().to_string_lossy().to_string();
+    assert_eq!(find_workspace_root(&top), None);
+    assert_eq!(find_partial_workspace_root(&top), None);
+}
