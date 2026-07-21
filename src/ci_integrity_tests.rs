@@ -114,9 +114,20 @@ fn parse_ls_files_extracts_mode_and_path() {
     assert_eq!(entries.len(), 2);
     assert_eq!(
         entries[0],
-        ("100755".to_string(), "scripts/foo".to_string())
+        (
+            "100755".to_string(),
+            "abc".to_string(),
+            "scripts/foo".to_string()
+        )
     );
-    assert_eq!(entries[1], ("100644".to_string(), "README.md".to_string()));
+    assert_eq!(
+        entries[1],
+        (
+            "100644".to_string(),
+            "def".to_string(),
+            "README.md".to_string()
+        )
+    );
 }
 
 fn actual_uids(dir: &Path) -> (u32, u32) {
@@ -159,6 +170,53 @@ fn deployment_wrong_owner_is_violation() {
     let violations = deployment_violations(&dir, git_uid + 1, file_uid + 1, false);
     assert!(
         violations.iter().any(|v| v.contains(".git owned by uid")),
+        "unexpected: {:?}",
+        violations
+    );
+}
+
+#[test]
+fn deployment_modified_content_is_violation() {
+    let dir = unique_temp_dir("deploy-content");
+    init_repo(&dir);
+    fs::write(dir.join("f.txt"), "tampered").unwrap();
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid, file_uid, false);
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("content hash differs")),
+        "unexpected: {:?}",
+        violations
+    );
+}
+
+#[test]
+fn deployment_untracked_file_is_violation() {
+    let dir = unique_temp_dir("deploy-untracked");
+    init_repo(&dir);
+    fs::write(dir.join("rogue.sh"), "x").unwrap();
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid, file_uid, false);
+    assert!(
+        violations.iter().any(|v| v.contains("untracked file")),
+        "unexpected: {:?}",
+        violations
+    );
+}
+
+#[test]
+fn deployment_allowlisted_untracked_passes() {
+    let dir = unique_temp_dir("deploy-allowlist");
+    init_repo(&dir);
+    fs::create_dir_all(dir.join(".venv")).unwrap();
+    fs::write(dir.join(".venv/pyvenv.cfg"), "x").unwrap();
+    fs::create_dir_all(dir.join("pkg/__pycache__")).unwrap();
+    fs::write(dir.join("pkg/__pycache__/m.cpython-313.pyc"), "x").unwrap();
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid, file_uid, false);
+    assert!(
+        !violations.iter().any(|v| v.contains("untracked file")),
         "unexpected: {:?}",
         violations
     );

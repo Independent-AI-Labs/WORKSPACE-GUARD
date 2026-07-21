@@ -33,6 +33,13 @@ const REQUIRED_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
 const HOOK_MARKER_NEEDLES: [&str; 2] = ["AUTO-GENERATED", "generate-hooks"];
 const MAX_LISTED_VIOLATIONS: usize = 10;
 const CI_DEPLOY_REL: &str = "projects/CI";
+const UNTRACKED_ALLOWLIST: [&str; 5] = [
+    ".venv/",
+    "node_modules/",
+    "__pycache__/",
+    "target/",
+    ".pytest_cache/",
+];
 
 fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(GIT_BIN);
@@ -124,12 +131,55 @@ fn check_consumer_hooks(toplevel: &str) -> Result<(), GuardError> {
     )))
 }
 
-fn parse_ls_files(blob: &str) -> Vec<(String, String)> {
+fn parse_ls_files(blob: &str) -> Vec<(String, String, String)> {
     blob.split('\0')
         .filter_map(|rec| {
             let (meta, path) = rec.split_once('\t')?;
-            let mode = meta.split_whitespace().next()?.to_string();
-            Some((mode, path.to_string()))
+            let mut fields = meta.split_whitespace();
+            let mode = fields.next()?.to_string();
+            let hash = fields.next()?.to_string();
+            Some((mode, hash, path.to_string()))
+        })
+        .collect()
+}
+
+fn blob_hash_of(path: &Path) -> Option<String> {
+    let mut cmd = Command::new(GIT_BIN);
+    cmd.env_clear()
+        .env("PATH", CHILD_PATH)
+        .env("HOME", "/")
+        .arg("hash-object")
+        .arg("--")
+        .arg(path);
+    crate::apply_safe_directory(&mut cmd);
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn untracked_violations(ci_path: &Path) -> Vec<String> {
+    let Some(blob) = git_output(
+        ci_path,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    ) else {
+        return Vec::new();
+    };
+    blob.split('\0')
+        .filter(|rel| !rel.is_empty())
+        .filter(|rel| {
+            !rel.split('/').any(|component| {
+                UNTRACKED_ALLOWLIST
+                    .iter()
+                    .any(|a| component == a.trim_end_matches('/'))
+            })
+        })
+        .map(|rel| {
+            format!(
+                "{}: untracked file in deployment",
+                ci_path.join(rel).display()
+            )
         })
         .collect()
 }
@@ -196,7 +246,7 @@ fn deployment_violations(
     }
 
     if let Some(blob) = git_output(ci_path, &["ls-files", "-s", "-z"]) {
-        for (mode, rel) in parse_ls_files(&blob) {
+        for (mode, hash, rel) in parse_ls_files(&blob) {
             if violations.len() >= MAX_LISTED_VIOLATIONS {
                 break;
             }
@@ -209,6 +259,13 @@ fn deployment_violations(
                 }
             };
             if meta.file_type().is_symlink() {
+                if mode != "120000" {
+                    violations.push(format!(
+                        "{}: tracked entry is a symlink but index mode is {}",
+                        path.display(),
+                        mode
+                    ));
+                }
                 continue;
             }
             if meta.uid() != file_uid {
@@ -226,7 +283,19 @@ fn deployment_violations(
                     path.display()
                 ));
             }
+            if meta.is_file() && blob_hash_of(&path).as_deref() != Some(hash.as_str()) {
+                violations.push(format!(
+                    "{}: content hash differs from git index (modified on disk)",
+                    path.display()
+                ));
+            }
         }
+    }
+    for v in untracked_violations(ci_path) {
+        if violations.len() >= MAX_LISTED_VIOLATIONS {
+            break;
+        }
+        violations.push(v);
     }
     violations
 }
