@@ -123,7 +123,11 @@ fn commit_amend_blocked() {
     state.has_amend = true;
     let argv_os = argv(&["git", "commit", "--amend"]);
     let result = check_blocked(&state, "commit", &argv_os, "/nonexistent-git", None);
-    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    if crate::is_config_privileged() {
+        assert!(result.is_ok(), "root should be allowed: {:?}", result);
+    } else {
+        assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    }
 }
 
 #[test]

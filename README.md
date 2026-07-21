@@ -121,7 +121,8 @@ class).
 
 - Subcommand blocks: `reset`, `clean`, `restore`, `rebase`, `gc`, and related
   destructive operations; sudo-gated `checkout` / `submodule`; flag gates on
-  `--hard`, `--no-verify`, force push, `--amend`, protected-branch pull/merge.
+  `--hard`, `--no-verify`, force push, protected-branch pull/merge; `--amend`
+  is sudo-gated (agents stay forward-only, operators may amend via sudo).
 - 96 glob patterns on `-c` / `--config` / `--config-env` keys.
 - Closed child environment (18-variable allow-list, hardcoded `PATH`).
 - Per-repo `.git/` ownership lock in host-exec mode.

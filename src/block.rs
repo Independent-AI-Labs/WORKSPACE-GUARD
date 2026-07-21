@@ -169,10 +169,10 @@ pub fn check_blocked(
         }
     }
 
-    if subcommand == "commit" && state.has_amend {
+    if subcommand == "commit" && state.has_amend && !operator_root {
         return Err(GuardError::Blocked {
             reason: "git commit --amend".into(),
-            hint: "Make a new commit instead: history is immutable, amends are forbidden".into(),
+            hint: "Amends rewrite history: agent commits are forward-only. Operators may amend via sudo.".into(),
         });
     }
 

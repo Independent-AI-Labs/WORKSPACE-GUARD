@@ -277,6 +277,11 @@ cases:
     expect: blocked
     reason_contains: amend
 
+  - id: commit-amend-root-allowed
+    argv: [git, commit, --amend]
+    expect: allowed
+    sudo_only: true
+
   - id: rebase-destructive
     argv: [git, rebase, main]
     expect: blocked
