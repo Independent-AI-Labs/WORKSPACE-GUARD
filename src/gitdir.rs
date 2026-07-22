@@ -123,9 +123,30 @@ pub fn lock(argv_os: &[OsString]) {
     }
 
     // 4. Glob patterns (e.g. *_exceptions.yaml): recursive scan from toplevel
+    let unsealed = read_unseal_state(&git_dir);
     for &(pattern, mode) in crate::LOCKED_GLOB_PATTERNS {
-        lock_glob_files(&toplevel, pattern, mode);
+        lock_glob_files(&toplevel, pattern, mode, &unsealed);
     }
+}
+
+/// Name of the root-owned state file inside the git dir that lists repo
+/// files intentionally unsealed by scripts/config-lock.sh (timed unseal
+/// window). Lives inside .git/ (itself locked root:root) so the agent
+/// cannot forge or edit it.
+const UNSEAL_STATE_FILE: &str = "config-unseal.files";
+
+/// Read the unseal state file. Absent or unreadable means "nothing
+/// unsealed" (fail closed: every glob-locked file stays locked).
+fn read_unseal_state(git_dir: &Path) -> Vec<PathBuf> {
+    let content = match fs::read_to_string(git_dir.join(UNSEAL_STATE_FILE)) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    content
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with("owner="))
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// Recursively scan `root` for files whose name matches `pattern` and
@@ -142,7 +163,7 @@ fn is_pruned_dir(name: &str) -> bool {
     name == ".git" || crate::LOCK_PRUNE_DIR_NAMES.contains(&name)
 }
 
-fn lock_glob_files(root: &Path, pattern: &str, mode: u32) {
+fn lock_glob_files(root: &Path, pattern: &str, mode: u32, unsealed: &[PathBuf]) {
     match fs::symlink_metadata(root) {
         Ok(meta) if meta.is_symlink() => {
             let _ = lchown_root(root);
@@ -156,14 +177,20 @@ fn lock_glob_files(root: &Path, pattern: &str, mode: u32) {
                         None => continue,
                     };
                     if path.is_dir() && !is_pruned_dir(&file_name) {
-                        lock_glob_files(&path, pattern, mode);
-                    } else if path.is_file() && glob_match(pattern, &file_name) {
+                        lock_glob_files(&path, pattern, mode, unsealed);
+                    } else if path.is_file()
+                        && glob_match(pattern, &file_name)
+                        && !unsealed.contains(&path)
+                    {
                         lock_file(&path, mode);
                     }
                 }
             }
         }
         Ok(meta) if meta.is_file() => {
+            if unsealed.iter().any(|p| p.as_path() == root) {
+                return;
+            }
             if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
                 if glob_match(pattern, name) {
                     lock_file(root, mode);

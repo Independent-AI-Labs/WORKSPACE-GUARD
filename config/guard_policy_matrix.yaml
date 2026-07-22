@@ -54,8 +54,40 @@ cases:
 
   - id: worktree-add
     argv: [git, worktree, add, ../wt]
+    expect: allowed
+
+  - id: worktree-add-force-blocked
+    argv: [git, worktree, add, -f, ../wt]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: worktree add -f
+
+  - id: worktree-list-allowed
+    argv: [git, worktree, list]
+    expect: allowed
+
+  - id: worktree-lock-allowed
+    argv: [git, worktree, lock, ../wt]
+    expect: allowed
+
+  - id: worktree-remove-blocked
+    argv: [git, worktree, remove, ../wt]
+    expect: blocked
+    reason_contains: worktree remove
+
+  - id: worktree-prune-blocked
+    argv: [git, worktree, prune]
+    expect: blocked
+    reason_contains: worktree prune
+
+  - id: worktree-remove-root-allowed
+    argv: [git, worktree, remove, ../wt]
+    expect: allowed
+    sudo_only: true
+
+  - id: worktree-unknown-verb-blocked
+    argv: [git, worktree, frobnicate, ../wt]
+    expect: blocked
+    reason_contains: worktree frobnicate
 
   - id: reflog-expire
     argv: [git, reflog, expire, --all]

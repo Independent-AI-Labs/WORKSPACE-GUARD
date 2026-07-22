@@ -79,11 +79,13 @@ fn glob_files_no_crash_on_various_inputs() {
         Path::new("/nonexistent-path-1234"),
         "*_exceptions.yaml",
         0o644,
+        &[],
     );
     lock_glob_files(
         tempfile::tempdir().unwrap().path(),
         "*_exceptions.yaml",
         0o644,
+        &[],
     );
 }
 
@@ -104,7 +106,7 @@ fn glob_files_finds_nested_exceptions() {
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("deep_exceptions.yaml"), b"x").unwrap();
 
-    lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &[]);
 
     assert!(root.join("quality_exceptions.yaml").exists());
     assert!(root.join("other.txt").exists());
@@ -125,7 +127,7 @@ fn glob_files_skips_dotgit() {
     let exc = root.join("quality_exceptions.yaml");
     fs::write(&exc, b"x").unwrap();
 
-    lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &[]);
     assert!(exc.exists());
 }
 
@@ -139,7 +141,7 @@ fn glob_files_handles_symlink_exceptions_file() {
     let link = root.join("link_exceptions.yaml");
     std::os::unix::fs::symlink(&real_file, &link).unwrap();
 
-    lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &[]);
 
     assert!(real_file.exists());
     assert!(link.exists());
@@ -153,7 +155,7 @@ fn glob_files_handles_broken_symlink() {
     let link = root.join("broken_exceptions.yaml");
     std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
 
-    lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &[]);
 }
 
 #[test]
@@ -165,7 +167,7 @@ fn glob_files_multiple_patterns_independent() {
     fs::write(root.join("bar_exceptions.yaml"), b"x").unwrap();
     fs::write(root.join("other.txt"), b"x").unwrap();
 
-    lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &[]);
 
     assert!(root.join("foo_exceptions.yaml").exists());
     assert!(root.join("bar_exceptions.yaml").exists());
@@ -185,8 +187,51 @@ fn glob_files_deeply_nested() {
     let deep_file = cur.join("deep_exceptions.yaml");
     fs::write(&deep_file, b"x").unwrap();
 
-    lock_glob_files(root, "*_exceptions.yaml", 0o644);
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &[]);
     assert!(deep_file.exists());
+}
+
+// --- unseal-state tests ---
+
+#[test]
+fn glob_files_skips_unsealed_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let sealed = root.join("sealed_exceptions.yaml");
+    let open = root.join("open_exceptions.yaml");
+    fs::write(&sealed, b"x").unwrap();
+    fs::write(&open, b"x").unwrap();
+
+    let unsealed = vec![open.clone()];
+    lock_glob_files(root, "*_exceptions.yaml", 0o644, &unsealed);
+
+    assert!(sealed.exists());
+    assert!(open.exists());
+}
+
+#[test]
+fn read_unseal_state_absent_is_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(read_unseal_state(dir.path()).is_empty());
+}
+
+#[test]
+fn read_unseal_state_parses_list_and_skips_owner_line() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join(UNSEAL_STATE_FILE),
+        "/repo/config/a_exceptions.yaml\n/repo/config/dead_code.yaml\nowner=agent:agent\n",
+    )
+    .unwrap();
+    let got = read_unseal_state(dir.path());
+    assert_eq!(
+        got,
+        vec![
+            PathBuf::from("/repo/config/a_exceptions.yaml"),
+            PathBuf::from("/repo/config/dead_code.yaml"),
+        ]
+    );
 }
 
 // --- lock_glob_trees tests ---

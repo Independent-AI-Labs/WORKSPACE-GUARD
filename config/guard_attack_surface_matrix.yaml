@@ -462,9 +462,9 @@ cases:
     reason_contains: destructive subcommand
 
   - id: atk-worktree
-    argv: [git, worktree, add, ../wt]
+    argv: [git, worktree, prune]
     expect: blocked
-    reason_contains: destructive subcommand
+    reason_contains: worktree prune
 
   - id: atk-reflog
     argv: [git, reflog, expire, --all]

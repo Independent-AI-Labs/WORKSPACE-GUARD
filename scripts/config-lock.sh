@@ -69,6 +69,29 @@ repo_owner() {
     stat -c '%U:%G' "$1"
 }
 
+# Resolve the real git dir (worktrees have .git as a file pointing at it).
+# The guard binary reads <gitdir>/config-unseal.files to honor an active
+# unseal; the file lives inside the locked .git tree so only root can
+# create or remove it.
+git_dir() {
+    local repo="$1"
+    if [[ -d "$repo/.git" ]]; then
+        printf '%s\n' "$repo/.git"
+    elif [[ -f "$repo/.git" ]]; then
+        local target
+        target="$(sed -n 's/^gitdir: //p' "$repo/.git")"
+        [[ -n "$target" ]] || fail "cannot parse $repo/.git"
+        [[ "$target" = /* ]] || target="$repo/$target"
+        printf '%s\n' "$target"
+    else
+        fail "no .git in $repo"
+    fi
+}
+
+unseal_state_path() {
+    printf '%s/config-unseal.files\n' "$(git_dir "$1")"
+}
+
 cancel_timer() {
     local repo="$1" unit
     unit="$(unit_name "$repo")"
@@ -115,6 +138,7 @@ do_lock() {
     require_root
     cancel_timer "$repo"
     rm -f "$(state_file "$repo")"
+    rm -f "$(unseal_state_path "$repo")"
     mapfile -t files < <(config_files "$repo")
     [[ ${#files[@]} -gt 0 ]] || fail "no config/*.yaml in $repo"
     lock_files "$repo" "${files[@]}"
@@ -169,6 +193,12 @@ do_unseal() {
     done < "$sf"
     [[ $bad -eq 0 ]] || fail "unseal verification failed for $repo/config; NOT scheduling relock"
     printf 'owner=%s\n' "$owner" >> "$sf"
+    # Mirror the file list into the locked .git tree so the guard binary
+    # skips exactly these paths on its per-invocation relock pass.
+    local gsf
+    gsf="$(unseal_state_path "$repo")"
+    cp "$sf" "$gsf" || fail "cannot write guard-visible state: $gsf"
+    chown root:root "$gsf"; chmod 0644 "$gsf"
     log "unsealed $count file(s) -> $owner (state: $sf)"
     if [[ $resumed -eq 1 ]]; then
         log "existing timer left as-is; check: make config-lock-status"
@@ -204,9 +234,10 @@ do_relock() {
     else
         while IFS= read -r f; do files+=("$f"); done < <(config_files "$repo")
     fi
-    [[ ${#files[@]} -gt 0 ]] || { log "nothing to relock"; rm -f "$sf"; exit 0; }
+    [[ ${#files[@]} -gt 0 ]] || { log "nothing to relock"; rm -f "$sf"; rm -f "$(unseal_state_path "$repo")"; exit 0; }
     lock_files "$repo" "${files[@]}"
     rm -f "$sf"
+    rm -f "$(unseal_state_path "$repo")"
 }
 
 do_status() {

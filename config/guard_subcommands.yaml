@@ -21,7 +21,6 @@ blocked:
   - bisect
   - filter-branch
   - filter-repo
-  - worktree
   - reflog
   - replace
   - lfs
@@ -47,6 +46,7 @@ sudo_gated:
 
 partial:
   - rm
+  - worktree
   - stash
   - branch
   - push

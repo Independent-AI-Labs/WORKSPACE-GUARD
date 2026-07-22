@@ -180,6 +180,40 @@ pub fn check_blocked(
         crate::fetch::check_fetch_refspecs(argv_os)?;
     }
 
+    if subcommand == "worktree" {
+        // Agents share one checkout per repo because worktree was fully
+        // blocked, which caused cross-agent staging pollution (5161f9e).
+        // Safe lifecycle verbs are allowed; destructive ones are sudo-gated
+        // like amend. `add -f` is denied even for root (force-checkouts
+        // into a dirty path defeat the forward-only guarantee).
+        let verb = extract_worktree_verb(argv_os);
+        match verb.as_str() {
+            "" | "list" | "lock" | "unlock" | "move" => {}
+            "add" => {
+                if state.has_force_flag {
+                    return Err(GuardError::Blocked {
+                        reason: "git worktree add -f".into(),
+                        hint: "Force-adding a worktree over a dirty path is destructive; commit or clean the target path first.".into(),
+                    });
+                }
+            }
+            "remove" | "prune" | "repair" if !operator_root => {
+                return Err(GuardError::Blocked {
+                    reason: format!("git worktree {}", verb),
+                    hint: "worktree remove/prune/repair can delete working state: operators may run them via sudo.".into(),
+                });
+            }
+            "remove" | "prune" | "repair" => {}
+            other => {
+                return Err(GuardError::Blocked {
+                    reason: format!("git worktree {}", other),
+                    hint: "Allowed worktree verbs: add (without -f), list, lock, unlock, move."
+                        .into(),
+                });
+            }
+        }
+    }
+
     if subcommand == "revert" {
         let target = extract_revert_target(argv_os);
         if let Ok(branch) = get_current_branch(git_path, cwd) {
@@ -418,6 +452,21 @@ fn extract_revert_target(argv_os: &[OsString]) -> String {
         }
     }
     "HEAD".to_string()
+}
+
+/// First positional after `worktree` (the verb), skipping global git
+/// options. `git worktree` with no verb is `list`, which is read-only.
+fn extract_worktree_verb(argv_os: &[OsString]) -> String {
+    for arg in argv_os.iter().skip(1) {
+        let s = arg.to_string_lossy();
+        if s == "worktree" {
+            continue;
+        }
+        if !s.starts_with('-') {
+            return s.to_string();
+        }
+    }
+    String::new()
 }
 
 fn run_git(git_path: &str, cwd: Option<&str>, args: &[&str]) -> std::process::ExitStatus {
