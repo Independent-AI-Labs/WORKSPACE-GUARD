@@ -12,6 +12,7 @@ mod block;
 mod ci_integrity;
 mod config_keys;
 mod exec;
+mod fetch;
 #[cfg(feature = "capability-mode")]
 mod gitdir;
 mod remote;

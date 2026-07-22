@@ -355,6 +355,37 @@ cases:
     expect: blocked
     reason_contains: exec
 
+  - id: fetch-oid-refspec-blocked
+    argv: [git, fetch, origin, 0123456789abcdef0123456789abcdef01234567]
+    expect: blocked
+    reason_contains: raw object ID
+
+  - id: fetch-oid-dst-refspec-blocked
+    argv: [git, fetch, origin, +main:0123456789abcdef0123456789abcdef01234567]
+    expect: blocked
+    reason_contains: raw object ID
+
+  - id: fetch-empty-dst-refspec-blocked
+    argv: [git, fetch, origin, "main:"]
+    expect: blocked
+    reason_contains: empty destination
+
+  - id: fetch-branch-allowed
+    argv: [git, fetch, origin, main]
+    expect: allowed
+
+  - id: fetch-depth-allowed
+    argv: [git, fetch, --depth, "1", origin, main]
+    expect: allowed
+
+  - id: fetch-pair-refspec-allowed
+    argv: [git, fetch, origin, +refs/heads/main:refs/remotes/origin/main]
+    expect: allowed
+
+  - id: fetch-plain-allowed
+    argv: [git, fetch]
+    expect: allowed
+
   - id: rebase-abort-allowed
     argv: [git, rebase, --abort]
     expect: allowed

@@ -176,6 +176,10 @@ pub fn check_blocked(
         });
     }
 
+    if subcommand == "fetch" {
+        crate::fetch::check_fetch_refspecs(argv_os)?;
+    }
+
     if subcommand == "revert" {
         let target = extract_revert_target(argv_os);
         if let Ok(branch) = get_current_branch(git_path, cwd) {
