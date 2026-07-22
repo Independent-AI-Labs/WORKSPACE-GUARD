@@ -223,6 +223,23 @@ _run_drift() { run bash "$FAKE_REPO/scripts/suid-drift-check" "$@"; }
     assert_output --partial "WARNING"
 }
 
+@test "drift-check: new cap under /usr/lib -> CRITICAL (M2)" {
+    _setup_drift
+    _write_suid_baseline "$FAKE_REPO" "/usr/bin/sudo"
+    _write_fcap_baseline "$FAKE_REPO"
+    printf '%s\n' /usr/bin/sudo > "$TEST_TMPDIR/suid.lst"
+    export GUARD_FIND_FIXTURE="$TEST_TMPDIR/suid.lst"
+    # snap-confine-style path: capability-bearing helpers live under
+    # /usr/lib and are just as reachable by the agent as /usr/bin caps.
+    printf '%s\n' '/usr/lib/snapd/evil-helper cap_sys_admin=ep' > "$TEST_TMPDIR/caps.lst"
+    export GUARD_GETCAP_FIXTURE="$TEST_TMPDIR/caps.lst"
+    _run_drift
+    assert_failure
+    [ "$status" -eq 1 ]
+    assert_output --partial "CRITICAL"
+    assert_output --partial "new file capability"
+}
+
 @test "drift-check: writes drift-report.yaml with summary" {
     _setup_drift
     _write_suid_baseline "$FAKE_REPO" "/usr/bin/sudo"

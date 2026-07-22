@@ -1107,12 +1107,12 @@ binaries:
 
   - name: "git"
     tags: ["suid", "sudo"]
-    path: null
+    path: "/usr/bin/git"
     contained: false
-    policy: deny-non-root
+    policy: deny-all-non-root
     allow_subcommands: []
     allow_self_username: false
-    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH", "GIT_EXEC_PATH"]
     reject_patterns: []
 
   - name: "gnuplot"
@@ -3967,7 +3967,7 @@ binaries:
 
   - name: "mount"
     tags: ["suid", "sudo"]
-    path: "/usr/bin/mount"
+    path: null
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4087,7 +4087,7 @@ binaries:
 
   - name: "passwd"
     tags: ["sudo"]
-    path: "/usr/bin/passwd"
+    path: null
     contained: false
     policy: arg-validate
     allow_subcommands: ["passwd"]
@@ -4137,7 +4137,7 @@ binaries:
 
   - name: "pkexec"
     tags: ["suid", "sudo"]
-    path: null
+    path: "/usr/bin/pkexec"
     contained: false
     policy: deny-all-non-root
     allow_subcommands: []
@@ -4437,7 +4437,7 @@ binaries:
 
   - name: "su"
     tags: ["suid", "sudo"]
-    path: "/usr/bin/su"
+    path: null
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4447,7 +4447,7 @@ binaries:
 
   - name: "sudo"
     tags: ["sudo"]
-    path: null
+    path: "/usr/bin/sudo"
     contained: false
     policy: arg-validate
     allow_subcommands: ["sudo", "sudoedit"]
@@ -4737,7 +4737,7 @@ binaries:
 
   - name: "chfn"
     tags: ["suid"]
-    path: "/usr/bin/chfn"
+    path: null
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4747,7 +4747,7 @@ binaries:
 
   - name: "chsh"
     tags: ["suid"]
-    path: "/usr/bin/chsh"
+    path: null
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4797,7 +4797,7 @@ binaries:
 
   - name: "newgrp"
     tags: ["suid"]
-    path: "/usr/bin/newgrp"
+    path: null
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4817,7 +4817,7 @@ binaries:
 
   - name: "ping"
     tags: ["suid"]
-    path: null
+    path: "/usr/bin/ping"
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4837,7 +4837,7 @@ binaries:
 
   - name: "pppd"
     tags: ["suid"]
-    path: null
+    path: "/usr/sbin/pppd"
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4887,7 +4887,7 @@ binaries:
 
   - name: "umount"
     tags: ["suid"]
-    path: "/usr/bin/umount"
+    path: null
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -4915,11 +4915,211 @@ binaries:
     env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
     reject_patterns: []
 
-  - name: "gpasswd"
+  - name: "chrome-sandbox"
     tags: ["suid"]
-    path: "/usr/bin/gpasswd"
+    path: "/opt/google/chrome/chrome-sandbox"
     contained: false
     policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "chfn.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/chfn.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "chsh.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/chsh.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "fusermount3"
+    tags: ["suid"]
+    path: "/usr/bin/fusermount3"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "gpasswd.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/gpasswd.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "mount.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/mount.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "newgidmap"
+    tags: ["suid"]
+    path: "/usr/bin/newgidmap"
+    contained: false
+    policy: arg-validate
+    allow_subcommands: ["newgidmap"]
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "newgrp.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/newgrp.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "newuidmap"
+    tags: ["suid"]
+    path: "/usr/bin/newuidmap"
+    contained: false
+    policy: arg-validate
+    allow_subcommands: ["newuidmap"]
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "passwd.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/passwd.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "su.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/su.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "umount.distrib"
+    tags: ["suid"]
+    path: "/usr/bin/umount.distrib"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "dbus-daemon-launch-helper"
+    tags: ["suid"]
+    path: "/usr/lib/dbus-1.0/dbus-daemon-launch-helper"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "ssh-keysign"
+    tags: ["suid"]
+    path: "/usr/lib/openssh/ssh-keysign"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "polkit-agent-helper-1"
+    tags: ["suid"]
+    path: "/usr/lib/polkit-1/polkit-agent-helper-1"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "Xorg.wrap"
+    tags: ["suid"]
+    path: "/usr/lib/xorg/Xorg.wrap"
+    contained: false
+    policy: deny-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "snap-confine"
+    tags: ["caps"]
+    path: "/usr/lib/snapd/snap-confine"
+    contained: false
+    policy: deny-all-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "mtr-packet"
+    tags: ["caps"]
+    path: "/usr/bin/mtr-packet"
+    contained: false
+    policy: deny-all-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "true"
+    tags: ["caps"]
+    path: "/usr/bin/true"
+    contained: false
+    policy: deny-all-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "gst-ptp-helper"
+    tags: ["caps"]
+    path: "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-ptp-helper"
+    contained: false
+    policy: deny-all-non-root
+    allow_subcommands: []
+    allow_self_username: false
+    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
+    reject_patterns: []
+
+  - name: "git-ssh-wrapper"
+    tags: ["caps"]
+    path: "/usr/lib/workspace-guard/git-ssh-wrapper"
+    contained: false
+    policy: deny-all-non-root
     allow_subcommands: []
     allow_self_username: false
     env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]

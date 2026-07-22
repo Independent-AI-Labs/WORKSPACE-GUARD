@@ -37,8 +37,14 @@ trap 'rm -f "$tmpf"' EXIT
 # gitleaks exits 1 when leaks are found -- that is expected here; we WANT
 # the report. Any other nonzero (timeout/crash) is a real failure: detect
 # via a captured rc instead of inheriting gitleaks' exit code.
+# -i points at an empty directory: without it gitleaks auto-loads the very
+# .gitleaksignore we are regenerating, suppresses every listed finding,
+# and the file self-erases on each run.
+_empty_ignore_dir="$(mktemp -d)"
+trap 'rm -f "$tmpf"; rmdir "$_empty_ignore_dir"' EXIT
 rc=0
-gitleaks dir docs/references --no-banner -f json -r "$tmpf" -l error >"$DEVNULL" 2>"$DEVNULL" || rc=$?
+gitleaks dir docs/references --no-banner -f json -r "$tmpf" -l error \
+    -i "$_empty_ignore_dir" >"$DEVNULL" 2>"$DEVNULL" || rc=$?
 if [ "$rc" != "0" ] && [ "$rc" != "1" ]; then
   echo "regen-gitleaksignore: gitleaks dir failed (exit $rc)" >&2
   exit "$rc"

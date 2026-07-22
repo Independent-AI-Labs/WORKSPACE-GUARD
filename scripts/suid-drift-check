@@ -124,11 +124,15 @@ log() { printf '%s\n' "$1"; }
 gather() { printf '  - {path: "%s", type: "%s", class: "%s", detail: "%s", timestamp: "%s"}\n' "$1" "$2" "$3" "$4" "$NOW" >> "$DRIFT_REPORT"; }
 
 # agent_accessible PATH -> 0/1. /snap is read-only; everything under
-# /usr/bin, /usr/local/bin, /usr/sbin, /bin, /sbin is treated as
-# agent-accessible (CRITICAL on new cap).
+# the executable system trees (/usr/bin, /usr/local/bin, /usr/sbin,
+# /bin, /sbin, /usr/lib, /usr/libexec, /lib, /lib64) is treated as
+# agent-accessible (CRITICAL on new cap). /usr/lib* must be covered:
+# snap-confine and gst-ptp-helper live there and their caps are just
+# as reachable by the agent as a cap on /usr/bin (M2).
 agent_accessible() {
     case "$1" in
         /usr/bin/*|/usr/local/bin/*|/usr/sbin/*|/bin/*|/sbin/*) return 0 ;;
+        /usr/lib/*|/usr/libexec/*|/lib/*|/lib64/*) return 0 ;;
         *) return 1 ;;
     esac
 }
