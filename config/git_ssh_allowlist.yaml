@@ -1,0 +1,8 @@
+version: 1
+# SSH destinations the git-ssh-wrapper may connect to. Anything outside
+# this list is refused before ssh runs, so a provisioned key can only
+# authenticate to these hosts as these users.
+hosts:
+  - github.com
+users:
+  - git

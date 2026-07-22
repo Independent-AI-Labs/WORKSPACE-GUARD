@@ -165,11 +165,19 @@ GIT_SSH_COMMAND=/usr/lib/workspace-guard/git-ssh-wrapper
 GIT_SSH=/usr/lib/workspace-guard/git-ssh-wrapper
 ```
 
-**Wrapper (planned binary `workspace-git-ssh`):**
+**Wrapper (binary `workspace-git-ssh`):**
 
 - Map `getuid()` → username → `/usr/lib/workspace-guard/ssh-keys/<user>/id_ed25519`
 - Reject missing keys and path escape
-- `exec` `/usr/bin/ssh` with `-i <key> -F $HOME/.ssh/config -o IdentitiesOnly=yes --` + args
+- Validate argv against the git transport allowlist: only
+  `ssh [-p port] [-o SendEnv=GIT_PROTOCOL] [-4|-6] user@host <cmd>` with
+  user/host inside `config/git_ssh_allowlist.yaml` and `<cmd>` a quoted
+  `git-upload-pack`/`git-receive-pack` with a safe path charset
+- Load the key into a wrapper-spawned `ssh-agent` (`ssh-add -` on stdin,
+  socket at `$XDG_RUNTIME_DIR/workspace-guard/agent.sock`) and `exec`
+  `/usr/bin/ssh` with `-F /dev/null -o IdentitiesOnly=yes
+  -o IdentityAgent=<sock>` + validated args, so raw key material never
+  lands on agent-readable disk
 - Installed with `cap_dac_override=ep` to read root `0600` keys
 
 `core.sshCommand` remains blocked for non-root ([config/guard_config_keys.yaml](../../config/guard_config_keys.yaml)).

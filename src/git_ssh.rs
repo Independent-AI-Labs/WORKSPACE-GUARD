@@ -1,22 +1,52 @@
-//! Git SSH wrapper: exec ssh with root-provisioned per-user ed25519 key only.
+//! Git SSH wrapper: exec ssh authenticated by a root-provisioned per-user
+//! ed25519 key, without ever writing key material to agent-readable disk.
 //! Installed as /usr/lib/workspace-guard/git-ssh-wrapper with cap_dac_override.
 //!
-//! OpenSSH requires the connecting user to own the private key file. Provision
-//! stores keys root:root under `/usr/lib/workspace-guard/ssh-keys/`. This
-//! wrapper reads them (via file cap), stages a 0600 copy under the user's
-//! runtime dir, then execs ssh against that path.
+//! Two controls (H3):
+//!   1. Key isolation: the wrapper reads the root-owned key via its file
+//!      capability and pipes it straight into an ssh-agent it owns
+//!      (`ssh-add -` on stdin). ssh then authenticates through the agent
+//!      socket (`-o IdentityAgent=`), so no `-i` staging copy exists for
+//!      the agent to read and reuse with a plain ssh client.
+//!   2. Argv allowlist: the wrapper refuses any invocation that is not
+//!      exactly git's transport form
+//!      `ssh [-p port] [-o SendEnv=GIT_PROTOCOL] [-4|-6] user@host <cmd>`
+//!      with user/host inside config/git_ssh_allowlist.yaml and <cmd> a
+//!      quoted `git-upload-pack`/`git-receive-pack` with a safe path
+//!      charset. No port forwards, no interactive sessions, no other
+//!      hosts.
+//!
+//! Residual: the agent can point its own ssh at the wrapper-managed agent
+//! socket and authenticate as itself to any host that accepts the
+//! provisioned key, but it can never extract the private key (ssh-agent
+//! does not export key material). Server-side receive hooks (H4) are the
+//! enforcement layer for where pushes may land.
 
 use std::ffi::{CString, OsString};
+use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
-use std::process;
+use std::process::{self, Command, Stdio};
 
 use nix::unistd::{chown, execv, getuid, Uid, User};
 
 const SSH_BIN: &str = "/usr/bin/ssh";
+const SSH_AGENT_BIN: &str = "/usr/bin/ssh-agent";
+const SSH_ADD_BIN: &str = "/usr/bin/ssh-add";
 const KEY_ROOT: &str = "/usr/lib/workspace-guard/ssh-keys";
 const STAGE_DIR_NAME: &str = "workspace-guard";
+const AGENT_SOCK_NAME: &str = "agent.sock";
+const CHILD_PATH_ENV: &str = "/usr/bin:/bin";
+
+include!(concat!(env!("OUT_DIR"), "/git_ssh_config.rs"));
+
+#[derive(Debug, PartialEq)]
+enum AgentState {
+    HasKeys,
+    Empty,
+    Dead,
+}
 
 fn valid_username(name: &str) -> bool {
     !name.is_empty()
@@ -68,18 +98,179 @@ fn runtime_base(uid: Uid) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", uid.as_raw())))
 }
 
-fn stage_key_for_user(uid: Uid, source: &Path) -> Result<PathBuf, std::io::Error> {
-    let material = std::fs::read(source)?;
-    let stage_dir = runtime_base(uid).join(STAGE_DIR_NAME);
-    std::fs::create_dir_all(&stage_dir)?;
-    std::fs::set_permissions(&stage_dir, std::fs::Permissions::from_mode(0o700))?;
-    let _ = chown(&stage_dir, Some(uid), None);
+fn runtime_dir(uid: Uid) -> Result<PathBuf, std::io::Error> {
+    let dir = runtime_base(uid).join(STAGE_DIR_NAME);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    let _ = chown(&dir, Some(uid), None);
+    Ok(dir)
+}
 
-    let stage_key = stage_dir.join("id_ed25519");
-    std::fs::write(&stage_key, &material)?;
-    std::fs::set_permissions(&stage_key, std::fs::Permissions::from_mode(0o600))?;
-    chown(&stage_key, Some(uid), None)?;
-    Ok(stage_key)
+fn ssh_add_probe(sock: &Path) -> AgentState {
+    let out = Command::new(SSH_ADD_BIN)
+        .arg("-l")
+        .env_clear()
+        .env("PATH", CHILD_PATH_ENV)
+        .env("SSH_AUTH_SOCK", sock)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match out {
+        Ok(s) if s.success() => AgentState::HasKeys,
+        Ok(s) if s.code() == Some(1) => AgentState::Empty,
+        _ => AgentState::Dead,
+    }
+}
+
+fn spawn_agent(sock: &Path) -> Result<(), std::io::Error> {
+    let _ = std::fs::remove_file(sock);
+    let status = Command::new(SSH_AGENT_BIN)
+        .arg("-a")
+        .arg(sock)
+        .env_clear()
+        .env("PATH", CHILD_PATH_ENV)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("ssh-agent exited non-zero"))
+    }
+}
+
+fn load_key_into_agent(sock: &Path, material: &[u8]) -> Result<(), std::io::Error> {
+    let mut child = Command::new(SSH_ADD_BIN)
+        .arg("-")
+        .env_clear()
+        .env("PATH", CHILD_PATH_ENV)
+        .env("SSH_AUTH_SOCK", sock)
+        .env("SSH_ASKPASS", "/bin/false")
+        .env("SSH_ASKPASS_REQUIRE", "never")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let write_result = stdin.write_all(material);
+        drop(stdin);
+        write_result?;
+    }
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("ssh-add exited non-zero"))
+    }
+}
+
+fn ensure_agent_with_key(uid: Uid, key: &Path) -> Result<PathBuf, String> {
+    let material = std::fs::read(key).map_err(|e| format!("cannot read provisioned key: {e}"))?;
+    let dir = runtime_dir(uid).map_err(|e| format!("cannot prepare runtime dir: {e}"))?;
+    let sock = dir.join(AGENT_SOCK_NAME);
+    if ssh_add_probe(&sock) == AgentState::Dead {
+        spawn_agent(&sock).map_err(|e| format!("cannot spawn ssh-agent: {e}"))?;
+    }
+    if ssh_add_probe(&sock) == AgentState::Dead {
+        return Err("ssh-agent socket not responsive after spawn".into());
+    }
+    if load_key_into_agent(&sock, &material).is_err() && ssh_add_probe(&sock) != AgentState::HasKeys
+    {
+        return Err("cannot load provisioned key into ssh-agent".into());
+    }
+    Ok(sock)
+}
+
+fn is_safe_repo_path(inner: &str) -> bool {
+    !inner.is_empty()
+        && inner.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || c == '.'
+                || c == '_'
+                || c == '/'
+                || c == '-'
+                || c == '~'
+                || c == '+'
+        })
+}
+
+fn valid_git_command(cmd: &str) -> bool {
+    for prefix in ["git-upload-pack '", "git-receive-pack '"] {
+        if let Some(rest) = cmd.strip_prefix(prefix) {
+            if let Some(inner) = rest.strip_suffix('\'') {
+                return is_safe_repo_path(inner);
+            }
+        }
+    }
+    false
+}
+
+fn valid_host_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+fn validate_ssh_args(args: &[OsString]) -> Result<(), String> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let s = args[i].to_string_lossy().to_string();
+        match s.as_str() {
+            "-p" => {
+                let port = args
+                    .get(i + 1)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .ok_or("missing port after -p")?;
+                if port.is_empty() || port.len() > 5 || !port.chars().all(|c| c.is_ascii_digit()) {
+                    return Err(format!("bad -p port: {port}"));
+                }
+                i += 2;
+            }
+            "-o" => {
+                let opt = args
+                    .get(i + 1)
+                    .map(|o| o.to_string_lossy().to_string())
+                    .ok_or("missing value after -o")?;
+                if opt != "SendEnv=GIT_PROTOCOL" {
+                    return Err(format!("-o option not allowed: {opt}"));
+                }
+                i += 2;
+            }
+            "-4" | "-6" => i += 1,
+            _ if s.starts_with('-') => return Err(format!("ssh option not allowed: {s}")),
+            _ => {
+                positionals.push(s);
+                i += 1;
+            }
+        }
+    }
+    if positionals.len() != 2 {
+        return Err(format!(
+            "expected user@host and command, got {} positional(s)",
+            positionals.len()
+        ));
+    }
+    let dest = &positionals[0];
+    let (user, host) = dest
+        .split_once('@')
+        .ok_or_else(|| format!("destination not user@host: {dest}"))?;
+    if !valid_host_token(user) || !valid_host_token(host) {
+        return Err(format!("bad destination charset: {dest}"));
+    }
+    if !GIT_SSH_ALLOWED_USERS.contains(&user) {
+        return Err(format!("ssh user not allowed: {user}"));
+    }
+    if !GIT_SSH_ALLOWED_HOSTS.contains(&host) {
+        return Err(format!("ssh host not allowed: {host}"));
+    }
+    let cmd = &positionals[1];
+    if !valid_git_command(cmd) {
+        return Err(format!("remote command not allowed: {cmd}"));
+    }
+    Ok(())
 }
 
 fn cstring_arg(arg: &OsString) -> CString {
@@ -103,10 +294,16 @@ fn main() {
         }
     };
 
-    let staged_key = match stage_key_for_user(user.uid, &source_key) {
-        Ok(k) => k,
+    let incoming: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if let Err(e) = validate_ssh_args(&incoming) {
+        eprintln!("git-ssh-wrapper: refused: {e}");
+        process::exit(2);
+    }
+
+    let sock = match ensure_agent_with_key(user.uid, &source_key) {
+        Ok(s) => s,
         Err(e) => {
-            eprintln!("git-ssh-wrapper: cannot stage SSH key: {e}");
+            eprintln!("git-ssh-wrapper: {e}");
             process::exit(2);
         }
     };
@@ -114,17 +311,17 @@ fn main() {
     let ssh = CString::new(SSH_BIN).expect("ssh path");
     let mut argv: Vec<CString> = vec![
         CString::new("ssh").expect("argv0"),
-        CString::new("-i").expect("-i"),
-        CString::new(staged_key.to_string_lossy().as_bytes()).expect("identity file"),
         CString::new("-F").expect("-F"),
         CString::new("/dev/null").expect("ssh config"),
         CString::new("-o").expect("-o flag"),
         CString::new("IdentitiesOnly=yes").expect("IdentitiesOnly"),
         CString::new("-o").expect("-o flag"),
+        CString::new(format!("IdentityAgent={}", sock.to_string_lossy())).expect("IdentityAgent"),
+        CString::new("-o").expect("-o flag"),
         CString::new("StrictHostKeyChecking=accept-new").expect("StrictHostKeyChecking"),
     ];
-    for arg in std::env::args_os().skip(1) {
-        argv.push(cstring_arg(&arg));
+    for arg in &incoming {
+        argv.push(cstring_arg(arg));
     }
 
     if execv(&ssh, &argv).is_err() {
@@ -136,6 +333,10 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn os(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
 
     #[test]
     fn valid_username_accepts_agent() {
@@ -164,5 +365,92 @@ mod tests {
             PathBuf::from("/run/user/1000")
         );
         std::env::remove_var("XDG_RUNTIME_DIR");
+    }
+
+    #[test]
+    fn validate_accepts_git_upload_pack() {
+        let args = os(&[
+            "git@github.com",
+            "git-upload-pack '/Independent-AI-Labs/WORKSPACE-GUARD.git'",
+        ]);
+        assert!(validate_ssh_args(&args).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_git_protocol_and_port() {
+        let args = os(&[
+            "-p",
+            "22",
+            "-o",
+            "SendEnv=GIT_PROTOCOL",
+            "-4",
+            "git@github.com",
+            "git-receive-pack '/org/repo.git'",
+        ]);
+        assert!(validate_ssh_args(&args).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_host() {
+        let args = os(&["git@evil.example.com", "git-upload-pack '/org/repo.git'"]);
+        let err = validate_ssh_args(&args).unwrap_err();
+        assert!(err.contains("host not allowed"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_unknown_user() {
+        let args = os(&["root@github.com", "git-upload-pack '/org/repo.git'"]);
+        let err = validate_ssh_args(&args).unwrap_err();
+        assert!(err.contains("user not allowed"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_interactive_session() {
+        let args = os(&["git@github.com"]);
+        assert!(validate_ssh_args(&args).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_port_forward() {
+        let args = os(&[
+            "-L",
+            "8080:localhost:80",
+            "git@github.com",
+            "git-upload-pack '/org/repo.git'",
+        ]);
+        assert!(validate_ssh_args(&args).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_option_injection() {
+        let args = os(&[
+            "-o",
+            "ProxyCommand=/tmp/x",
+            "git@github.com",
+            "git-upload-pack '/org/repo.git'",
+        ]);
+        assert!(validate_ssh_args(&args).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_shell_injection_in_command() {
+        let args = os(&[
+            "git@github.com",
+            "git-upload-pack '/org/repo.git'; rm -rf /; '",
+        ]);
+        assert!(validate_ssh_args(&args).is_err());
+        let args2 = os(&["git@github.com", "git-upload-pack '/org/repo.git' extra"]);
+        assert!(validate_ssh_args(&args2).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_bad_port() {
+        let args = os(&[
+            "-p",
+            "22;id",
+            "git@github.com",
+            "git-upload-pack '/org/repo.git'",
+        ]);
+        assert!(validate_ssh_args(&args).is_err());
     }
 }
