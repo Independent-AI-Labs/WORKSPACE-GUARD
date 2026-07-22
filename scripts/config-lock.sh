@@ -114,6 +114,11 @@ lock_files() {
     local f locked=0 bad=0
     for f in "$@"; do
         [[ -f "$f" ]] || { log "skip (missing): $f"; continue; }
+        # Idempotent relock: chown on an immutable file fails with EPERM
+        # even for root, so drop +i first when re-locking.
+        if have_chattr && is_immutable "$f"; then
+            chattr -i "$f" || { log "ERROR: chattr -i failed: $f"; bad=1; continue; }
+        fi
         chown root:root "$f" || { log "ERROR: chown root:root failed: $f"; bad=1; continue; }
         if have_chattr; then
             chattr +i "$f" || { log "ERROR: chattr +i failed: $f"; bad=1; continue; }
