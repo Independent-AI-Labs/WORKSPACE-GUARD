@@ -14,6 +14,7 @@ mod config_keys;
 mod exec;
 #[cfg(feature = "capability-mode")]
 mod gitdir;
+mod remote;
 mod wsroot;
 
 #[cfg(not(feature = "capability-mode"))]

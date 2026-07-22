@@ -11,6 +11,7 @@ use nix::unistd::{getuid, Pid, User};
 
 use crate::{
     args::ArgState,
+    remote::repo_targets_provisioned_host,
     wsroot::{find_partial_workspace_root, find_workspace_root},
     GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT, CONTRACT_TIMEOUT_MS,
     CORE_LIMIT, ENFORCEMENT_CONFIG, GIT_ORIGINAL, NOFILE_LIMIT, WORKSPACE_MARKERS,
@@ -295,6 +296,14 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
                     "workspace markers incomplete at {}: expected all of {:?}; \
                      failing closed (possible marker tampering)",
                     partial, WORKSPACE_MARKERS
+                )));
+            }
+            if repo_targets_provisioned_host(&toplevel) {
+                return Err(GuardError::ContractFailed(format!(
+                    "{} is a clone of a provisioned remote but sits outside the workspace: \
+                     committing or pushing here bypasses every quality gate (H4). \
+                     Work inside the workspace tree instead.",
+                    toplevel
                 )));
             }
             return Ok(());
