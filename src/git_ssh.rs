@@ -277,6 +277,33 @@ fn cstring_arg(arg: &OsString) -> CString {
     CString::new(arg.as_bytes()).unwrap_or_else(|_| CString::new("ssh").unwrap())
 }
 
+/// Build the ssh argv. IdentityFile is required even though the key
+/// comes from the agent: with IdentitiesOnly=yes and no configured
+/// identity file, ssh offers zero keys and the server rejects with
+/// publickey-denied (observed 2026-07-22: pushes failed despite the
+/// agent holding the provisioned key). Pointing IdentityFile at the
+/// provisioned .pub makes ssh offer exactly that key from our agent;
+/// the private half stays root-only.
+fn build_ssh_argv(sock: &Path, pubkey: &Path, incoming: &[OsString]) -> Vec<CString> {
+    let mut argv: Vec<CString> = vec![
+        CString::new("ssh").expect("argv0"),
+        CString::new("-F").expect("-F"),
+        CString::new("/dev/null").expect("ssh config"),
+        CString::new("-o").expect("-o flag"),
+        CString::new("IdentitiesOnly=yes").expect("IdentitiesOnly"),
+        CString::new("-o").expect("-o flag"),
+        CString::new(format!("IdentityFile={}", pubkey.to_string_lossy())).expect("IdentityFile"),
+        CString::new("-o").expect("-o flag"),
+        CString::new(format!("IdentityAgent={}", sock.to_string_lossy())).expect("IdentityAgent"),
+        CString::new("-o").expect("-o flag"),
+        CString::new("StrictHostKeyChecking=accept-new").expect("StrictHostKeyChecking"),
+    ];
+    for arg in incoming {
+        argv.push(cstring_arg(arg));
+    }
+    argv
+}
+
 fn main() {
     let user = match User::from_uid(getuid()) {
         Ok(Some(u)) => u,
@@ -309,20 +336,9 @@ fn main() {
     };
 
     let ssh = CString::new(SSH_BIN).expect("ssh path");
-    let mut argv: Vec<CString> = vec![
-        CString::new("ssh").expect("argv0"),
-        CString::new("-F").expect("-F"),
-        CString::new("/dev/null").expect("ssh config"),
-        CString::new("-o").expect("-o flag"),
-        CString::new("IdentitiesOnly=yes").expect("IdentitiesOnly"),
-        CString::new("-o").expect("-o flag"),
-        CString::new(format!("IdentityAgent={}", sock.to_string_lossy())).expect("IdentityAgent"),
-        CString::new("-o").expect("-o flag"),
-        CString::new("StrictHostKeyChecking=accept-new").expect("StrictHostKeyChecking"),
-    ];
-    for arg in &incoming {
-        argv.push(cstring_arg(arg));
-    }
+    let mut pubkey = source_key.clone().into_os_string();
+    pubkey.push(".pub");
+    let argv = build_ssh_argv(&sock, Path::new(&pubkey), &incoming);
 
     if execv(&ssh, &argv).is_err() {
         eprintln!("git-ssh-wrapper: execv {} failed", SSH_BIN);
@@ -441,6 +457,37 @@ mod tests {
         assert!(validate_ssh_args(&args).is_err());
         let args2 = os(&["git@github.com", "git-upload-pack '/org/repo.git' extra"]);
         assert!(validate_ssh_args(&args2).is_err());
+    }
+
+    #[test]
+    fn argv_pins_identity_file_when_identities_only() {
+        let args = os(&["git@github.com", "git-upload-pack '/org/repo.git'"]);
+        let argv = build_ssh_argv(
+            Path::new("/run/user/1000/workspace-guard/agent.sock"),
+            Path::new("/usr/lib/workspace-guard/ssh-keys/agent/id_ed25519.pub"),
+            &args,
+        );
+        let joined: Vec<String> = argv
+            .iter()
+            .map(|c| c.to_string_lossy().into_owned())
+            .collect();
+        assert!(joined.iter().any(|a| a == "IdentitiesOnly=yes"));
+        assert!(
+            joined
+                .iter()
+                .any(|a| a == "IdentityFile=/usr/lib/workspace-guard/ssh-keys/agent/id_ed25519.pub"),
+            "IdentityFile missing: {joined:?}"
+        );
+        assert!(
+            joined
+                .iter()
+                .any(|a| a == "IdentityAgent=/run/user/1000/workspace-guard/agent.sock"),
+            "IdentityAgent missing: {joined:?}"
+        );
+        assert_eq!(
+            joined.last().map(String::as_str),
+            Some("git-upload-pack '/org/repo.git'")
+        );
     }
 
     #[test]
