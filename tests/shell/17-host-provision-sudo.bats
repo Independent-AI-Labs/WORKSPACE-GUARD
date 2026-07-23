@@ -151,9 +151,10 @@ EOF
 }
 
 @test "hp_sudo_live_runuser_probe uses non-interactive sudo -n" {
-    grep -q 'sudo -n -l' "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    grep -q 'sudo -n -l' "$GUARD_ROOT/scripts/lib/host-provision-sudo-probe.sh"
     grep -q 'sudo -n -v' "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
     ! grep -qE 'runuser -u [^ ]+ sudo -l([^-]|$)' "$GUARD_ROOT/scripts/lib/host-provision-sudo.sh"
+    ! grep -qE 'runuser -u [^ ]+ sudo -l([^-]|$)' "$GUARD_ROOT/scripts/lib/host-provision-sudo-probe.sh"
 }
 
 @test "hp_sudo_strip_user_from_dropin still works for unit tests" {

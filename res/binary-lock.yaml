@@ -5095,16 +5095,6 @@ binaries:
     env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
     reject_patterns: []
 
-  - name: "true"
-    tags: ["caps"]
-    path: "/usr/bin/true"
-    contained: false
-    policy: deny-all-non-root
-    allow_subcommands: []
-    allow_self_username: false
-    env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
-    reject_patterns: []
-
   - name: "gst-ptp-helper"
     tags: ["caps"]
     path: "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-ptp-helper"
