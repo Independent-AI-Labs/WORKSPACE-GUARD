@@ -461,3 +461,27 @@ fn file_lock_mode_other_exec_only() {
 }
 
 // --- lock_glob_trees exec-bit structure tests ---
+
+// --- lock_in_scope tests ---
+
+#[test]
+fn lock_scope_skips_unrelated_tmp_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!lock_in_scope(dir.path()));
+}
+
+#[test]
+fn lock_scope_covers_partial_workspace_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(crate::WORKSPACE_MARKERS[0])).unwrap();
+    assert!(lock_in_scope(dir.path()));
+}
+
+#[test]
+fn lock_scope_covers_full_workspace_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    for m in crate::WORKSPACE_MARKERS {
+        std::fs::create_dir_all(dir.path().join(m)).unwrap();
+    }
+    assert!(lock_in_scope(dir.path()));
+}

@@ -97,6 +97,12 @@ pub fn lock(argv_os: &[OsString]) {
         None => return,
     };
 
+    // Scope: the lock protects repositories the guard is responsible for
+    // (see lock_in_scope). Any other repo is left alone.
+    if !lock_in_scope(&toplevel) {
+        return;
+    }
+
     // 1. Recursive tree paths (e.g. .git/)
     for entry in crate::LOCKED_RECURSIVE_TREE_PATHS {
         if *entry == ".git" {
@@ -127,6 +133,20 @@ pub fn lock(argv_os: &[OsString]) {
     for &(pattern, mode) in crate::LOCKED_GLOB_PATTERNS {
         lock_glob_files(&toplevel, pattern, mode, &unsealed);
     }
+}
+
+/// True when the ownership lock applies to the repo at `toplevel`: repos
+/// inside the workspace (full or partial marker match; a partial match is
+/// a workspace with missing pieces and must stay locked, matching the
+/// fail-closed contract in exec.rs) and clones of provisioned remotes
+/// outside the workspace (H4). Any other repo (scratch clones, test
+/// sandboxes under /tmp, upstream checkouts) is out of scope: locking it
+/// would break ordinary agent workflows without protecting anything the
+/// guard enforces on.
+fn lock_in_scope(toplevel: &Path) -> bool {
+    let s = toplevel.to_string_lossy().to_string();
+    crate::wsroot::find_partial_workspace_root(&s).is_some()
+        || crate::remote::repo_targets_provisioned_host(&s)
 }
 
 /// Name of the root-owned state file inside the git dir that lists repo
