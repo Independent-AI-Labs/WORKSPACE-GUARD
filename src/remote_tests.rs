@@ -38,21 +38,33 @@ fn repo_with_provisioned_remote_is_flagged() {
             .output()
             .unwrap()
     };
-    assert!(run(&["init", "-q"]).status.success());
+    let run_ok = |args: &[&str]| {
+        let out = run(args);
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let write_remote = |url: &str| {
+        std::fs::write(
+            format!("{top}/.git/config"),
+            format!("[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = {url}\n"),
+        )
+        .unwrap();
+    };
+    run_ok(&["init", "-q"]);
     assert!(!repo_targets_provisioned_host(&top));
-    assert!(run(&[
-        "remote",
-        "add",
-        "origin",
-        "git@github.com:Independent-AI-Labs/WORKSPACE-GUARD.git"
-    ])
-    .status
-    .success());
+    write_remote("https://example.com/x/y.git");
+    assert!(!repo_targets_provisioned_host(&top));
+    // Mutate the config via fs, not `git remote`: once the remote points
+    // at a provisioned host the guard treats the repo as a workspace
+    // clone and root-locks its .git, so capability-scrubbed contexts
+    // (pre-push hooks) can no longer write it via git. The lock also
+    // means the tempdir may survive cleanup in such contexts.
+    write_remote("git@github.com:Independent-AI-Labs/WORKSPACE-GUARD.git");
     assert!(repo_targets_provisioned_host(&top));
-    assert!(
-        run(&["remote", "set-url", "origin", "https://example.com/x/y.git"])
-            .status
-            .success()
-    );
-    assert!(!repo_targets_provisioned_host(&top));
+    let _ = std::fs::remove_dir_all(dir.path());
+    std::mem::forget(dir);
 }
