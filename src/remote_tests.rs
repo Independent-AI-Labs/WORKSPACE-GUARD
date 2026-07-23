@@ -30,6 +30,11 @@ fn repo_with_provisioned_remote_is_flagged() {
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "safe.directory")
             .env("GIT_CONFIG_VALUE_0", "*")
+            // Hook contexts (pre-push) export repo env that overrides -C
+            // and would redirect these calls at the enclosing repository.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .output()
             .unwrap()
     };
