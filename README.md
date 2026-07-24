@@ -1,18 +1,38 @@
 # WORKSPACE-GUARD
 
-WORKSPACE-GUARD is a fail-closed, compiled-in-Rust policy layer for the git
-interface and adjacent host surface on agent dev machines.
+WORKSPACE-GUARD is a fail-closed, compiled-in-Rust policy layer that guards
+the git interface and hardens the surrounding host surface on agent dev
+machines.
 
-It installs as `/usr/bin/git` and execs the real binary (`/usr/bin/git.original`,
-root-only, mode `0700`) only after argument, configuration-key, and environment
-checks pass. Enforcement rests on three ideas:
+It is organized into four deployed programs:
+
+1. **Program I - Git Guard.** Replaces `/usr/bin/git` and execs the real
+   binary (`/usr/bin/git.original`, root-only, mode `0700`) only after
+   argument, configuration-key, and environment checks pass. It root-locks
+   `.git/`, enforces forward-only history, and delegates hook-based quality
+   checks to WORKSPACE-CI.
+2. **Program II-A - Binary Lock.** Contains GTFOBins-class SUID and
+   file-capability binaries behind per-binary policy wrappers
+   (`workspace-binary-guard` at each contained path, exec of `<path>.real`).
+3. **Program II-C/D - Audit and Inventory.** Maintains live baselines against
+   GTFOBins and konstruktoid catalogs, runs drift checks against them, and
+   deploys auditd and AIDE rules.
+4. **Program III - Home Lock.** Root-locks `~/.gitconfig`, `~/.ssh/*`, and
+   declared config globs inside fleet accounts.
+
+Program II-B - Sandbox is roadmap: a hardened systemd unit template ships,
+but the launcher binary that would apply Landlock, seccomp, and namespace
+isolation is not yet built.
+
+Enforcement rests on three ideas:
 
 1. **Forward-only history.** Agents cannot rewrite, revert, restore, clean,
    stash-drop, force-push, or bypass hooks (`--no-verify`). `git commit
    --amend` is available only to operators via sudo.
-2. **Scoped root-locking.** `.git/`, `~/.gitconfig`, `~/.ssh/*`, and declared
-   config globs are owned by root inside workspace repos and provisioned-host
-   clones. The lock does not apply to sandboxes outside those scopes.
+2. **Scoped root-locking.** Program I root-locks `.git/` inside workspace
+   repos and provisioned-host clones; Program III root-locks user-global
+   identity files and declared config globs. Locks are not applied to
+   temporary sandboxes outside these scopes.
 3. **Operator intent.** Root-owned config files can be temporarily unsealed
    with `config-lock.sh unseal`, edited, and re-locked. The guard honors the
    unseal state across invocations and fails closed when the state file is
