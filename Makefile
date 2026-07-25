@@ -369,8 +369,18 @@ sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not syn
 	$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 .PHONY: gitleaks-ignore-regen
-gitleaks-ignore-regen: ## Regenerate .gitleaksignore fingerprints for docs/references/ cached content
-	bash scripts/regen-gitleaksignore
+# Runs the gitleaks scan only when docs/references content actually
+# changed since the last regen (the scan walks every cached reference
+# file and dominated `make sync-gtfobins` wall time). The stamp hash is
+# stored next to .gitleaksignore; deleting it forces a rescan.
+gitleaks-ignore-regen: ## Regenerate .gitleaksignore fingerprints for docs/references/ cached content (skips when unchanged)
+	_refs_hash="$$(find docs/references -type f -exec sha256sum {} + 2>$(DEVNULL) | sort -k2 | sha256sum | cut -d' ' -f1)"; \
+	_stamp=".gitleaksignore.refs-sha256"; \
+	if [ -f "$$_stamp" ] && [ "$$(cat "$$_stamp")" = "$$_refs_hash" ] && [ -f .gitleaksignore ]; then \
+		echo "gitleaks-ignore-regen: docs/references unchanged, skipping scan"; \
+	else \
+		bash scripts/regen-gitleaksignore && printf '%s\n' "$$_refs_hash" > "$$_stamp"; \
+	fi
 
 .PHONY: sync-gtfobins-verify
 sync-gtfobins-verify: ## Re-fetch sources and emit SHA-256 manifest of canonical references

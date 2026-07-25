@@ -12,9 +12,9 @@ use nix::unistd::{getuid, Pid, User};
 use crate::{
     args::ArgState,
     remote::repo_targets_provisioned_host,
-    wsroot::{find_partial_workspace_root, find_workspace_root},
+    wsroot::{classify_workspace_root, WorkspaceRoot},
     GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT, CONTRACT_TIMEOUT_MS,
-    CORE_LIMIT, ENFORCEMENT_CONFIG, GIT_ORIGINAL, NOFILE_LIMIT, WORKSPACE_MARKERS,
+    CORE_LIMIT, GIT_ORIGINAL, NOFILE_LIMIT, WORKSPACE_MARKERS,
 };
 
 #[cfg(feature = "capability-mode")]
@@ -113,12 +113,20 @@ fn verify_git_original() -> Result<(), GuardError> {
     }
 }
 
+/// True when `path` IS the running guard binary itself: same device and
+/// inode as /proc/self/exe. O(1) metadata comparison; the previous
+/// implementation read the entire git.original binary into memory and
+/// window-scanned it for a sentinel string on every git invocation.
 fn is_guard_binary(path: &Path) -> bool {
-    let sentinel = b"workspace-guard";
-    match fs::read(path) {
-        Ok(bytes) => bytes.windows(sentinel.len()).any(|w| w == sentinel),
-        Err(_) => false,
-    }
+    let target = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    let self_meta = match fs::metadata("/proc/self/exe") {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    target.st_dev() == self_meta.st_dev() && target.st_ino() == self_meta.st_ino()
 }
 
 fn collect_sudo_gated_env_warnings(sudo: bool) -> Vec<String> {
@@ -149,7 +157,13 @@ fn collect_sudo_gated_env_warnings(sudo: bool) -> Vec<String> {
     warnings
 }
 
-pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result<(), GuardError> {
+pub fn execve_real_git(
+    argv_os: &[OsString],
+    state: Option<&ArgState>,
+    git_dir: Option<&Path>,
+) -> Result<(), GuardError> {
+    #[cfg(not(feature = "capability-mode"))]
+    let _ = git_dir;
     let sudo = crate::is_sudo();
     if let Some(s) = state {
         if !s.dangerous_config_keys.is_empty() {
@@ -248,26 +262,30 @@ pub fn execve_real_git(argv_os: &[OsString], state: Option<&ArgState>) -> Result
         }
         _ => {
             let child_pid = Pid::from_raw(pid);
+            // Post-exec relock: reclaim files git.original created back to
+            // root:root. Reuses the git dir resolved once in main.rs; when
+            // no git dir was resolved (no subcommand, or not a repo) the
+            // relock is skipped entirely instead of spawning a rev-parse.
+            #[cfg(feature = "capability-mode")]
+            let relock = |git_dir: Option<&Path>| {
+                if let Some(gd) = git_dir {
+                    crate::gitdir::lock(gd);
+                }
+            };
             match waitpid(child_pid, None) {
                 Ok(WaitStatus::Exited(_, code)) => {
                     #[cfg(feature = "capability-mode")]
-                    {
-                        crate::gitdir::lock(argv_os);
-                    }
+                    relock(git_dir);
                     std::process::exit(code);
                 }
                 Ok(WaitStatus::Signaled(_, sig, _)) => {
                     #[cfg(feature = "capability-mode")]
-                    {
-                        crate::gitdir::lock(argv_os);
-                    }
+                    relock(git_dir);
                     std::process::exit(128 + sig as i32);
                 }
                 _ => {
                     #[cfg(feature = "capability-mode")]
-                    {
-                        crate::gitdir::lock(argv_os);
-                    }
+                    relock(git_dir);
                     std::process::exit(1);
                 }
             }
@@ -287,17 +305,16 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         _ => return Ok(()),
     };
 
-    let wsroot = find_workspace_root(&toplevel);
-    let wsroot = match wsroot {
-        Some(w) => w,
-        None => {
-            if let Some(partial) = find_partial_workspace_root(&toplevel) {
-                return Err(GuardError::ContractFailed(format!(
-                    "workspace markers incomplete at {}: expected all of {:?}; \
-                     failing closed (possible marker tampering)",
-                    partial, WORKSPACE_MARKERS
-                )));
-            }
+    let wsroot = match classify_workspace_root(&toplevel) {
+        WorkspaceRoot::Full(w) => w,
+        WorkspaceRoot::Partial(partial) => {
+            return Err(GuardError::ContractFailed(format!(
+                "workspace markers incomplete at {}: expected all of {:?}; \
+                 failing closed (possible marker tampering)",
+                partial, WORKSPACE_MARKERS
+            )));
+        }
+        WorkspaceRoot::None => {
             if repo_targets_provisioned_host(&toplevel) {
                 return Err(GuardError::ContractFailed(format!(
                     "{} is a clone of a provisioned remote but sits outside the workspace: \
@@ -310,7 +327,7 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
         }
     };
 
-    if check_vendored_tier_bypass(&wsroot, &toplevel) {
+    if crate::vendored::check_vendored_tier_bypass(&wsroot, &toplevel) {
         return Err(GuardError::ContractFailed(
             "Project tier is set to 'vendored' in project_enforcement.yaml: \
              quality gates are disabled. Restore 'strict' tier before committing."
@@ -393,117 +410,6 @@ pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
 /// True when `path` is a regular, non-symlink file owned by uid 0.
 /// Runtime trust gate for files the guard honors but an agent could
 /// otherwise rewrite (mirrors verify_git_original's ownership rule).
-fn root_owned_regular(path: &Path) -> bool {
-    match fs::symlink_metadata(path) {
-        Ok(meta) => meta.is_file() && meta.st_uid() == 0,
-        Err(_) => false,
-    }
-}
-
-/// Test seam: unit tests write enforcement fixtures as the test user, so
-/// the ownership gate is compiled out under cfg(test). Production builds
-/// always enforce it.
-fn enforcement_file_trusted(path: &Path) -> bool {
-    #[cfg(test)]
-    {
-        let _ = path;
-        true
-    }
-    #[cfg(not(test))]
-    {
-        root_owned_regular(path)
-    }
-}
-
-fn check_vendored_tier_bypass(wsroot: &str, toplevel: &str) -> bool {
-    let enforce_path = Path::new(wsroot).join(ENFORCEMENT_CONFIG);
-    if !enforce_path.exists() {
-        return false;
-    }
-    if !enforcement_file_trusted(&enforce_path) {
-        return false;
-    }
-    let content = match fs::read_to_string(&enforce_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    let rel_path = match toplevel.strip_prefix(wsroot) {
-        Some(stripped) => stripped.trim_start_matches('/'),
-        None => toplevel,
-    };
-
-    let mut in_exemptions = false;
-    let mut current_path: Option<String> = None;
-    let mut current_tier: Option<String> = None;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "exemptions:" {
-            in_exemptions = true;
-            current_path = None;
-            current_tier = None;
-            continue;
-        }
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if in_exemptions && !trimmed.starts_with('-') && !trimmed.contains(':') {
-            continue;
-        }
-        if in_exemptions
-            && !trimmed.starts_with('-')
-            && !trimmed.starts_with("path:")
-            && !trimmed.starts_with("tier:")
-            && !trimmed.starts_with("reason:")
-        {
-            in_exemptions = false;
-            current_path = None;
-            current_tier = None;
-            continue;
-        }
-        if !in_exemptions {
-            continue;
-        }
-
-        let entry_line = match trimmed.strip_prefix("- ") {
-            Some(s) => s,
-            None => trimmed,
-        };
-
-        if let Some(stripped) = entry_line.strip_prefix("tier:") {
-            let val = stripped.trim();
-            let val = val.trim_matches(|c| c == '"' || c == '\'');
-            let val = val.split('#').next().unwrap_or(val).trim();
-            current_tier = Some(val.to_lowercase());
-        }
-        if let Some(stripped) = entry_line.strip_prefix("path:") {
-            current_path = Some(stripped.trim().to_string());
-        }
-
-        if current_path.is_some() && current_tier.is_some() {
-            let path_val = current_path.as_deref().unwrap();
-            if (rel_path.starts_with(path_val.trim_end_matches('/')) || path_val == rel_path)
-                && current_tier.as_deref() == Some("vendored")
-            {
-                return true;
-            }
-            current_path = None;
-            current_tier = None;
-        }
-    }
-
-    if let (Some(path_val), Some(tier)) = (current_path.as_deref(), current_tier.as_deref()) {
-        if (rel_path.starts_with(path_val.trim_end_matches('/')) || path_val == rel_path)
-            && tier == "vendored"
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(test)]
 #[path = "exec_tests.rs"]
 mod tests;

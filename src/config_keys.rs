@@ -1,17 +1,12 @@
-use crate::guard_config::{DANGEROUS_CONFIG_KEYS, SUDO_GATED_CONFIG_KEYS};
+use crate::guard_config::{DANGEROUS_CONFIG_KEY_SEGMENTS, SUDO_GATED_CONFIG_KEY_SEGMENTS};
 
 pub fn is_dangerous_config_key(key: &str) -> bool {
     let key_lower = key.trim().to_lowercase();
     let segments: Vec<&str> = key_lower.split('.').collect();
 
-    for &pattern in DANGEROUS_CONFIG_KEYS {
-        let pat_segs: Vec<&str> = pattern.split('.').collect();
-        if glob_match_segments(&segments, &pat_segs) {
-            return true;
-        }
-    }
-
-    false
+    DANGEROUS_CONFIG_KEY_SEGMENTS
+        .iter()
+        .any(|pat| glob_match_segments(&segments, pat))
 }
 
 pub fn is_config_key_blocked(key: &str, sudo: bool) -> bool {
@@ -23,38 +18,35 @@ pub fn is_config_key_blocked(key: &str, sudo: bool) -> bool {
     }
     let key_lower = key.trim().to_lowercase();
     let segments: Vec<&str> = key_lower.split('.').collect();
-    for &pattern in SUDO_GATED_CONFIG_KEYS {
-        let pat_segs: Vec<&str> = pattern.split('.').collect();
-        if glob_match_segments(&segments, &pat_segs) {
-            return true;
-        }
-    }
-    false
+    SUDO_GATED_CONFIG_KEY_SEGMENTS
+        .iter()
+        .any(|pat| glob_match_segments(&segments, pat))
 }
 
+/// Glob match on pre-split, pre-lowercased pattern segments. `*` matches
+/// exactly one segment; `**` matches zero or more. Patterns are compiled
+/// at build time (see build.rs emit_seg_list) and build.rs rejects any
+/// pattern with more than one `**`, so this recursive matcher stays linear
+/// in practice and allocates nothing.
 fn glob_match_segments(segs: &[&str], pats: &[&str]) -> bool {
-    let n = segs.len();
-    let m = pats.len();
-    let mut dp = vec![vec![false; m + 1]; n + 1];
-    dp[0][0] = true;
-
-    for j in 0..m {
-        if pats[j] == "**" && dp[0][j] {
-            dp[0][j + 1] = true;
-        }
+    if pats.is_empty() {
+        return segs.is_empty();
     }
-
-    for i in 0..n {
-        for j in 0..m {
-            if pats[j] == "**" {
-                dp[i + 1][j + 1] = dp[i + 1][j] || dp[i][j + 1];
-            } else if pats[j] == "*" || segs[i] == pats[j].to_lowercase().as_str() {
-                dp[i + 1][j + 1] = dp[i][j];
+    if pats[0] == "**" {
+        for skip in 0..=segs.len() {
+            if glob_match_segments(&segs[skip..], &pats[1..]) {
+                return true;
             }
         }
+        return false;
     }
-
-    dp[n][m]
+    if segs.is_empty() {
+        return false;
+    }
+    if pats[0] == "*" || pats[0] == segs[0] {
+        return glob_match_segments(&segs[1..], &pats[1..]);
+    }
+    false
 }
 
 #[cfg(test)]

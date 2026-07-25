@@ -1,8 +1,14 @@
 # WORKSPACE-GUARD
 
-WORKSPACE-GUARD is a fail-closed, compiled-in-Rust policy layer that guards
-the git interface and hardens the surrounding host surface on agent dev
-machines.
+WORKSPACE-GUARD wraps the most abusable surfaces of an agent dev machine in
+compiled Rust guards, vetting every git invocation for destructive history
+and policy bypass while containing GTFOBins-class SUID and file-capability
+binaries behind per-binary policy wrappers.
+
+It then root-locks `.git/` trees
+and fleet identity files so agents cannot tamper with enforcement, and keeps
+a continuous record of the result through GTFOBins baselines, drift checks,
+and auditd/AIDE rules.
 
 It is organized into four deployed programs:
 

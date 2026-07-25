@@ -159,6 +159,83 @@ fn blob_hash_of(path: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Batch content-hash check for all tracked files in ONE git process
+/// (`hash-object --stdin-paths`). Replaces the previous per-file
+/// subprocess loop, which spawned one git process per tracked file on
+/// every commit/push. Files whose paths contain a newline (cannot be
+/// passed via --stdin-paths) fall back to the single-file path.
+/// Returns paths whose on-disk content differs from the index hash.
+fn modified_tracked_files(ci_path: &Path, entries: &[(String, String)]) -> Vec<String> {
+    let mut modified = Vec::new();
+    let mut batch_paths: Vec<String> = Vec::new();
+    let mut batch_index: Vec<(String, String)> = Vec::new(); // (rel, index hash)
+
+    for (rel, index_hash) in entries {
+        if rel.contains('\n') {
+            let path = ci_path.join(rel);
+            if blob_hash_of(&path).as_deref() != Some(index_hash.as_str()) {
+                modified.push(rel.clone());
+            }
+        } else {
+            batch_paths.push(ci_path.join(rel).to_string_lossy().into_owned());
+            batch_index.push((rel.clone(), index_hash.clone()));
+        }
+    }
+
+    if batch_paths.is_empty() {
+        return modified;
+    }
+
+    let mut cmd = Command::new(GIT_BIN);
+    cmd.env_clear()
+        .env("PATH", CHILD_PATH)
+        .env("HOME", "/")
+        .arg("hash-object")
+        .arg("--stdin-paths")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    crate::apply_safe_directory(&mut cmd);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => {
+            // Fail closed: batch unavailable, verify each file singly.
+            for (rel, index_hash) in &batch_index {
+                let path = ci_path.join(rel);
+                if blob_hash_of(&path).as_deref() != Some(index_hash.as_str()) {
+                    modified.push(rel.clone());
+                }
+            }
+            return modified;
+        }
+    };
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(batch_paths.join("\n").as_bytes());
+            let _ = stdin.write_all(b"\n");
+        }
+    }
+    let out = match child.wait_with_output() {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            for (rel, index_hash) in &batch_index {
+                let path = ci_path.join(rel);
+                if blob_hash_of(&path).as_deref() != Some(index_hash.as_str()) {
+                    modified.push(rel.clone());
+                }
+            }
+            return modified;
+        }
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for ((rel, index_hash), got) in batch_index.iter().zip(stdout.lines()) {
+        if got.trim() != index_hash {
+            modified.push(rel.clone());
+        }
+    }
+    modified
+}
+
 fn untracked_violations(ci_path: &Path) -> Vec<String> {
     let Some(blob) = git_output(
         ci_path,
@@ -246,6 +323,7 @@ fn deployment_violations(
     }
 
     if let Some(blob) = git_output(ci_path, &["ls-files", "-s", "-z"]) {
+        let mut hash_candidates: Vec<(String, String)> = Vec::new();
         for (mode, hash, rel) in parse_ls_files(&blob) {
             if violations.len() >= MAX_LISTED_VIOLATIONS {
                 break;
@@ -283,12 +361,18 @@ fn deployment_violations(
                     path.display()
                 ));
             }
-            if meta.is_file() && blob_hash_of(&path).as_deref() != Some(hash.as_str()) {
-                violations.push(format!(
-                    "{}: content hash differs from git index (modified on disk)",
-                    path.display()
-                ));
+            if meta.is_file() {
+                hash_candidates.push((rel, hash));
             }
+        }
+        for rel in modified_tracked_files(ci_path, &hash_candidates) {
+            if violations.len() >= MAX_LISTED_VIOLATIONS {
+                break;
+            }
+            violations.push(format!(
+                "{}: content hash differs from git index (modified on disk)",
+                ci_path.join(&rel).display()
+            ));
         }
     }
     for v in untracked_violations(ci_path) {

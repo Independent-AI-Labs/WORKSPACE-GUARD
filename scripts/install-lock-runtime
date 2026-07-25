@@ -99,12 +99,77 @@ if [[ "$total" -eq 0 ]]; then
 fi
 echo "==> Lock surface: $total binaries from $CONFIG"
 
+# Batch metadata collection for the whole lock surface: the idempotency
+# probe used to spawn stat + grep + dpkg-divert + lsattr + sha256sum per
+# binary. One spawn each here; the per-binary loop reads the arrays.
+declare -A SURFACE_MODE=() SURFACE_IS_GUARD=() SURFACE_DIVERTED=()
+declare -A REAL_MODE=() REAL_SHA=() REAL_IMM=()
+_surface_paths=() _real_paths=()
+while IFS= read -r _p; do
+    [[ -z "$_p" ]] && continue
+    [[ -f "$_p" ]] && _surface_paths+=("$_p")
+    [[ -f "${_p}.real" ]] && _real_paths+=("${_p}.real")
+done < "$lock_surface_tmp"
+
+# Batch probes capture stdout first (keeping partial output when some
+# entries fail) and feed the parse loops via herestring, which restores
+# the trailing newline command substitution drops.
+if [[ ${#_surface_paths[@]} -gt 0 ]]; then
+    _batch_out="$(stat -c '%a %n' -- "${_surface_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] || continue
+        SURFACE_MODE["${_line#* }"]="${_line%% *}"
+    done <<< "$_batch_out"
+    _batch_out="$(grep -la "workspace-guard" -- "${_surface_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    while IFS= read -r _p; do
+        [[ -n "$_p" ]] || continue
+        SURFACE_IS_GUARD["$_p"]=1
+    done <<< "$_batch_out"
+fi
+if [[ ${#_real_paths[@]} -gt 0 ]]; then
+    _batch_out="$(stat -c '%a %n' -- "${_real_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] || continue
+        REAL_MODE["${_line#* }"]="${_line%% *}"
+    done <<< "$_batch_out"
+    _batch_out="$(sha256sum -- "${_real_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] || continue
+        _h="${_line%% *}"; _p="${_line#* }"; _p="${_p# }"
+        REAL_SHA["$_p"]="$_h"
+    done <<< "$_batch_out"
+    _batch_out="$(lsattr -d -- "${_real_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] || continue
+        _a="${_line%% *}"; _p="${_line#* }"
+        [[ "$_a" == *i* ]] && REAL_IMM["$_p"]=1
+    done <<< "$_batch_out"
+fi
+if command -v dpkg-divert >"$DEVNULL" 2>&1; then
+    while IFS= read -r _p; do
+        SURFACE_DIVERTED["$_p"]=1
+    done < <(dpkg-divert --list 2>"$DEVNULL" | awk '{ for (i=1; i<=NF; i++) if ($i=="of") { print $(i+1); break } }')
+fi
+
 if [[ ! -x "$GUARD_BIN" ]]; then
     echo "ERROR: guard binary not found at $GUARD_BIN" >&2
     echo "       run: make build-binary-guard" >&2
     exit 2
 fi
 echo "==> Guard binary: $GUARD_BIN"
+
+# The post-install warm check execs the same guard binary at every
+# contained path, so which invocation succeeds (--version vs --help vs
+# bare) is a property of the guard, not the path. Probe once here and
+# reuse; the old code ran up to 3 warm execs per binary.
+WARM_MODE="none"
+if "$GUARD_BIN" --version >"$DEVNULL" 2>&1; then
+    WARM_MODE="--version"
+elif "$GUARD_BIN" --help >"$DEVNULL" 2>&1; then
+    WARM_MODE="--help"
+elif "$GUARD_BIN" <"$DEVNULL" >"$DEVNULL" 2>&1; then
+    WARM_MODE="bare"
+fi
 
 HAVE_CHATTR=0
 if command -v chattr; then HAVE_CHATTR=1; fi
@@ -193,23 +258,22 @@ while IFS= read -r path; do
     real="${path}.real"
 
     # Idempotency: .real sealed (0700) AND $path is guard AND diverted.
+    # All probes read the pre-collected batch arrays (no per-binary spawns).
     already=0
     if [[ -f "$real" ]]; then
-        real_mode="$(stat -c '%a' "$real" 2>"$DEVNULL")" || real_mode="?"
-        if [[ "$real_mode" == "700" ]] && grep -qa "workspace-guard" "$path" 2>"$DEVNULL"; then
-            if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
+        real_mode="${REAL_MODE["$real"]:-?}"
+        if [[ "$real_mode" == "700" && -n "${SURFACE_IS_GUARD["$path"]:-}" ]]; then
+            if [[ -n "${SURFACE_DIVERTED["$path"]:-}" ]]; then
                 echo "  ALREADY CONTAINED (skip)"
                 SKIPPED=$((SKIPPED+1))
                 if [[ "$DRY_RUN" -eq 0 ]]; then
                     imm_now=false
-                    if [[ "$HAVE_CHATTR" -eq 1 ]]; then
-                        if lsattr -d "$real" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
-                            imm_now=true
-                        fi
+                    if [[ "$HAVE_CHATTR" -eq 1 && -n "${REAL_IMM["$real"]:-}" ]]; then
+                        imm_now=true
                     fi
                     append_state_entry "$path" \
-                        "$(sha256sum "$real" 2>"$DEVNULL" | awk '{print $1}')" \
-                        "$(stat -c '%a' "$path")" "$imm_now" true "$NOW"
+                        "${REAL_SHA["$real"]:-}" \
+                        "${SURFACE_MODE["$path"]:-?}" "$imm_now" true "$NOW"
                 fi
                 already=1
             fi
@@ -310,13 +374,16 @@ while IFS= read -r path; do
         rollback_path "$path"; FAILED=$((FAILED+1)); continue
     fi
 
-    # 3j. Warm check: <path> should now be the guard binary.
-    if ! _warm_out="$("$path" --version 2>&1)"; then
-        if ! _warm_out="$("$path" --help 2>&1)"; then
-            if ! _warm_out="$("$path" </dev/null 2>&1)"; then
-                echo "  WARN: $path warm-check failed (post-install): $_warm_out" >&2
-            fi
-        fi
+    # 3j. Warm check: <path> should now be the guard binary. One exec,
+    #     using the invocation form the preflight probe proved works.
+    case "$WARM_MODE" in
+        --version) _warm_ok=1; _warm_out="$("$path" --version 2>&1)" || _warm_ok=0 ;;
+        --help)    _warm_ok=1; _warm_out="$("$path" --help 2>&1)" || _warm_ok=0 ;;
+        bare)      _warm_ok=1; _warm_out="$("$path" <"$DEVNULL" 2>&1)" || _warm_ok=0 ;;
+        none)      _warm_ok=0; _warm_out="guard binary failed all preflight probes" ;;
+    esac
+    if [[ "$_warm_ok" -eq 0 ]]; then
+        echo "  WARN: $path warm-check failed (post-install): $_warm_out" >&2
     fi
 
     # 3i. Record state for uninstall-lock-runtime.

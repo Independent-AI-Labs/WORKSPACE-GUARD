@@ -5,3 +5,5 @@
 config/home-lock-users.yaml
 config/agent-git-identity
 config/host-provision.yaml
+# Regen stamp for `make gitleaks-ignore-regen` (per-host, regenerated)
+.gitleaksignore.refs-sha256

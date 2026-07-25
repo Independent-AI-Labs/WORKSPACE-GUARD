@@ -1,7 +1,4 @@
-use crate::{
-    is_config_key_blocked, GuardError, BLOCKED_SUBCOMMANDS, SUBCOMMANDS_WITH_PARTIAL_BLOCKS,
-    SUDO_GATED_SUBCOMMANDS,
-};
+use crate::{is_config_key_blocked, GuardError, ABBREV_CANDIDATES, ABBREV_PREFERRED};
 
 pub struct ArgState {
     pub subcommand: Option<String>,
@@ -23,36 +20,33 @@ pub struct ArgState {
 
 fn resolve_subcommand_abbreviation(raw: &str) -> String {
     let raw_lower = raw.to_lowercase();
-    let all_candidates: Vec<&&str> = BLOCKED_SUBCOMMANDS
-        .iter()
-        .chain(SUDO_GATED_SUBCOMMANDS.iter())
-        .chain(SUBCOMMANDS_WITH_PARTIAL_BLOCKS.iter())
-        .collect();
-
-    let mut matches: Vec<&&str> = all_candidates
-        .iter()
-        .filter(|c| c.starts_with(&raw_lower))
-        .copied()
-        .collect();
-    matches.sort();
-    matches.dedup();
-
-    if matches.len() == 1 {
-        return matches[0].to_string();
-    }
-    // Prefer porcelain (partial/sudo_gated) over plumbing (blocked) when a
-    // prefix is ambiguous (e.g. "com" → commit, not commit-tree).
-    if matches.len() > 1 {
-        let preferred: Vec<&&str> = matches
-            .iter()
-            .filter(|c| {
-                SUBCOMMANDS_WITH_PARTIAL_BLOCKS.contains(c) || SUDO_GATED_SUBCOMMANDS.contains(c)
-            })
-            .copied()
-            .collect();
-        if preferred.len() == 1 {
-            return preferred[0].to_string();
+    // ABBREV_CANDIDATES is sorted+deduped at build time, so all entries
+    // with the given prefix form one contiguous range; partition_point
+    // finds its start in O(log n).
+    let start = ABBREV_CANDIDATES.partition_point(|c| *c < raw_lower.as_str());
+    let range = &ABBREV_CANDIDATES[start..];
+    let mut match_count = 0usize;
+    let mut single_match = "";
+    let mut preferred_count = 0usize;
+    let mut preferred_match = "";
+    for cand in range {
+        if !cand.starts_with(&raw_lower) {
+            break;
         }
+        match_count += 1;
+        single_match = cand;
+        // Prefer porcelain (partial/sudo_gated) over plumbing (blocked)
+        // when a prefix is ambiguous (e.g. "com" -> commit, not commit-tree).
+        if ABBREV_PREFERRED.binary_search(cand).is_ok() {
+            preferred_count += 1;
+            preferred_match = cand;
+        }
+    }
+    if match_count == 1 {
+        return single_match.to_string();
+    }
+    if match_count > 1 && preferred_count == 1 {
+        return preferred_match.to_string();
     }
     raw.to_string()
 }

@@ -16,13 +16,21 @@ ensure_testagent() {
     echo "Created user $_TESTAGENT_USER (uid $_TESTAGENT_UID)"
 }
 
+_TARGET_CHOWNED=0
 _chown_target_for_testagent() {
+    # Recursive chown of the whole target/ tree is expensive; only the
+    # first call in a run does work, later calls are no-ops unless a
+    # build step ran in between (which re-creates root-owned artifacts).
     if [[ ! -d target ]]; then
+        return 0
+    fi
+    if [[ "$_TARGET_CHOWNED" -eq 1 ]] && ! find target ! -user "$_TESTAGENT_USER" -print -quit | grep -q .; then
         return 0
     fi
     # Darwin Tier 0 leaves SUID fixtures here; virtiofs bind mounts reject chown on them.
     rm -rf target/.bats-sync-live
     chown -R "$_TESTAGENT_USER:$_TESTAGENT_USER" target
+    _TARGET_CHOWNED=1
 }
 
 echo "==> Tier 1: lint"

@@ -11,7 +11,7 @@ fn glob_trees_does_not_crash_on_large_dir_hierarchy() {
         fs::write(sub.join("file.txt"), b"x").unwrap();
     }
 
-    lock_glob_trees(root, ".boot*");
+    lock_worktree_globs(root, &HashSet::new());
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn glob_trees_multiple_matching_dirs() {
     fs::create_dir_all(&nested).unwrap();
     fs::write(nested.join("c.bin"), b"x").unwrap();
 
-    lock_glob_trees(root, ".boot*");
+    lock_worktree_globs(root, &HashSet::new());
 
     assert!(b1.join("a.bin").exists());
     assert!(b2.join("b.bin").exists());
@@ -51,7 +51,7 @@ fn glob_trees_does_not_match_non_dot_boot_dirs() {
     fs::create_dir_all(&partial).unwrap();
     fs::write(partial.join("y.txt"), b"x").unwrap();
 
-    lock_glob_trees(root, ".boot*");
+    lock_worktree_globs(root, &HashSet::new());
 
     assert!(normal.join("x.txt").exists());
     assert!(partial.join("y.txt").exists());
@@ -60,7 +60,7 @@ fn glob_trees_does_not_match_non_dot_boot_dirs() {
 #[test]
 fn glob_trees_handles_empty_root() {
     let dir = tempfile::tempdir().unwrap();
-    lock_glob_trees(dir.path(), ".boot*");
+    lock_worktree_globs(dir.path(), &HashSet::new());
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn glob_trees_handles_root_is_file() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("not_a_dir");
     fs::write(&f, b"x").unwrap();
-    lock_glob_trees(&f, ".boot*");
+    lock_worktree_globs(&f, &HashSet::new());
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn glob_trees_exec_bits_preserved_on_binary_files() {
         .output()
         .unwrap();
 
-    lock_glob_trees(root, ".boot*");
+    lock_worktree_globs(root, &HashSet::new());
 
     let node_mode = fs::symlink_metadata(boot_dir.join("node"))
         .unwrap()

@@ -56,7 +56,35 @@ fn remote_urls(toplevel: &str) -> Vec<String> {
 /// True when any remote of the repo points at a provisioned SSH host
 /// (config/git_ssh_allowlist.yaml): a workspace clone living outside the
 /// workspace, which must not commit/push without the contract (H4).
+///
+/// Production builds cache the verdict per toplevel for the process
+/// lifetime: the guard is a short-lived per-invocation process and this
+/// check fires twice on the commit/push path (gitdir lock scope and the
+/// exec contract check), each spawning `git config --get-regexp`.
+/// Test builds bypass the cache because tests mutate repo config.
+#[cfg(not(test))]
 pub fn repo_targets_provisioned_host(toplevel: &str) -> bool {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static CACHE: RefCell<HashMap<String, bool>> = RefCell::new(HashMap::new());
+    }
+    CACHE.with(|c| {
+        if let Some(v) = c.borrow().get(toplevel) {
+            return *v;
+        }
+        let v = repo_targets_provisioned_host_uncached(toplevel);
+        c.borrow_mut().insert(toplevel.to_string(), v);
+        v
+    })
+}
+
+#[cfg(test)]
+pub fn repo_targets_provisioned_host(toplevel: &str) -> bool {
+    repo_targets_provisioned_host_uncached(toplevel)
+}
+
+fn repo_targets_provisioned_host_uncached(toplevel: &str) -> bool {
     remote_urls(toplevel)
         .iter()
         .filter_map(|u| remote_url_host(u))

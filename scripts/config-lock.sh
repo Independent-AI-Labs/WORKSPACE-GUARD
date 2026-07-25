@@ -17,6 +17,9 @@ UNIT_PREFIX="workspace-guard-config-relock"
 
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
+# DEVNULL stderr sink (banned-pattern compliant; see scripts/lib/qc.sh).
+source "$(dirname "$SCRIPT_PATH")/lib/qc.sh" || exit 1
+
 usage() {
     sed -n '2,14p' "$SCRIPT_PATH"
     exit 1
@@ -51,12 +54,37 @@ have_cmd() { local _probe; _probe="$(command -v "$1" 2>&1)"; }
 
 have_chattr() { have_cmd chattr; }
 
-is_immutable() {
-    have_chattr || return 1
-    local _out
-    _out="$(lsattr "$1" 2>&1)" || return 1
-    printf '%s\n' "$_out" | awk '{print $1}' | grep -q 'i'
+# Batched file-state snapshot: one lsattr + one stat spawn for the whole
+# file set instead of per-file pipelines. Missing/unreadable entries are
+# treated as not immutable / unknown owner, matching the old per-file
+# failure semantics.
+declare -A FILE_ATTRS=()
+declare -A FILE_OWNER=()
+
+collect_file_state() {
+    FILE_ATTRS=()
+    FILE_OWNER=()
+    [[ $# -gt 0 ]] || return 0
+    local line attr path
+    if have_chattr; then
+        # Capture first: keeps partial output when lsattr fails on some
+        # entries; herestring restores the trailing newline.
+        local _out _rc
+        _out="$(lsattr -- "$@" 2>"$DEVNULL")"; _rc=$?
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            attr="${line%% *}"
+            path="${line#* }"
+            FILE_ATTRS["$path"]="$attr"
+        done <<< "$_out"
+    fi
+    while IFS= read -r line; do
+        path="${line#* }"
+        FILE_OWNER["$path"]="${line%% *}"
+    done < <(stat -c '%U:%G %n' -- "$@")
 }
+
+is_immutable() { [[ "${FILE_ATTRS["$1"]:-}" == *i* ]]; }
 
 config_files() {
     local repo="$1" f
@@ -112,8 +140,12 @@ cancel_timer() {
 lock_files() {
     local repo="$1"; shift
     local f locked=0 bad=0
+    local present=()
     for f in "$@"; do
-        [[ -f "$f" ]] || { log "skip (missing): $f"; continue; }
+        [[ -f "$f" ]] && present+=("$f") || log "skip (missing): $f"
+    done
+    collect_file_state "${present[@]}"
+    for f in "${present[@]}"; do
         # Idempotent relock: chown on an immutable file fails with EPERM
         # even for root, so drop +i first when re-locking.
         if have_chattr && is_immutable "$f"; then
@@ -125,9 +157,9 @@ lock_files() {
         fi
         locked=$((locked + 1))
     done
-    for f in "$@"; do
-        [[ -f "$f" ]] || continue
-        if [[ "$(stat -c '%U:%G' "$f")" != "root:root" ]]; then
+    collect_file_state "${present[@]}"
+    for f in "${present[@]}"; do
+        if [[ "${FILE_OWNER["$f"]:-}" != "root:root" ]]; then
             log "ERROR: verify failed, not root:root: $f"; bad=1
         fi
         if have_chattr && ! is_immutable "$f"; then
@@ -149,12 +181,17 @@ do_lock() {
     lock_files "$repo" "${files[@]}"
 }
 
-writable_by() {
-    local user="$1" f="$2"
+# One privilege-drop spawn for the whole set: prints each file NOT
+# writable by <user>. Replaces a per-file sudo/su fork.
+not_writable_by() {
+    local user="$1"; shift
+    [[ $# -gt 0 ]] || return 0
     if have_cmd sudo; then
-        sudo -u "$user" test -w "$f"
+        sudo -u "$user" bash -c 'for f in "$@"; do if [ ! -w "$f" ]; then printf "%s\n" "$f"; fi; done' _ "$@"
     else
-        su -s /bin/sh -c "test -w \"$f\"" "$user"
+        local q
+        printf -v q ' %q' "$@"
+        su -s /bin/sh -c "for f in$q; do if [ ! -w \"\$f\" ]; then printf '%s\n' \"\$f\"; fi; done" "$user"
     fi
 }
 
@@ -174,8 +211,11 @@ do_unseal() {
     mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
     : > "$sf"
     local count=0 bad=0 f_abs
-    while IFS= read -r f; do
-        f_abs="$f"
+    local all_files=()
+    while IFS= read -r f; do all_files+=("$f"); done < <(config_files "$repo")
+    [[ ${#all_files[@]} -gt 0 ]] || fail "no config/*.yaml in $repo"
+    collect_file_state "${all_files[@]}"
+    for f_abs in "${all_files[@]}"; do
         if have_chattr && is_immutable "$f_abs"; then
             chattr -i "$f_abs" || { log "ERROR: chattr -i failed: $f_abs"; bad=1; continue; }
         fi
@@ -183,19 +223,21 @@ do_unseal() {
         chmod u+rw "$f_abs" || { log "ERROR: chmod u+rw failed: $f_abs"; bad=1; continue; }
         printf '%s\n' "$f_abs" >> "$sf"
         count=$((count + 1))
-    done < <(config_files "$repo")
-    [[ $count -gt 0 ]] || fail "no config/*.yaml in $repo"
-    while IFS= read -r f; do
+    done
+    local sealed_files=()
+    while IFS= read -r f; do sealed_files+=("$f"); done < "$sf"
+    collect_file_state "${sealed_files[@]}"
+    for f in "${sealed_files[@]}"; do
         if is_immutable "$f"; then
             log "ERROR: verify failed, still immutable: $f"; bad=1
         fi
-        if [[ "$(stat -c '%U:%G' "$f")" != "$owner" ]]; then
+        if [[ "${FILE_OWNER["$f"]:-}" != "$owner" ]]; then
             log "ERROR: verify failed, owner mismatch: $f"; bad=1
         fi
-        if ! writable_by "$owner_user" "$f"; then
-            log "ERROR: verify failed, not writable by $owner_user: $f"; bad=1
-        fi
-    done < "$sf"
+    done
+    while IFS= read -r f; do
+        log "ERROR: verify failed, not writable by $owner_user: $f"; bad=1
+    done < <(not_writable_by "$owner_user" "${sealed_files[@]}")
     [[ $bad -eq 0 ]] || fail "unseal verification failed for $repo/config; NOT scheduling relock"
     printf 'owner=%s\n' "$owner" >> "$sf"
     # Mirror the file list into the locked .git tree so the guard binary
@@ -247,17 +289,18 @@ do_relock() {
 
 do_status() {
     local repo="$1" f owner attr
-    while IFS= read -r f; do
-        owner="$(stat -c '%U:%G' "$f")"
+    local files=()
+    while IFS= read -r f; do files+=("$f"); done < <(config_files "$repo")
+    collect_file_state "${files[@]}"
+    for f in "${files[@]}"; do
+        owner="${FILE_OWNER["$f"]:-unknown}"
         if have_chattr; then
-            local _attr_out
-            _attr_out="$(lsattr "$f" 2>&1)" || _attr_out=""
-            attr="$(printf '%s\n' "$_attr_out" | awk '{print $1}')"
+            attr="${FILE_ATTRS["$f"]:-}"
         else
             attr="(no chattr)"
         fi
         printf '%-55s owner=%-12s attrs=%s\n' "${f#"$repo"/}" "$owner" "$attr"
-    done < <(config_files "$repo")
+    done
     if [[ -f "$(state_file "$repo")" ]]; then
         echo "state: UNSEALED (state file present: $(state_file "$repo"))"
     else

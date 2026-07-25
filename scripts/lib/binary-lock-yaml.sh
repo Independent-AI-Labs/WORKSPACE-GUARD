@@ -26,20 +26,24 @@ emit_binary_lock() {
     # newgidmap) can be folded into the universe for full coverage.
     local live_tmp
     live_tmp="$(mktemp)"; register_temp "$live_tmp"
+    # Live basenames tracked in an assoc array: the caps loop's
+    # "already recorded?" probe was a grep process spawn per entry.
+    local -A live_seen=()
     while IFS= read -r path; do
         [[ -z "$path" ]] && continue
         local bname has_real=0
-        bname="$(basename "$path")"
+        bname="${path##*/}"
         [[ -f "${path}.real" ]] && has_real=1
+        live_seen["$bname"]=1
         printf '%s\t%s\t%s\n' "$bname" "$path" "$has_real" >> "$live_tmp"
     done < "$SUID_LIVE_TMP"
     while IFS=$'\t' read -r path caps; do
         [[ -z "$path" ]] && continue
         local bname has_real=0
-        bname="$(basename "$path")"
+        bname="${path##*/}"
         [[ -f "${path}.real" ]] && has_real=1
         # Skip if already recorded via SUID loop (basename collision).
-        if grep -qxP "^$bname\t" "$live_tmp"; then continue; fi
+        if [[ -n "${live_seen["$bname"]:-}" ]]; then continue; fi
         printf '%s\t%s\t%s\n' "$bname" "$path" "$has_real" >> "$live_tmp"
     done < "$CAPS_LIVE_TMP"
 

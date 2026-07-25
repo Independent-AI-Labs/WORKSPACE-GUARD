@@ -201,23 +201,39 @@ new_caps_tmp="$(mktemp -t suid-drift-fc-new.XXXXXX)"; register_temp "$new_caps_t
 rm_caps_tmp="$(mktemp -t suid-drift-fc-rm.XXXXXX)";   register_temp "$rm_caps_tmp"
 ch_caps_tmp="$(mktemp -t suid-drift-fc-ch.XXXXXX)";   register_temp "$ch_caps_tmp"
 
+# Associative-array join: the previous per-entry awk probe respawned awk
+# per line and rescanned the whole opposite file (quadratic).
+declare -A known_caps_map=() live_caps_map=()
 while IFS=$'\t' read -r path caps; do
-    [[ -z "$path" ]] && continue
-    existing="$(awk -v p="$path" -F'\t' '$1==p {print $2; exit}' "$known_fcap_raw")"
+    [[ -n "$path" ]] && known_caps_map["$path"]="$caps"
+done < "$known_fcap_raw"
+while IFS=$'\t' read -r path caps; do
+    [[ -n "$path" ]] && live_caps_map["$path"]="$caps"
+done < "$live_fcap_raw"
+
+for path in "${!live_caps_map[@]}"; do
+    caps="${live_caps_map[$path]}"
+    existing="${known_caps_map["$path"]:-}"
     if [[ -z "$existing" ]]; then
         printf '%s\t%s\n' "$path" "$caps" >> "$new_caps_tmp"
     elif [[ "$existing" != "$caps" ]]; then
         printf '%s\t%s\t%s\n' "$path" "$existing" "$caps" >> "$ch_caps_tmp"
     fi
-done < "$live_fcap_raw"
+done
 
-while IFS=$'\t' read -r path caps; do
-    [[ -z "$path" ]] && continue
-    existing="$(awk -v p="$path" -F'\t' '$1==p {print $2; exit}' "$live_fcap_raw")"
-    if [[ -z "$existing" ]]; then
-        printf '%s\t%s\n' "$path" "$caps" >> "$rm_caps_tmp"
+for path in "${!known_caps_map[@]}"; do
+    if [[ -z "${live_caps_map["$path"]:-}" ]]; then
+        printf '%s\t%s\n' "$path" "${known_caps_map[$path]}" >> "$rm_caps_tmp"
     fi
-done < "$known_fcap_raw"
+done
+
+# Assoc-array iteration order is unspecified; sort so the report is
+# deterministic (the old per-line awk probes emitted in sorted order).
+for _t in "$new_caps_tmp" "$ch_caps_tmp" "$rm_caps_tmp"; do
+    if [[ -s "$_t" ]]; then
+        sort -o "$_t" "$_t"
+    fi
+done
 
 while IFS=$'\t' read -r path caps; do
     [[ -z "$path" ]] && continue

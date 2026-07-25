@@ -16,6 +16,7 @@ mod fetch;
 #[cfg(feature = "capability-mode")]
 mod gitdir;
 mod remote;
+mod vendored;
 mod wsroot;
 
 #[cfg(not(feature = "capability-mode"))]
@@ -98,17 +99,21 @@ pub fn push_safe_directory_env(envp: &mut Vec<std::ffi::CString>) {
 
 fn main() {
     let argv_os: Vec<OsString> = std::env::args_os().collect();
-    let cmd_str: String = argv_os
-        .iter()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join(" ");
+    // cmd_str is built lazily: it is only used on the block/error paths,
+    // so the join must not run on every allowed git invocation.
+    let cmd_str = || {
+        argv_os
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
 
     let result = run(&argv_os);
 
     match result {
         Ok(()) => {}
-        Err(GuardError::Blocked { reason, hint }) => block(&reason, &hint, &cmd_str),
+        Err(GuardError::Blocked { reason, hint }) => block(&reason, &hint, &cmd_str()),
         Err(GuardError::ContractFailed(msg)) => {
             eprintln!("{}", msg);
             process::exit(4);
@@ -284,7 +289,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     exec::set_resource_limits();
 
     if argv_os.len() <= 1 {
-        return exec::execve_real_git(argv_os, None);
+        return exec::execve_real_git(argv_os, None, None);
     }
 
     let argv: Vec<&[u8]> = argv_os.iter().map(|a| a.as_bytes()).collect();
@@ -296,20 +301,29 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
 
         // Capability-mode ownership lock: claim all paths declared in
-        // config/guard_locked_paths.yaml (e.g. .git/, .gitmodules,
-        // *_exceptions.yaml) as root:root before any further git.original
-        // subprocess can fire a payload planted inside them.
-        // Best-effort; never blocks a pass.
+        // config/guard_locked_paths.yaml (e.g. .git/ minus object
+        // stores, .gitmodules, *_exceptions.yaml) as root:root before
+        // any further git.original subprocess can fire a payload
+        // planted inside them. Best-effort; never blocks a pass.
         // Root-only builds are no-ops (user is already root).
+        // The git dir is resolved ONCE here; the post-exec relock in
+        // exec.rs reuses it instead of spawning a second rev-parse.
         #[cfg(feature = "capability-mode")]
-        gitdir::lock(argv_os);
+        let git_dir = gitdir::resolve_git_dir(argv_os);
+        #[cfg(feature = "capability-mode")]
+        if let Some(ref gd) = git_dir {
+            gitdir::lock(gd);
+        }
 
         if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
             exec::check_workspace_ci_contract(sub)?;
         }
+
+        #[cfg(feature = "capability-mode")]
+        return exec::execve_real_git(argv_os, Some(&state), git_dir.as_deref());
     }
 
-    exec::execve_real_git(argv_os, Some(&state))
+    exec::execve_real_git(argv_os, Some(&state), None)
 }
 
 #[cfg(test)]

@@ -180,7 +180,7 @@ fn check_arg_validate(
                     if !flags_ok {
                         continue;
                     }
-                    if let Ok(re) = regex::Regex::new(pat) {
+                    if let Some(re) = compiled_reject_regex(pat) {
                         if re.is_match(&joined) {
                             return Some(format!("reject regex {:?}: {}", pat, rp.reason));
                         }
@@ -190,6 +190,29 @@ fn check_arg_validate(
         }
     }
     None
+}
+
+/// Reject regexes come from the compile-time-baked policy table (or test
+/// statics); each pattern is compiled at most once per process instead of
+/// on every invocation of check_arg_validate (F14). An invalid pattern
+/// caches None and is skipped (same fail-open-per-pattern behavior as
+/// before; the table is build-time validated so this cannot happen in
+/// production).
+fn compiled_reject_regex(pat: &'static str) -> Option<&'static regex::Regex> {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<&'static str, Option<&'static regex::Regex>>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().ok()?;
+    // Box::leak gives a truly 'static reference; the guard process is
+    // short-lived (exec or exit), so the leak is bounded by the number of
+    // baked reject patterns and never grows per-invocation.
+    *guard.entry(pat).or_insert_with(|| {
+        regex::Regex::new(pat)
+            .ok()
+            .map(|re| &*Box::leak(Box::new(re)))
+    })
 }
 
 fn join_argv(argv_rest: &[OsString]) -> String {
@@ -228,11 +251,12 @@ fn build_sanitized_env(
     policy: &binary_policy_types::BinaryPolicy,
     _is_root: bool,
 ) -> Vec<(OsString, OsString)> {
+    use std::collections::HashSet;
+    let strip_set: HashSet<&'static str> = policy.env_sanitise.iter().copied().collect();
     let mut out: Vec<(OsString, OsString)> = Vec::new();
-    let strip_set: Vec<&'static str> = policy.env_sanitise.to_vec();
     for (k, v) in env::vars_os() {
         let key_str = k.to_string_lossy();
-        if strip_set.iter().any(|s| *s == key_str) {
+        if strip_set.contains(key_str.as_ref()) {
             continue;
         }
         out.push((k, v));

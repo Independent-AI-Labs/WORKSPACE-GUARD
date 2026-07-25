@@ -5,7 +5,7 @@ edition = "2021"
 description = "Capability-based guard framework: blocks destructive commands, sanitises env, enforces WORKSPACE-CI contracts. Git PoC."
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"

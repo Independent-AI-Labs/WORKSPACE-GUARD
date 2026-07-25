@@ -5,7 +5,9 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
-fn default_version() -> u32 {
+mod build_binary_guard;
+
+pub(crate) fn default_version() -> u32 {
     1
 }
 
@@ -100,54 +102,8 @@ struct LockedPathsConfig {
     prune_dir_names: Vec<String>,
 }
 
-// --- binary-guard codegen structs ----------------------------------------
-// These are ONLY used to deserialize res/binary-lock.yaml into a form that
-// build.rs can emit as a const literal. The runtime structs (BinaryPolicy,
-// RejectRule, RejectKind) live in src/binary_policy_types.rs and are never
-// emitted by build.rs. The generated file contains ONLY the
-// `pub const BINARY_POLICIES: &[BinaryPolicy] = &[ ... ];` literal.
-
-#[derive(Deserialize)]
-struct BinaryLockFile {
-    #[serde(default = "default_version")]
-    _version: u32,
-    binaries: Vec<BinaryLockEntry>,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct BinaryLockEntry {
-    name: String,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    contained: bool,
-    policy: String,
-    #[serde(default)]
-    allow_subcommands: Vec<String>,
-    #[serde(default)]
-    allow_self_username: bool,
-    #[serde(default)]
-    reject_patterns: Vec<RejectPatternYaml>,
-    #[serde(default)]
-    env_sanitise: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct RejectPatternYaml {
-    kind: String,
-    #[serde(default)]
-    flag: Option<String>,
-    #[serde(default)]
-    pattern: Option<String>,
-    #[serde(default)]
-    subcommand: Option<String>,
-    #[serde(default)]
-    requires_flags: Vec<String>,
-    reason: String,
-}
+// The binary-guard codegen structs and emit logic live in
+// build_binary_guard.rs (keeps build.rs under the 512-line gate).
 
 #[derive(Deserialize)]
 struct PathsConfig {
@@ -176,6 +132,38 @@ fn emit_str_list(buf: &mut String, name: &str, items: &[String]) {
     buf.push_str(&format!("pub const {}: &[&str] = &[\n", name));
     for item in items {
         buf.push_str(&format!("    {:?},\n", item));
+    }
+    buf.push_str("];\n\n");
+}
+
+/// Emit glob patterns pre-split on '.' and pre-lowercased as
+/// `&[&[&str]]` so the runtime matcher never splits or lowercases per
+/// call (F18). Patterns with more than one `**` are build-fatal: the
+/// runtime matcher is a recursive segment walk that stays linear only
+/// under that constraint.
+fn emit_seg_list(buf: &mut String, name: &str, patterns: &[String]) {
+    if patterns.is_empty() {
+        buf.push_str(&format!("pub const {}: &[&[&str]] = &[];\n\n", name));
+        return;
+    }
+    buf.push_str(&format!("pub const {}: &[&[&str]] = &[\n", name));
+    for pat in patterns {
+        let segs: Vec<String> = pat.split('.').map(|s| s.to_lowercase()).collect();
+        if segs.iter().filter(|s| s.as_str() == "**").count() > 1 {
+            panic!(
+                "build.rs: config-key pattern {:?} has more than one '**' segment",
+                pat
+            );
+        }
+        buf.push_str("    &[");
+        buf.push_str(
+            &segs
+                .iter()
+                .map(|s| format!("{:?}", s))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        buf.push_str("],\n");
     }
     buf.push_str("];\n\n");
 }
@@ -279,6 +267,32 @@ fn main() {
         &subcommands.contract_check,
     );
 
+    // F19: abbreviation resolution tables. ABBREV_CANDIDATES is the
+    // sorted, deduped union of every policy-bearing subcommand list so
+    // the runtime resolver is a partition_point + range scan with no
+    // Vec build, sort, or dedup per call. ABBREV_PREFERRED is the
+    // sorted partial+sudo_gated set the resolver prefers when a raw
+    // prefix matches several candidates.
+    let mut abbrev_candidates: Vec<String> = subcommands
+        .blocked
+        .iter()
+        .chain(subcommands.sudo_gated.iter())
+        .chain(subcommands.partial.iter())
+        .cloned()
+        .collect();
+    abbrev_candidates.sort();
+    abbrev_candidates.dedup();
+    emit_str_list(&mut code, "ABBREV_CANDIDATES", &abbrev_candidates);
+    let mut abbrev_preferred: Vec<String> = subcommands
+        .partial
+        .iter()
+        .chain(subcommands.sudo_gated.iter())
+        .cloned()
+        .collect();
+    abbrev_preferred.sort();
+    abbrev_preferred.dedup();
+    emit_str_list(&mut code, "ABBREV_PREFERRED", &abbrev_preferred);
+
     code.push_str("// --- guard_config_keys.yaml ---\n");
     emit_str_list(&mut code, "DANGEROUS_CONFIG_KEYS", &config_keys.dangerous);
     emit_str_list(&mut code, "SUDO_GATED_CONFIG_KEYS", &config_keys.sudo_gated);
@@ -286,6 +300,17 @@ fn main() {
         &mut code,
         "VALUE_TAKING_OPTS",
         &config_keys.value_taking_opts,
+    );
+    // F18: pre-split, pre-lowercased segment tables for the glob matcher.
+    emit_seg_list(
+        &mut code,
+        "DANGEROUS_CONFIG_KEY_SEGMENTS",
+        &config_keys.dangerous,
+    );
+    emit_seg_list(
+        &mut code,
+        "SUDO_GATED_CONFIG_KEY_SEGMENTS",
+        &config_keys.sudo_gated,
     );
 
     code.push_str("// --- guard_protected_branches.yaml ---\n");
@@ -389,123 +414,6 @@ fn main() {
     // guard build does not require res/binary-lock.yaml to exist. Emits
     // ONLY the BINARY_POLICIES const literal; no struct/fn/enum.
     if env::var_os("CARGO_FEATURE_BINARY_GUARD").is_some() {
-        emit_binary_guard_config(Path::new(&manifest));
-    }
-}
-
-/// Emit OUT_DIR/binary_policies.rs containing ONLY the
-/// `pub const BINARY_POLICIES: &[BinaryPolicy] = &[ ... ];` literal.
-///
-/// The structs the literal references (BinaryPolicy, RejectRule, RejectKind)
-/// are defined in hand-written src/binary_policy_types.rs. build.rs emits
-/// no type definitions and no function bodies: baking logic into generated
-/// strings breaks IDE support and diffs readably; the codegen smell this
-/// split is designed to prevent.
-fn emit_binary_guard_config(manifest: &Path) {
-    let res_dir = manifest.join("res");
-    let lock_path = res_dir.join("binary-lock.yaml");
-    let text = fs::read_to_string(&lock_path).unwrap_or_else(|e| {
-        panic!(
-            "build.rs: failed to read {}: {}. Run `make sync-gtfobins` to regenerate. {}",
-            lock_path.display(),
-            e,
-            "res/binary-lock.yaml is the generated build input for the binary guard.",
-        )
-    });
-    let lock: BinaryLockFile = serde_yaml::from_str(&text)
-        .unwrap_or_else(|e| panic!("build.rs: failed to parse {}: {}", lock_path.display(), e));
-
-    let mut code = String::new();
-    code.push_str("// Auto-generated by build.rs from res/binary-lock.yaml. DO NOT EDIT.\n");
-    code.push_str("// Run `make sync-gtfobins` to regenerate. This file contains ONLY the\n");
-    code.push_str("// BINARY_POLICIES const literal; the structs it references live in\n");
-    code.push_str(
-        "// src/binary_policy_types.rs (hand-written). build.rs emits no fn/struct/enum.\n\n",
-    );
-    code.push_str("pub const BINARY_POLICIES: &[BinaryPolicy] = &[\n");
-    for b in &lock.binaries {
-        code.push_str("    BinaryPolicy {\n");
-        code.push_str(&format!("        name: {:?},\n", b.name));
-        code.push_str(&format!("        policy: {},\n", policy_variant(&b.policy)));
-        code.push_str("        allow_subcommands: &[");
-        emit_str_literals_inline(&mut code, &b.allow_subcommands);
-        code.push_str("],\n");
-        code.push_str(&format!(
-            "        allow_self_username: {},\n",
-            b.allow_self_username
-        ));
-        code.push_str("        reject_patterns: &[\n");
-        for rp in &b.reject_patterns {
-            code.push_str("            RejectRule {\n");
-            code.push_str(&format!(
-                "                kind: {},\n",
-                reject_kind_variant(&rp.kind)
-            ));
-            match &rp.flag {
-                Some(f) => code.push_str(&format!("                flag: Some({:?}),\n", f)),
-                None => code.push_str("                flag: None,\n"),
-            }
-            match &rp.pattern {
-                Some(p) => code.push_str(&format!("                pattern: Some({:?}),\n", p)),
-                None => code.push_str("                pattern: None,\n"),
-            }
-            match &rp.subcommand {
-                Some(s) => code.push_str(&format!("                subcommand: Some({:?}),\n", s)),
-                None => code.push_str("                subcommand: None,\n"),
-            }
-            code.push_str("                requires_flags: &[");
-            emit_str_literals_inline(&mut code, &rp.requires_flags);
-            code.push_str("],\n");
-            code.push_str(&format!("                reason: {:?},\n", rp.reason));
-            code.push_str("            },\n");
-        }
-        code.push_str("        ],\n");
-        code.push_str("        env_sanitise: &[");
-        emit_str_literals_inline(&mut code, &b.env_sanitise);
-        code.push_str("],\n");
-        code.push_str("    },\n");
-    }
-    code.push_str("];\n");
-
-    let out_dir = env::var("OUT_DIR").unwrap();
-    fs::write(Path::new(&out_dir).join("binary_policies.rs"), code).unwrap();
-    println!("cargo:rerun-if-changed=res/binary-lock.yaml");
-}
-
-fn emit_str_literals_inline(buf: &mut String, items: &[String]) {
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            buf.push_str(", ");
-        }
-        buf.push_str(&format!("{:?}", item));
-    }
-}
-
-/// Map a policy string from the YAML into the enum variant identifier emitted
-/// in the generated const literal. A const context cannot call `from_str`, so
-/// build.rs converts the wire string to the variant path at codegen time.
-/// Panics on an unknown policy string (fail-closed at build time, not runtime).
-fn policy_variant(s: &str) -> &'static str {
-    match s {
-        "deny-non-root" => "PolicyKind::DenyNonRoot",
-        "deny-all-non-root" => "PolicyKind::DenyAllNonRoot",
-        "arg-validate" => "PolicyKind::ArgValidate",
-        "pass-through" => "PolicyKind::PassThrough",
-        other => panic!(
-            "build.rs: unknown policy string {:?} in res/binary-lock.yaml",
-            other
-        ),
-    }
-}
-
-/// Map a reject-kind string from the YAML into the enum variant identifier.
-fn reject_kind_variant(s: &str) -> &'static str {
-    match s {
-        "flag" => "RejectKind::Flag",
-        "regex" => "RejectKind::Regex",
-        other => panic!(
-            "build.rs: unknown reject kind {:?} in res/binary-lock.yaml",
-            other
-        ),
+        build_binary_guard::emit_binary_guard_config(Path::new(&manifest));
     }
 }

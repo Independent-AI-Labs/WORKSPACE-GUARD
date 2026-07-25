@@ -1,88 +1,4 @@
 use super::*;
-use std::io::Write;
-
-fn write_temp_enforcement(dir: &std::path::Path, content: &str) {
-    let ws_config = dir.join("workspace").join("config");
-    std::fs::create_dir_all(&ws_config).unwrap();
-    let mut f = std::fs::File::create(ws_config.join("project_enforcement.yaml")).unwrap();
-    f.write_all(content.as_bytes()).unwrap();
-}
-
-#[test]
-fn vendored_tier_not_bypassed_for_safe_tier() {
-    let dir = tempfile::tempdir().unwrap();
-    let content = r#"
-version: 1
-defaults:
-  tier: strict
-exemptions:
-  - path: projects/WORKSPACE-GUARD/
-    tier: strict
-    reason: "test"
-"#;
-    write_temp_enforcement(dir.path(), content);
-    let wsroot = dir.path().to_string_lossy().to_string();
-    let toplevel = format!("{}/projects/WORKSPACE-GUARD", wsroot);
-    assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
-}
-
-#[test]
-fn vendored_tier_bypass_detected() {
-    let dir = tempfile::tempdir().unwrap();
-    let content = r#"
-version: 1
-defaults:
-  tier: strict
-exemptions:
-  - path: projects/WORKSPACE-GUARD/
-    tier: vendored
-    reason: "test vendored bypass"
-"#;
-    write_temp_enforcement(dir.path(), content);
-    let wsroot = dir.path().to_string_lossy().to_string();
-    let toplevel = format!("{}/projects/WORKSPACE-GUARD", wsroot);
-    assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
-}
-
-#[test]
-fn vendored_tier_no_exemptions() {
-    let dir = tempfile::tempdir().unwrap();
-    let content = r#"
-version: 1
-defaults:
-  tier: strict
-"#;
-    write_temp_enforcement(dir.path(), content);
-    let wsroot = dir.path().to_string_lossy().to_string();
-    let toplevel = format!("{}/projects/other", wsroot);
-    assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
-}
-
-#[test]
-fn vendored_tier_missing_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let wsroot = dir.path().to_string_lossy().to_string();
-    let toplevel = format!("{}/projects/WORKSPACE-GUARD", wsroot);
-    assert!(!check_vendored_tier_bypass(&wsroot, &toplevel));
-}
-
-#[test]
-fn vendored_tier_path_prefix_match() {
-    let dir = tempfile::tempdir().unwrap();
-    let content = r#"
-version: 1
-defaults:
-  tier: strict
-exemptions:
-  - path: projects/WORKSPACE-GUARD/
-    tier: vendored
-    reason: "test"
-"#;
-    write_temp_enforcement(dir.path(), content);
-    let wsroot = dir.path().to_string_lossy().to_string();
-    let toplevel = format!("{}/projects/WORKSPACE-GUARD/subdir", wsroot);
-    assert!(check_vendored_tier_bypass(&wsroot, &toplevel));
-}
 
 #[test]
 fn raise_child_dac_override_returns_without_panic() {
@@ -121,19 +37,17 @@ fn verify_git_original_returns_error_when_missing() {
 }
 
 #[test]
-fn is_guard_binary_detects_sentinel() {
+fn is_guard_binary_detects_self_by_inode() {
+    let self_path = std::fs::read_link("/proc/self/exe").expect("read_link");
+    assert!(is_guard_binary(&self_path));
+
     let tmpdir = tempfile::tempdir().expect("tempdir");
-    let guard_like = tmpdir.path().join("fake-guard");
-    fs::write(&guard_like, b"some bytes workspace-guard more bytes").expect("write");
-    assert!(is_guard_binary(&guard_like));
+    let other = tmpdir.path().join("other");
+    fs::write(&other, b"git version 2.53.0\n").expect("write");
+    assert!(!is_guard_binary(&other));
 
-    let real_like = tmpdir.path().join("fake-real");
-    fs::write(&real_like, b"git version 2.53.0\n").expect("write");
-    assert!(!is_guard_binary(&real_like));
-
-    let empty = tmpdir.path().join("empty");
-    fs::write(&empty, b"").expect("write");
-    assert!(!is_guard_binary(&empty));
+    let missing = tmpdir.path().join("missing");
+    assert!(!is_guard_binary(&missing));
 }
 
 #[cfg(feature = "capability-mode")]
@@ -223,32 +137,6 @@ fn sudo_gated_env_warnings_non_sudo_drops_with_message() {
     assert!(msgs_sudo.is_empty());
 }
 
-#[test]
-fn root_owned_regular_accepts_system_binary() {
-    let path = std::path::Path::new("/usr/bin/git");
-    if path.exists() {
-        assert!(root_owned_regular(path));
-    }
-}
-
-#[test]
-fn root_owned_regular_rejects_agent_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("owned-by-test-user");
-    std::fs::write(&file, b"x").unwrap();
-    assert!(!root_owned_regular(&file));
-}
-
-#[test]
-fn root_owned_regular_rejects_symlink() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("real");
-    let link = dir.path().join("link");
-    std::fs::write(&target, b"x").unwrap();
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-    assert!(!root_owned_regular(&link));
-}
-
 fn make_workspace_markers(dir: &std::path::Path, markers: &[&str]) {
     for m in markers {
         let p = dir.join(m);
@@ -261,6 +149,7 @@ fn make_workspace_markers(dir: &std::path::Path, markers: &[&str]) {
 
 #[test]
 fn full_markers_find_workspace_root() {
+    use crate::wsroot::find_workspace_root;
     let dir = tempfile::tempdir().unwrap();
     make_workspace_markers(dir.path(), WORKSPACE_MARKERS);
     let top = format!("{}/projects/CI", dir.path().to_string_lossy());
@@ -272,6 +161,7 @@ fn full_markers_find_workspace_root() {
 
 #[test]
 fn partial_markers_miss_full_but_hit_partial() {
+    use crate::wsroot::{find_partial_workspace_root, find_workspace_root};
     let dir = tempfile::tempdir().unwrap();
     let some: Vec<&str> = WORKSPACE_MARKERS.iter().take(1).cloned().collect();
     make_workspace_markers(dir.path(), &some);
@@ -285,6 +175,7 @@ fn partial_markers_miss_full_but_hit_partial() {
 
 #[test]
 fn no_markers_hit_neither() {
+    use crate::wsroot::{find_partial_workspace_root, find_workspace_root};
     let dir = tempfile::tempdir().unwrap();
     let top = dir.path().to_string_lossy().to_string();
     assert_eq!(find_workspace_root(&top), None);

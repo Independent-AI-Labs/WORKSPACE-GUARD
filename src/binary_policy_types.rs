@@ -48,6 +48,9 @@ pub struct RejectRule {
 pub struct BinaryPolicy {
     pub name: &'static str,
     pub policy: PolicyKind,
+    // Read by build.rs to emit BINARY_POLICY_ALIASES; the runtime lookup
+    // uses that sorted index instead of scanning this list per call.
+    #[allow(dead_code)]
     pub allow_subcommands: &'static [&'static str],
     #[allow(dead_code)]
     pub allow_self_username: bool,
@@ -55,19 +58,19 @@ pub struct BinaryPolicy {
     pub env_sanitise: &'static [&'static str],
 }
 
-/// First-match-wins lookup. Walks the compiled-in table in order; returns
-/// the entry whose `name` equals `invoked_name` exactly OR whose
-/// `allow_subcommands` contains `invoked_name`. The symlink-alias rule
-/// means `sudoedit` resolves to the `sudo` entry without a duplicate row.
+/// Exact-name lookup first, then symlink-alias lookup. Both tables are
+/// sorted at build time (build.rs rejects duplicate names/aliases), so
+/// each probe is a binary search: O(log n) over 511 entries instead of
+/// two linear scans. The symlink-alias rule means `sudoedit` resolves to
+/// the `sudo` entry without a duplicate row.
 pub fn find_policy(invoked_name: &str) -> Option<&'static BinaryPolicy> {
-    BINARY_POLICIES
-        .iter()
-        .find(|p| p.name == invoked_name)
-        .or_else(|| {
-            BINARY_POLICIES
-                .iter()
-                .find(|p| p.allow_subcommands.contains(&invoked_name))
-        })
+    if let Ok(idx) = BINARY_POLICIES.binary_search_by(|p| p.name.cmp(invoked_name)) {
+        return Some(&BINARY_POLICIES[idx]);
+    }
+    if let Ok(idx) = BINARY_POLICY_ALIASES.binary_search_by(|(a, _)| a.cmp(&invoked_name)) {
+        return Some(&BINARY_POLICIES[BINARY_POLICY_ALIASES[idx].1 as usize]);
+    }
+    None
 }
 
 // The generated table. build.rs writes this file into OUT_DIR; it contains

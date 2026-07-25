@@ -18,7 +18,7 @@ pub const GIT_SSH_WRAPPER_PATH: &str = "/usr/lib/workspace-guard/git-ssh-wrapper
 
 const ALLOWED_KEYS: &[&str] = &["user.email", "user.name"];
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct AgentGitIdentity {
     pub email: Option<String>,
     pub name: Option<String>,
@@ -159,7 +159,7 @@ pub fn resolve_unix_user() -> Option<(String, PathBuf)> {
     Some((name, user.dir))
 }
 
-pub fn load_identity_for_current_user() -> AgentGitIdentity {
+fn load_identity_uncached() -> AgentGitIdentity {
     if let Ok(p) = std::env::var("WORKSPACE_GUARD_AGENT_IDENTITY_FILE") {
         if !p.is_empty() {
             return load_agent_git_identity_from(Path::new(&p));
@@ -176,6 +176,23 @@ pub fn load_identity_for_current_user() -> AgentGitIdentity {
         }
     }
     load_agent_git_identity_from(&identity_path())
+}
+
+/// Identity for the current user. Production builds cache it for the
+/// process lifetime: the guard is a short-lived per-invocation process
+/// and the identity feeds every hardened-env construction in that
+/// invocation (gitdir resolve, policy subcalls, exec env). Test builds
+/// bypass the cache because tests swap WORKSPACE_GUARD_AGENT_IDENTITY_FILE
+/// between assertions.
+#[cfg(not(test))]
+pub fn load_identity_for_current_user() -> AgentGitIdentity {
+    static IDENTITY: std::sync::OnceLock<AgentGitIdentity> = std::sync::OnceLock::new();
+    IDENTITY.get_or_init(load_identity_uncached).clone()
+}
+
+#[cfg(test)]
+pub fn load_identity_for_current_user() -> AgentGitIdentity {
+    load_identity_uncached()
 }
 
 pub fn base_hardened_entries(identity: &AgentGitIdentity) -> Vec<(String, String)> {
