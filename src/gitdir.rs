@@ -74,7 +74,6 @@
 
 #![cfg(feature = "capability-mode")]
 
-use std::collections::HashSet;
 use std::ffi::{CString, OsString};
 use std::fs;
 use std::os::linux::fs::MetadataExt;
@@ -147,9 +146,11 @@ pub fn lock(git_dir: &Path) {
     }
 
     // 3+4. Tree glob patterns (e.g. .boot*) and filename glob patterns
-    // (e.g. *_exceptions.yaml) in ONE recursive worktree walk.
-    let unsealed = read_unseal_state(git_dir);
-    lock_worktree_globs(&toplevel, &unsealed);
+    // (e.g. *_exceptions.yaml) in ONE recursive worktree walk. The lock
+    // is unconditional: edits to locked policy files go through the
+    // root-gated scripts/exemption.sh (SPEC-EXEMPTION-EDIT); there is
+    // no unseal skip list.
+    lock_worktree_globs(&toplevel);
 }
 
 /// True when the ownership lock applies to the repo at `toplevel`: repos
@@ -164,26 +165,6 @@ fn lock_in_scope(toplevel: &Path) -> bool {
     let s = toplevel.to_string_lossy().to_string();
     crate::wsroot::find_partial_workspace_root(&s).is_some()
         || crate::remote::repo_targets_provisioned_host(&s)
-}
-
-/// Name of the root-owned state file inside the git dir that lists repo
-/// files intentionally unsealed by scripts/config-lock.sh (timed unseal
-/// window). Lives inside .git/ (itself locked root:root) so the agent
-/// cannot forge or edit it.
-const UNSEAL_STATE_FILE: &str = "config-unseal.files";
-
-/// Read the unseal state file. Absent or unreadable means "nothing
-/// unsealed" (fail closed: every glob-locked file stays locked).
-fn read_unseal_state(git_dir: &Path) -> HashSet<PathBuf> {
-    let content = match fs::read_to_string(git_dir.join(UNSEAL_STATE_FILE)) {
-        Ok(c) => c,
-        Err(_) => return HashSet::new(),
-    };
-    content
-        .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("owner="))
-        .map(PathBuf::from)
-        .collect()
 }
 
 /// Directory names the unified worktree glob walk never descends into.
@@ -202,9 +183,8 @@ fn is_pruned_dir(name: &str) -> bool {
 ///
 /// Previously each pattern triggered its own full worktree walk (7+
 /// traversals per lock pass); now every entry is visited once and
-/// matched against all patterns. Unsealed paths are skipped via a
-/// HashSet lookup (O(1) per candidate instead of a linear scan).
-fn lock_worktree_globs(root: &Path, unsealed: &HashSet<PathBuf>) {
+/// matched against all patterns.
+fn lock_worktree_globs(root: &Path) {
     match fs::symlink_metadata(root) {
         Ok(meta) if meta.is_symlink() => {
             let _ = lchown_root(root);
@@ -228,8 +208,8 @@ fn lock_worktree_globs(root: &Path, unsealed: &HashSet<PathBuf>) {
                         None => continue,
                     };
                     if path.is_dir() && !is_pruned_dir(&file_name) {
-                        lock_worktree_globs(&path, unsealed);
-                    } else if path.is_file() && !unsealed.contains(&path) {
+                        lock_worktree_globs(&path);
+                    } else if path.is_file() {
                         for &(pattern, mode) in crate::LOCKED_GLOB_PATTERNS {
                             if glob_match(pattern, &file_name) {
                                 lock_file(&path, mode);

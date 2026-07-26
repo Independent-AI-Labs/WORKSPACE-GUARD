@@ -250,17 +250,14 @@ rebuild -- no Rust code changes needed.
 Best-effort: if a file cannot be read or stat'd, the error is logged and skipped
 and does not block the git invocation.
 
-#### 11.7.1.1 Timed-Unseal Override
+#### 11.7.1.1 Policy YAML Edits (no unseal override)
 
-`scripts/config-lock.sh unseal <repo> [minutes]` temporarily hands
-`config/*.yaml` back to the repo owner so legitimate edits are possible.
-To keep the guard binary's per-invocation glob relock from instantly
-reverting the unseal, the script mirrors the unsealed file list into
-`<gitdir>/config-unseal.files` (root:root 0o644, inside the locked `.git`
-tree the agent cannot write). Before the glob-pattern lock pass, the
-guard reads that file and skips exactly the listed paths; an absent or
-unreadable file means "skip nothing" (fail closed). `config-lock.sh
-lock`/`relock` delete the state file, restoring full enforcement.
+The glob lock is unconditional: there is no unseal state file and no
+skip list. Legitimate edits to locked policy YAMLs go through the
+root-gated `scripts/exemption.sh` (`sudo make exemption-add` /
+`exemption-remove`), which manipulates YAML contents directly while
+the files stay `root:root` at all times. See
+[SPEC-EXEMPTION-EDIT](SPEC-EXEMPTION-EDIT.md).
 
 The installer must `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep' /usr/bin/git`
 (CAP_SETPCAP is needed so the forked child can raise CAP_DAC_OVERRIDE into

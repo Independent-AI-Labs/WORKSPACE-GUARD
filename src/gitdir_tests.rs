@@ -75,8 +75,8 @@ fn is_hook_file_detects_hooks() {
 
 #[test]
 fn glob_files_no_crash_on_various_inputs() {
-    lock_worktree_globs(Path::new("/nonexistent-path-1234"), &HashSet::new());
-    lock_worktree_globs(tempfile::tempdir().unwrap().path(), &HashSet::new());
+    lock_worktree_globs(Path::new("/nonexistent-path-1234"));
+    lock_worktree_globs(tempfile::tempdir().unwrap().path());
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn glob_files_finds_nested_exceptions() {
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("deep_exceptions.yaml"), b"x").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(root.join("quality_exceptions.yaml").exists());
     assert!(root.join("other.txt").exists());
@@ -117,7 +117,7 @@ fn glob_files_skips_dotgit() {
     let exc = root.join("quality_exceptions.yaml");
     fs::write(&exc, b"x").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
     assert!(exc.exists());
 }
 
@@ -131,7 +131,7 @@ fn glob_files_handles_symlink_exceptions_file() {
     let link = root.join("link_exceptions.yaml");
     std::os::unix::fs::symlink(&real_file, &link).unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(real_file.exists());
     assert!(link.exists());
@@ -145,7 +145,7 @@ fn glob_files_handles_broken_symlink() {
     let link = root.join("broken_exceptions.yaml");
     std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn glob_files_multiple_patterns_independent() {
     fs::write(root.join("bar_exceptions.yaml"), b"x").unwrap();
     fs::write(root.join("other.txt"), b"x").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(root.join("foo_exceptions.yaml").exists());
     assert!(root.join("bar_exceptions.yaml").exists());
@@ -177,55 +177,16 @@ fn glob_files_deeply_nested() {
     let deep_file = cur.join("deep_exceptions.yaml");
     fs::write(&deep_file, b"x").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
     assert!(deep_file.exists());
-}
-
-// --- unseal-state tests ---
-
-#[test]
-fn glob_files_skips_unsealed_paths() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-
-    let sealed = root.join("sealed_exceptions.yaml");
-    let open = root.join("open_exceptions.yaml");
-    fs::write(&sealed, b"x").unwrap();
-    fs::write(&open, b"x").unwrap();
-
-    let unsealed: HashSet<PathBuf> = [open.clone()].into_iter().collect();
-    lock_worktree_globs(root, &unsealed);
-
-    assert!(sealed.exists());
-    assert!(open.exists());
-}
-
-#[test]
-fn read_unseal_state_absent_is_empty() {
-    let dir = tempfile::tempdir().unwrap();
-    assert!(read_unseal_state(dir.path()).is_empty());
-}
-
-#[test]
-fn read_unseal_state_parses_list_and_skips_owner_line() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join(UNSEAL_STATE_FILE),
-        "/repo/config/a_exceptions.yaml\n/repo/config/dead_code.yaml\nowner=agent:agent\n",
-    )
-    .unwrap();
-    let got = read_unseal_state(dir.path());
-    assert_eq!(got.len(), 2);
-    assert!(got.contains(&PathBuf::from("/repo/config/a_exceptions.yaml")));
-    assert!(got.contains(&PathBuf::from("/repo/config/dead_code.yaml")));
 }
 
 // --- lock_glob_trees tests ---
 
 #[test]
 fn glob_trees_no_crash_on_nonexistent() {
-    lock_worktree_globs(Path::new("/nonexistent-path-1234"), &HashSet::new());
-    lock_worktree_globs(tempfile::tempdir().unwrap().path(), &HashSet::new());
+    lock_worktree_globs(Path::new("/nonexistent-path-1234"));
+    lock_worktree_globs(tempfile::tempdir().unwrap().path());
 }
 
 #[test]
@@ -244,7 +205,7 @@ fn glob_trees_finds_boot_dirs() {
     let other = root.join("other");
     fs::create_dir_all(&other).unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(boot_dir.join("vmlinuz").exists());
     assert!(bootloader_dir.join("stage1.bin").exists());
@@ -260,7 +221,7 @@ fn glob_trees_finds_nested_boot_dirs() {
     fs::create_dir_all(&nested).unwrap();
     fs::write(nested.join("kernel.img"), b"x").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(nested.join("kernel.img").exists());
 }
@@ -278,7 +239,7 @@ fn glob_trees_skips_dotgit() {
     fs::create_dir_all(&boot_dir).unwrap();
     fs::write(boot_dir.join("initrd"), b"x").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(boot_dir.join("initrd").exists());
     assert!(git_dir.join("config").exists());
@@ -293,7 +254,7 @@ fn glob_trees_does_not_lock_plain_dirs() {
     fs::create_dir_all(&normal).unwrap();
     fs::write(normal.join("main.rs"), b"fn main() {}").unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(normal.join("main.rs").exists());
 }
@@ -310,7 +271,7 @@ fn glob_trees_handles_symlink_dir() {
     let link = root.join(".boot-link");
     std::os::unix::fs::symlink(&real, &link).unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 
     assert!(real.join("file").exists());
     assert!(link.exists());
@@ -324,7 +285,7 @@ fn glob_trees_handles_broken_symlink() {
     let link = root.join(".boot-broken");
     std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
 
-    lock_worktree_globs(root, &HashSet::new());
+    lock_worktree_globs(root);
 }
 
 // --- glob_match tests ---

@@ -238,7 +238,9 @@ F21. Release profile uses `opt-level = "z"` + LTO + codegen-units=1.
     cost runtime speed. Fix: benchmark `opt-level = 3` for the wrapper
     crate; keep LTO.
 
-F22. `config-lock.sh` runs `lsattr | awk | grep`, `stat`, `chattr`,
+F22. (HISTORICAL: `config-lock.sh` has since been deleted and replaced
+by the sudo-gated `scripts/exemption.sh`; see SPEC-EXEMPTION-EDIT.)
+`config-lock.sh` runs `lsattr | awk | grep`, `stat`, `chattr`,
     `chown`, and (on unseal verify) `sudo -u <user> test -w` PER FILE,
     in two passes (mutate then verify). scripts/config-lock.sh:54-59,
     112-139, 152-159, 177-198. Fix: one `lsattr` batch, single pass,
@@ -340,7 +342,9 @@ F14-F19 implementation notes:
 
 F22/F23/F25 implementation notes:
 
-- F22: config-lock.sh now snapshots file state via collect_file_state
+- F22: (superseded -- config-lock.sh was later deleted in favor of
+  scripts/exemption.sh) config-lock.sh now snapshots file state via
+  collect_file_state
   (one lsattr + one stat spawn per phase instead of per-file
   lsattr|awk|grep and stat pipelines), and not_writable_by does one
   sudo/su privilege-drop spawn for the whole set. Flows unchanged;

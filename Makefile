@@ -422,37 +422,26 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	bash scripts/guard-operator.sh '$*'
 
 # =============================================================================
-# Consumer Config Lock (timed unseal for root-owned immutable configs)
+# Exemption Edit (sudo-gated YAML policy add/remove; SPEC-EXEMPTION-EDIT)
 # =============================================================================
-# Consumer repos (e.g. WORKSPACE-WEB-CONTENT) keep config/*.yaml root-owned
-# and chattr +i. These intents unseal them for a bounded window; relock is
-# scheduled via systemd-run (dependency: config/system-deps.yaml -> systemd,
-# checked/bootstrapped by make init / make init-check).
+# Policy YAMLs stay root:root at all times (guard ownership lock). Edits go
+# through scripts/exemption.sh as root; files are never released or relocked.
 
-CONFIG_LOCK_REPO ?= $(abspath $(REPO_ROOT)/../WORKSPACE-WEB-CONTENT)
-CONFIG_LOCK_MINUTES ?= 10
-
-.PHONY: config-lock config-unseal config-relock config-lock-status
-config-lock: ## Lock consumer config/*.yaml now (root:root + immutable); cancels pending relock timer (ROOT)
+.PHONY: exemption-add exemption-remove exemption-list
+exemption-add: ## Append an entry to a YAML policy list: make exemption-add FILE=.. KEY=.. FIELDS="hook=x reason=... paths=src/ added_by=.." (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
-		echo "ERROR: config-lock needs root: sudo make config-lock" >&2; exit 1; \
+		echo "ERROR: exemption-add needs root: sudo make exemption-add" >&2; exit 1; \
 	fi
-	bash scripts/config-lock.sh lock "$(CONFIG_LOCK_REPO)"
+	bash scripts/exemption.sh add "$(FILE)" "$(KEY)" $(FIELDS)
 
-config-unseal: ## Timed unseal of consumer config/*.yaml; auto-relock after CONFIG_LOCK_MINUTES (default 10) (ROOT)
+exemption-remove: ## Remove matching entries from a YAML policy list: make exemption-remove FILE=.. KEY=.. FIELDS="hook=x" (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
-		echo "ERROR: config-unseal needs root: sudo make config-unseal" >&2; exit 1; \
+		echo "ERROR: exemption-remove needs root: sudo make exemption-remove" >&2; exit 1; \
 	fi
-	bash scripts/config-lock.sh unseal "$(CONFIG_LOCK_REPO)" "$(CONFIG_LOCK_MINUTES)"
+	bash scripts/exemption.sh remove "$(FILE)" "$(KEY)" $(FIELDS)
 
-config-relock: ## Relock consumer config/*.yaml immediately and cancel the timed relock (ROOT)
-	if [ "$$(id -u)" != "0" ]; then \
-		echo "ERROR: config-relock needs root: sudo make config-relock" >&2; exit 1; \
-	fi
-	bash scripts/config-lock.sh relock "$(CONFIG_LOCK_REPO)"
-
-config-lock-status: ## Show per-file lock state and pending relock timer for consumer config/*.yaml
-	bash scripts/config-lock.sh status "$(CONFIG_LOCK_REPO)"
+exemption-list: ## Print a YAML policy file or one list key's block: make exemption-list FILE=.. [KEY=..]
+	bash scripts/exemption.sh list "$(FILE)" $(KEY)
 
 # =============================================================================
 # Host Provision

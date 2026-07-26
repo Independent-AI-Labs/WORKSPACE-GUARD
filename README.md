@@ -39,10 +39,10 @@ Enforcement rests on three ideas:
    repos and provisioned-host clones; Program III root-locks user-global
    identity files and declared config globs. Locks are not applied to
    temporary sandboxes outside these scopes.
-3. **Operator intent.** Root-owned config files can be temporarily unsealed
-   with `config-lock.sh unseal`, edited, and re-locked. The guard honors the
-   unseal state across invocations and fails closed when the state file is
-   absent or unreadable.
+3. **Operator intent.** Root-owned policy YAMLs are edited through the
+   sudo-gated `scripts/exemption.sh` (`sudo make exemption-add` /
+   `exemption-remove`), which manipulates YAML contents directly while the
+   files stay root-owned at all times. Files are never released or relocked.
 
 Blocks are audited to `~/.workspace-guard.log` and `/dev/tty`. Full policy
 detail is in `docs/specifications/`; operator workflow in
@@ -93,7 +93,7 @@ flowchart TB
 
   P1 --> S1["/usr/bin/git"]
   S1 --> E1["workspace-guard → git.original"]
-  P1 --> C1["config-lock.sh operator intents"]
+  P1 --> C1["exemption.sh operator intents"]
   P1 --> C2["ci_integrity: deployed CI content check"]
 
   P2A --> S2["GTFOBins SUID/CAP paths"]
@@ -164,11 +164,10 @@ before delegating to `git.original`.
 
 **Config lock and CI integrity:**
 
-- `scripts/config-lock.sh` gives operators a timed unseal over root-owned
-  consumer config globs (`config/*.yaml` exception files). `unseal` records
-  the released file list inside the root-owned `.git/` tree; the guard reads
-  that state and skips exactly those paths during its per-invocation glob
-  relock. `lock`/`relock` restore full enforcement.
+- `scripts/exemption.sh` gives operators sudo-gated add/remove/list/set
+  over root-owned policy YAMLs (`*_exceptions.yaml`, thresholds, excludes).
+  The guard's glob lock is unconditional; edits happen as root via atomic,
+  fail-closed transforms (see SPEC-EXEMPTION-EDIT).
 - `ci_integrity` verifies that deployed WORKSPACE-CI mirror content matches
   the expected tree, so an agent-modified deployment is detected even when
   file ownership still looks correct.
@@ -177,7 +176,8 @@ before delegating to `git.original`.
 |----------|---------|
 | [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md) | Policy engine, rules, config keys |
 | [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) | Install classes, host profiles, drift |
-| [SPEC-GIT-GUARD-HARDENING](docs/specifications/SPEC-GIT-GUARD-HARDENING.md) | `.git` lock, unseal flow, capability flow, threat model |
+| [SPEC-GIT-GUARD-HARDENING](docs/specifications/SPEC-GIT-GUARD-HARDENING.md) | `.git` lock, capability flow, threat model |
+| [SPEC-EXEMPTION-EDIT](docs/specifications/SPEC-EXEMPTION-EDIT.md) | Sudo-gated YAML policy add/remove |
 
 ---
 
@@ -293,8 +293,8 @@ Run from the workspace root; full detail in
 | `make guard-check` | Read-only health check |
 | `sudo make guard-down` | Remove git guard only (provision state preserved) |
 | `sudo GUARD_PURGE_CONFIRM=1 make guard-reset` | Factory reset then bring-up |
-| `scripts/config-lock.sh unseal <repo> [minutes]` | Temporarily release root-owned config files |
-| `scripts/config-lock.sh relock <repo>` | Restore config locks now |
+| `sudo make exemption-add FILE=.. KEY=.. FIELDS=".."`| Append a YAML policy entry |
+| `sudo make exemption-remove FILE=.. KEY=.. FIELDS=".."` | Remove matching YAML policy entries |
 
 ---
 
