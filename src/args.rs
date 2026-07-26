@@ -1,4 +1,6 @@
 use crate::{is_config_key_blocked, GuardError, ABBREV_CANDIDATES, ABBREV_PREFERRED};
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStrExt;
 
 pub struct ArgState {
     pub subcommand: Option<String>,
@@ -384,6 +386,29 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     }
 
     Ok(state)
+}
+
+/// Extract the leading global options that change WHERE git locates the
+/// repository (-C <path>, --git-dir, --work-tree) so the lock resolves the
+/// same git dir the real git child will operate on. Without this, a call
+/// like `git -C /other/repo status` would lock the repo under the guard's
+/// own cwd (or none) instead of the target repo (observed: post-exec
+/// relock was a no-op for every `-C` invocation, errors discarded).
+pub fn repo_location_args(argv_os: &[OsString]) -> Vec<OsString> {
+    let mut out = Vec::new();
+    let mut it = argv_os.iter().skip(1);
+    while let Some(a) = it.next() {
+        let bytes = a.as_bytes();
+        if bytes == b"-C" || bytes == b"--git-dir" || bytes == b"--work-tree" {
+            if let Some(v) = it.next() {
+                out.push(a.clone());
+                out.push(v.clone());
+            }
+        } else if bytes.starts_with(b"--git-dir=") || bytes.starts_with(b"--work-tree=") {
+            out.push(a.clone());
+        }
+    }
+    out
 }
 
 #[cfg(test)]

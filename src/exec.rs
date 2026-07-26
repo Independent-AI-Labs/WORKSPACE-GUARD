@@ -272,7 +272,10 @@ pub fn execve_real_git(
                     crate::gitdir::lock(gd);
                 }
             };
-            match waitpid(child_pid, None) {
+            let t = crate::trace_start("git.original exec+wait");
+            let waited = waitpid(child_pid, None);
+            crate::trace_end(t, "git.original exec+wait");
+            match waited {
                 Ok(WaitStatus::Exited(_, code)) => {
                     #[cfg(feature = "capability-mode")]
                     relock(git_dir);
@@ -293,12 +296,26 @@ pub fn execve_real_git(
     }
 }
 
-pub fn check_workspace_ci_contract(subcommand: &str) -> Result<(), GuardError> {
+pub fn check_workspace_ci_contract(
+    subcommand: &str,
+    argv_os: &[OsString],
+) -> Result<(), GuardError> {
     let mut toplevel_cmd = std::process::Command::new("/usr/bin/git.original");
     toplevel_cmd
         .env_clear()
         .env("PATH", CHILD_PATH)
         .env("HOME", "/");
+    // Preserve repo-location env overrides, then pass -C/--git-dir/
+    // --work-tree through: without them a `git -C /other/repo commit`
+    // would run the contract check against the guard's cwd repo instead
+    // of the target (observed: commits via -C to scratch repos triggered
+    // the full workspace CI deployment verification).
+    for var in ["GIT_DIR", "GIT_WORK_TREE"] {
+        if let Some(v) = std::env::var_os(var) {
+            toplevel_cmd.env(var, v);
+        }
+    }
+    toplevel_cmd.args(crate::args::repo_location_args(argv_os));
     crate::apply_safe_directory(&mut toplevel_cmd);
     let toplevel = match toplevel_cmd.args(["rev-parse", "--show-toplevel"]).output() {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),

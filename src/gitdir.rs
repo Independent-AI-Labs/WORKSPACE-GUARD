@@ -302,29 +302,6 @@ fn lock_tree(path: &Path, git_dir: &Path) {
     }
 }
 
-/// Extract the leading global options that change WHERE git locates the
-/// repository (-C <path>, --git-dir, --work-tree) so the lock resolves the
-/// same git dir the real git child will operate on. Without this, a call
-/// like `git -C /other/repo status` would lock the repo under the guard's
-/// own cwd (or none) instead of the target repo (observed: post-exec
-/// relock was a no-op for every `-C` invocation, errors discarded).
-fn repo_location_args(argv_os: &[OsString]) -> Vec<OsString> {
-    let mut out = Vec::new();
-    let mut it = argv_os.iter().skip(1);
-    while let Some(a) = it.next() {
-        let bytes = a.as_bytes();
-        if bytes == b"-C" || bytes == b"--git-dir" || bytes == b"--work-tree" {
-            if let Some(v) = it.next() {
-                out.push(a.clone());
-                out.push(v.clone());
-            }
-        } else if bytes.starts_with(b"--git-dir=") || bytes.starts_with(b"--work-tree=") {
-            out.push(a.clone());
-        }
-    }
-    out
-}
-
 /// Resolve the absolute git dir for this invocation. Called ONCE per
 /// guard invocation from main.rs; both lock passes reuse the result.
 pub fn resolve_git_dir(argv_os: &[OsString]) -> Option<PathBuf> {
@@ -339,7 +316,7 @@ pub fn resolve_git_dir(argv_os: &[OsString]) -> Option<PathBuf> {
         }
     }
     let out = cmd
-        .args(repo_location_args(argv_os))
+        .args(crate::args::repo_location_args(argv_os))
         .args(["rev-parse", "--absolute-git-dir"])
         .output()
         .ok()?;

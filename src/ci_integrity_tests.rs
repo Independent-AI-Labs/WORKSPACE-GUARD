@@ -16,16 +16,21 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 }
 
 fn run_git(dir: &Path, args: &[&str]) -> bool {
-    std::process::Command::new("git")
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(dir)
         .arg("-C")
         .arg(dir)
         .args(args)
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "safe.directory")
-        .env("GIT_CONFIG_VALUE_0", "*")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .env("GIT_CONFIG_VALUE_0", "*");
+    // Hard timeout: a stuck wrapped git must fail this test with
+    // diagnostics, not hang the whole suite (observed: a guard-side pipe
+    // deadlock stalled commits for minutes and read as "tests hanging").
+    match crate::child::run_with_timeout(&mut cmd, None, std::time::Duration::from_secs(20)) {
+        Ok(o) => o.success(),
+        Err(e) => panic!("git {:?} in {}: {}", args, dir.display(), e),
+    }
 }
 
 fn init_repo(dir: &Path) {
@@ -141,6 +146,31 @@ fn actual_uids(dir: &Path) -> (u32, u32) {
 fn deployment_clean_repo_has_no_violations() {
     let dir = unique_temp_dir("deploy-clean");
     init_repo(&dir);
+    let (git_uid, file_uid) = actual_uids(&dir);
+    let violations = deployment_violations(&dir, git_uid, file_uid, false);
+    assert!(violations.is_empty(), "unexpected: {:?}", violations);
+}
+
+#[test]
+fn deployment_large_tree_no_pipe_deadlock() {
+    // Regression: modified_tracked_files used to write the whole path
+    // list to `hash-object --stdin-paths` stdin BEFORE draining stdout.
+    // With >64KiB in both directions the two processes deadlocked,
+    // stalling every workspace commit (and this suite) for minutes.
+    // 2000 files puts ~100KiB through stdin and ~80KiB through stdout.
+    let dir = unique_temp_dir("deploy-large");
+    fs::create_dir_all(dir.join(".git")).unwrap();
+    fs::write(
+        dir.join(".git/config"),
+        "[user]\n\temail = t@t\n\tname = t\n",
+    )
+    .unwrap();
+    assert!(run_git(&dir, &["init", "-q"]));
+    fs::write(dir.join("f.txt"), "x").unwrap();
+    for i in 0..2000 {
+        fs::write(dir.join(format!("file-with-a-longer-name-{i:04}.txt")), "x").unwrap();
+    }
+    assert!(run_git(&dir, &["add", "."]));
     let (git_uid, file_uid) = actual_uids(&dir);
     let violations = deployment_violations(&dir, git_uid, file_uid, false);
     assert!(violations.is_empty(), "unexpected: {:?}", violations);

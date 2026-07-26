@@ -1,0 +1,11 @@
+# cargo-nextest profile: used automatically by `make test-unit` when
+# cargo-nextest is installed (`cargo install cargo-nextest`).
+# A test that runs past `period` is marked slow; after
+# `terminate-after` periods it is killed so the suite can never stall
+# unnoticed on a deadlocked test again.
+
+[profile.default]
+slow-timeout = { period = "10s", terminate-after = 3, grace-period = "5s" }
+
+[profile.default.junit]
+path = "nextest-junit.xml"

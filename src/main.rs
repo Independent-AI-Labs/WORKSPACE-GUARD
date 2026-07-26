@@ -9,6 +9,7 @@ use nix::unistd::geteuid;
 mod agent_identity;
 mod args;
 mod block;
+mod child;
 mod ci_integrity;
 mod config_keys;
 mod exec;
@@ -284,8 +285,31 @@ fn check_privileges() -> Result<(), GuardError> {
     Ok(())
 }
 
+/// Opt-in phase timing for debugging wrapped-git invocations:
+/// `WORKSPACE_GUARD_TRACE=1 git ...` prints each guard phase and its
+/// elapsed time to stderr. Off by default; zero cost when unset beyond
+/// one env lookup per phase.
+pub(crate) struct PhaseTrace(std::time::Instant);
+
+pub(crate) fn trace_start(phase: &str) -> Option<PhaseTrace> {
+    std::env::var_os("WORKSPACE_GUARD_TRACE")?;
+    eprintln!("[guard-trace] {phase}...");
+    Some(PhaseTrace(std::time::Instant::now()))
+}
+
+pub(crate) fn trace_end(t: Option<PhaseTrace>, phase: &str) {
+    if let Some(t) = t {
+        eprintln!(
+            "[guard-trace] {phase} done in {}ms",
+            t.0.elapsed().as_millis()
+        );
+    }
+}
+
 fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
+    let t = trace_start("check_privileges");
     check_privileges()?;
+    trace_end(t, "check_privileges");
     exec::set_resource_limits();
 
     if argv_os.len() <= 1 {
@@ -295,10 +319,14 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     let argv: Vec<&[u8]> = argv_os.iter().map(|a| a.as_bytes()).collect();
     args::check_null_bytes(&argv)?;
 
+    let t = trace_start("parse_args");
     let state = args::parse_args(&argv)?;
+    trace_end(t, "parse_args");
 
     if let Some(ref sub) = state.subcommand {
+        let t = trace_start("check_blocked");
         block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
+        trace_end(t, "check_blocked");
 
         // Capability-mode ownership lock: claim all paths declared in
         // config/guard_locked_paths.yaml (e.g. .git/ minus object
@@ -309,14 +337,20 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         // The git dir is resolved ONCE here; the post-exec relock in
         // exec.rs reuses it instead of spawning a second rev-parse.
         #[cfg(feature = "capability-mode")]
-        let git_dir = gitdir::resolve_git_dir(argv_os);
-        #[cfg(feature = "capability-mode")]
-        if let Some(ref gd) = git_dir {
-            gitdir::lock(gd);
-        }
+        let git_dir = {
+            let t = trace_start("resolve_git_dir+lock");
+            let gd = gitdir::resolve_git_dir(argv_os);
+            if let Some(ref g) = gd {
+                gitdir::lock(g);
+            }
+            trace_end(t, "resolve_git_dir+lock");
+            gd
+        };
 
         if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
-            exec::check_workspace_ci_contract(sub)?;
+            let t = trace_start("ci_contract_check");
+            exec::check_workspace_ci_contract(sub, argv_os)?;
+            trace_end(t, "ci_contract_check");
         }
 
         #[cfg(feature = "capability-mode")]

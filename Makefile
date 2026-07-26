@@ -179,8 +179,14 @@ test: ## Run cargo test (all feature combinations; integration gated by euid)
 
 test-unit: ## Unit/binary tests only (both feature combinations)
 	if [ "$(_OS)" != "Darwin" ]; then \
-		CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --workspace --bins; \
-		CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --bins; \
+		if command -v cargo-nextest; then \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo nextest run --workspace --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo nextest run --no-default-features --features root-only --bins; \
+		else \
+			echo "NOTE: cargo-nextest not found; using cargo test (per-test timeouts disabled)."; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --workspace --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --bins; \
+		fi; \
 	else \
 		echo "SKIP: cargo unit tests on Darwin (Linux-only; use make test-podman)"; \
 	fi
@@ -197,7 +203,7 @@ test-shell: ## Run the bats shell test suite (NOT gated in check-push).
 		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
 		exit 1; \
 	fi
-	bats tests/shell/
+	BATS_TEST_TIMEOUT=30 bats --timing tests/shell/
 
 # =============================================================================
 # Pre-push Quality Gate

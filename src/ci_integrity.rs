@@ -50,11 +50,11 @@ fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
         .arg(dir)
         .args(args);
     crate::apply_safe_directory(&mut cmd);
-    let out = cmd.output().ok()?;
-    if !out.status.success() {
+    let out = crate::child::run_with_timeout(&mut cmd, None, crate::child::CHILD_TIMEOUT).ok()?;
+    if !out.success() {
         return None;
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Some(out.stdout_string())
 }
 
 fn is_executable(meta: &fs::Metadata) -> bool {
@@ -152,11 +152,11 @@ fn blob_hash_of(path: &Path) -> Option<String> {
         .arg("--")
         .arg(path);
     crate::apply_safe_directory(&mut cmd);
-    let out = cmd.output().ok()?;
-    if !out.status.success() {
+    let out = crate::child::run_with_timeout(&mut cmd, None, crate::child::CHILD_TIMEOUT).ok()?;
+    if !out.success() {
         return None;
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Some(out.stdout_string())
 }
 
 /// Batch content-hash check for all tracked files in ONE git process
@@ -191,33 +191,19 @@ fn modified_tracked_files(ci_path: &Path, entries: &[(String, String)]) -> Vec<S
         .env("PATH", CHILD_PATH)
         .env("HOME", "/")
         .arg("hash-object")
-        .arg("--stdin-paths")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped());
+        .arg("--stdin-paths");
     crate::apply_safe_directory(&mut cmd);
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(_) => {
-            // Fail closed: batch unavailable, verify each file singly.
-            for (rel, index_hash) in &batch_index {
-                let path = ci_path.join(rel);
-                if blob_hash_of(&path).as_deref() != Some(index_hash.as_str()) {
-                    modified.push(rel.clone());
-                }
-            }
-            return modified;
-        }
-    };
-    {
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(batch_paths.join("\n").as_bytes());
-            let _ = stdin.write_all(b"\n");
-        }
-    }
-    let out = match child.wait_with_output() {
-        Ok(o) if o.status.success() => o,
+    let mut payload = batch_paths.join("\n").into_bytes();
+    payload.push(b'\n');
+    let out = match crate::child::run_with_timeout(
+        &mut cmd,
+        Some(payload),
+        crate::child::CHILD_TIMEOUT,
+    ) {
+        Ok(o) if o.success() => o,
         _ => {
+            // Fail closed: batch unavailable (spawn error, nonzero exit,
+            // or timeout), verify each file singly.
             for (rel, index_hash) in &batch_index {
                 let path = ci_path.join(rel);
                 if blob_hash_of(&path).as_deref() != Some(index_hash.as_str()) {

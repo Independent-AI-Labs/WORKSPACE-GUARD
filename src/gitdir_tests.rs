@@ -22,7 +22,7 @@ fn repo_location_args_extracts_c_and_git_dir() {
         OsString::from("--git-dir=/x/.git"),
         OsString::from("status"),
     ];
-    let got = repo_location_args(&argv);
+    let got = crate::args::repo_location_args(&argv);
     assert_eq!(
         got,
         vec![
@@ -31,7 +31,10 @@ fn repo_location_args_extracts_c_and_git_dir() {
             OsString::from("--git-dir=/x/.git"),
         ]
     );
-    assert!(repo_location_args(&[OsString::from("git"), OsString::from("status")]).is_empty());
+    assert!(
+        crate::args::repo_location_args(&[OsString::from("git"), OsString::from("status")])
+            .is_empty()
+    );
 }
 
 #[test]
