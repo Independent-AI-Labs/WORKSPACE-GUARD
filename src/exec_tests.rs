@@ -1,5 +1,75 @@
 use super::*;
 
+fn exec_test_scratch(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "guard-exec-test-{}-{}-{}",
+        tag,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn resolve_toplevel_honors_dash_c_over_guard_cwd() {
+    // Security regression: the old resolver used only the guard's cwd,
+    // so `cd /outside && git -C <workspace-repo> commit` skipped the
+    // entire workspace CI contract check. The resolver must follow -C
+    // to the repo the commit actually targets.
+    let dir = exec_test_scratch("toplevel-dashc");
+    let st = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["init", "-q"])
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let argv = vec![
+        OsString::from("git"),
+        OsString::from("-C"),
+        dir.clone().into_os_string(),
+        OsString::from("commit"),
+    ];
+    let resolved = resolve_toplevel(&argv, "git").expect("must resolve scratch repo");
+    // The test process cwd is the guard repo; a cwd-based resolver would
+    // return it instead of the -C target.
+    assert_eq!(
+        std::path::Path::new(&resolved).canonicalize().unwrap(),
+        dir.canonicalize().unwrap(),
+        "resolver must follow -C, not the guard cwd"
+    );
+}
+
+#[test]
+fn resolve_toplevel_returns_none_outside_any_repo() {
+    // Fail-closed contract check relies on this: an unresolvable target
+    // must surface as None so the caller blocks instead of skipping.
+    let dir = exec_test_scratch("toplevel-none");
+    let argv = vec![
+        OsString::from("git"),
+        OsString::from("-C"),
+        dir.into_os_string(),
+        OsString::from("commit"),
+    ];
+    assert!(resolve_toplevel(&argv, "git").is_none());
+}
+
+#[test]
+fn git_dir_env_vars_stay_out_of_allowed_vars() {
+    // execve_real_git only forwards ALLOWED_VARS to git.original, and
+    // resolve_toplevel spawns with env_clear: both sides agree that
+    // GIT_DIR/GIT_WORK_TREE never influence which repo a commit hits.
+    // If config ever re-adds them, the resolver and the exec env would
+    // diverge (contract check pointed at repo A, real commit in repo
+    // B), reopening a contract-check dodge. Pin the invariant.
+    assert!(!ALLOWED_VARS.contains(&"GIT_DIR"));
+    assert!(!ALLOWED_VARS.contains(&"GIT_WORK_TREE"));
+}
+
 #[test]
 fn raise_child_dac_override_returns_without_panic() {
     let _ = raise_child_dac_override();

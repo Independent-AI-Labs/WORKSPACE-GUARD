@@ -296,30 +296,52 @@ pub fn execve_real_git(
     }
 }
 
+/// Resolve the toplevel of the repo this invocation actually targets.
+/// Mirrors exactly what the exec'd git.original will see: -C,
+/// --git-dir/--work-tree argv pass through to it verbatim, so they are
+/// honored here; GIT_DIR/GIT_WORK_TREE are NOT in ALLOWED_VARS and are
+/// stripped by execve_real_git, so they must NOT be honored here (doing
+/// so would re-open a dodge: env points the check at an innocent repo
+/// while the real commit lands in the workspace repo).
+/// The guard's own cwd is intentionally irrelevant, so running from a
+/// directory outside any repo cannot dodge the contract check.
+/// Bounded by a timeout so a wedged resolver can never stall a commit.
+pub fn resolve_toplevel(argv_os: &[OsString], git_bin: &str) -> Option<String> {
+    let mut cmd = std::process::Command::new(git_bin);
+    cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
+    cmd.args(crate::args::repo_location_args(argv_os));
+    crate::apply_safe_directory(&mut cmd);
+    cmd.args(["rev-parse", "--show-toplevel"]);
+    match crate::child::run_with_timeout(&mut cmd, None, std::time::Duration::from_secs(20)) {
+        Ok(o) if o.success() => {
+            let t = o.stdout_string();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn check_workspace_ci_contract(
     subcommand: &str,
     argv_os: &[OsString],
 ) -> Result<(), GuardError> {
-    let mut toplevel_cmd = std::process::Command::new("/usr/bin/git.original");
-    toplevel_cmd
-        .env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/");
-    // Preserve repo-location env overrides, then pass -C/--git-dir/
-    // --work-tree through: without them a `git -C /other/repo commit`
-    // would run the contract check against the guard's cwd repo instead
-    // of the target (observed: commits via -C to scratch repos triggered
-    // the full workspace CI deployment verification).
-    for var in ["GIT_DIR", "GIT_WORK_TREE"] {
-        if let Some(v) = std::env::var_os(var) {
-            toplevel_cmd.env(var, v);
+    // Fail closed: if the target repo cannot be resolved we cannot know
+    // whether this commit/push is subject to the workspace contract, so
+    // the safe default is to block. (git would reject the operation
+    // outside a work tree anyway.)
+    let toplevel = match resolve_toplevel(argv_os, "/usr/bin/git.original") {
+        Some(t) => t,
+        None => {
+            return Err(GuardError::ContractFailed(format!(
+                "could not resolve the target repository for '{subcommand}'; \
+                 failing closed (cannot verify the workspace CI contract). \
+                 Run inside a valid work tree."
+            )))
         }
-    }
-    toplevel_cmd.args(crate::args::repo_location_args(argv_os));
-    crate::apply_safe_directory(&mut toplevel_cmd);
-    let toplevel = match toplevel_cmd.args(["rev-parse", "--show-toplevel"]).output() {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => return Ok(()),
     };
 
     let wsroot = match classify_workspace_root(&toplevel) {
