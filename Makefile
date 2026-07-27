@@ -430,26 +430,60 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	bash scripts/guard-operator.sh '$*'
 
 # =============================================================================
-# Exemption Edit (sudo-gated YAML policy add/remove; SPEC-EXEMPTION-EDIT)
+# YAML Policy Edit (sudo-gated secure YAML editor; SPEC-YAML-EDIT)
 # =============================================================================
 # Policy YAMLs stay root:root at all times (guard ownership lock). Edits go
-# through scripts/exemption.sh as root; files are never released or relocked.
+# through /usr/bin/workspace-yaml-edit as root; files are never released or
+# relocked, and chattr immutable flags survive every edit. FIELDS is split on
+# ';' so values may contain spaces; list fields use brackets (paths=[a,b]).
 
-.PHONY: exemption-add exemption-remove exemption-list
-exemption-add: ## Append an entry to a YAML policy list: make exemption-add FILE=.. KEY=.. FIELDS="hook=x reason=... paths=src/ added_by=.." (ROOT)
+YAML_EDIT := /usr/bin/workspace-yaml-edit
+
+.PHONY: build-yaml-edit install-yaml-edit
+build-yaml-edit: ## Build workspace-yaml-edit release binary (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
-		echo "ERROR: exemption-add needs root: sudo make exemption-add" >&2; exit 1; \
+		echo "ERROR: build-yaml-edit needs root (install consumes target/ artifacts): sudo make build-yaml-edit" >&2; \
+		exit 1; \
 	fi
-	bash scripts/exemption.sh add "$(FILE)" "$(KEY)" $(FIELDS)
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --bin workspace-yaml-edit
+	chown root:root "$(REPO_ROOT)/target"
+	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
-exemption-remove: ## Remove matching entries from a YAML policy list: make exemption-remove FILE=.. KEY=.. FIELDS="hook=x" (ROOT)
+install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
-		echo "ERROR: exemption-remove needs root: sudo make exemption-remove" >&2; exit 1; \
+		echo "ERROR: install-yaml-edit needs root: sudo make install-yaml-edit" >&2; exit 1; \
 	fi
-	bash scripts/exemption.sh remove "$(FILE)" "$(KEY)" $(FIELDS)
+	install -o root -g root -m 0755 "$(REPO_ROOT)/target/release/workspace-yaml-edit" "$(YAML_EDIT)"
 
-exemption-list: ## Print a YAML policy file or one list key's block: make exemption-list FILE=.. [KEY=..]
-	bash scripts/exemption.sh list "$(FILE)" $(KEY)
+.PHONY: yaml-add yaml-remove yaml-set yaml-get yaml-list yaml-validate
+yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
+	fi
+	IFS=';' read -ra _ye_fields <<< "$(FIELDS)"; \
+	"$(YAML_EDIT)" add "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)
+
+yaml-remove: ## Remove matching entries: make yaml-remove FILE=.. KEY=.. FIELDS="hook=x" (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-remove needs root: sudo make yaml-remove" >&2; exit 1; \
+	fi
+	IFS=';' read -ra _ye_fields <<< "$(FIELDS)"; \
+	"$(YAML_EDIT)" remove "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)
+
+yaml-set: ## Set a scalar: make yaml-set FILE=.. KEY=.. VALUE=.. (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-set needs root: sudo make yaml-set" >&2; exit 1; \
+	fi
+	"$(YAML_EDIT)" set "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)
+
+yaml-get: ## Print a scalar: make yaml-get FILE=.. KEY=..
+	"$(YAML_EDIT)" get "$(FILE)" "$(KEY)"
+
+yaml-list: ## Print the file or one list key's block: make yaml-list FILE=.. [KEY=..]
+	"$(YAML_EDIT)" list "$(FILE)" $(KEY)
+
+yaml-validate: ## Schema-validate a policy file: make yaml-validate FILE=..
+	"$(YAML_EDIT)" validate "$(FILE)"
 
 # =============================================================================
 # Host Provision

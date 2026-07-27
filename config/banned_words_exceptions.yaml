@@ -94,3 +94,7 @@ exceptions:
   #    exact `\bunlock\b` pattern string the banned-words gate reports.
   - pattern: '\bunlock\b'
     paths: ['src/block.rs', 'config/guard_policy_matrix.yaml']
+  - pattern: \bsilent
+    paths:
+      - src/yaml_edit_schema.rs
+      - src/yaml_edit_schema_tests.rs

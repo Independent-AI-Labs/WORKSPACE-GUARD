@@ -239,7 +239,7 @@ F21. Release profile uses `opt-level = "z"` + LTO + codegen-units=1.
     crate; keep LTO.
 
 F22. (HISTORICAL: `config-lock.sh` has since been deleted and replaced
-by the sudo-gated `scripts/exemption.sh`; see SPEC-EXEMPTION-EDIT.)
+by the sudo-gated `workspace-yaml-edit` binary; see SPEC-YAML-EDIT.)
 `config-lock.sh` runs `lsattr | awk | grep`, `stat`, `chattr`,
     `chown`, and (on unseal verify) `sudo -u <user> test -w` PER FILE,
     in two passes (mutate then verify). scripts/config-lock.sh:54-59,
@@ -343,7 +343,7 @@ F14-F19 implementation notes:
 F22/F23/F25 implementation notes:
 
 - F22: (superseded -- config-lock.sh was later deleted in favor of
-  scripts/exemption.sh) config-lock.sh now snapshots file state via
+  workspace-yaml-edit) config-lock.sh now snapshots file state via
   collect_file_state
   (one lsattr + one stat spawn per phase instead of per-file
   lsattr|awk|grep and stat pipelines), and not_writable_by does one

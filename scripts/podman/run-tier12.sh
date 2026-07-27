@@ -36,6 +36,8 @@ echo "==> Tier 1+2: running in $_IMAGE (projects mount: $_PROJECTS_ROOT)"
     bash -c 'set -euo pipefail
 bash scripts/podman/tier1-test.sh
 echo "==> Tier 2: root-only E2E"
-bash scripts/podman/e2e-root-only.sh'
+bash scripts/podman/e2e-root-only.sh
+echo "==> Tier 2b: yaml-edit root-tier E2E"
+bash scripts/podman/e2e-yaml-edit.sh'
 
 echo "==> Tier 1+2 complete"

@@ -254,10 +254,10 @@ and does not block the git invocation.
 
 The glob lock is unconditional: there is no unseal state file and no
 skip list. Legitimate edits to locked policy YAMLs go through the
-root-gated `scripts/exemption.sh` (`sudo make exemption-add` /
-`exemption-remove`), which manipulates YAML contents directly while
+root-gated `workspace-yaml-edit` binary (`sudo make yaml-add` /
+`yaml-remove`), which manipulates YAML contents directly while
 the files stay `root:root` at all times. See
-[SPEC-EXEMPTION-EDIT](SPEC-EXEMPTION-EDIT.md).
+[SPEC-YAML-EDIT](SPEC-YAML-EDIT.md).
 
 The installer must `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep' /usr/bin/git`
 (CAP_SETPCAP is needed so the forked child can raise CAP_DAC_OVERRIDE into

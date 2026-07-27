@@ -148,7 +148,7 @@ pub fn lock(git_dir: &Path) {
     // 3+4. Tree glob patterns (e.g. .boot*) and filename glob patterns
     // (e.g. *_exceptions.yaml) in ONE recursive worktree walk. The lock
     // is unconditional: edits to locked policy files go through the
-    // root-gated scripts/exemption.sh (SPEC-EXEMPTION-EDIT); there is
+    // root-gated workspace-yaml-edit binary (SPEC-YAML-EDIT); there is
     // no unseal skip list.
     lock_worktree_globs(&toplevel);
 }
