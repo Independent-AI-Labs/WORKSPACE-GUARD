@@ -247,6 +247,7 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (RO
 		exit 1; \
 	fi
 	CARGO_TARGET_DIR="$(REPO_ROOT)/target" bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(REPO_ROOT)/target/agent"
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
 
