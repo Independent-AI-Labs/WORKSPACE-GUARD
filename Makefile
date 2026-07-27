@@ -246,7 +246,7 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (RO
 		echo "ERROR: build-guard needs root (install consumes target/ artifacts): sudo make build-guard" >&2; \
 		exit 1; \
 	fi
-	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
 
@@ -316,8 +316,9 @@ build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins
 		echo "ERROR: build-binary-guard needs root (install consumes target/ artifacts): sudo make build-binary-guard" >&2; \
 		exit 1; \
 	fi
-	cargo build --release --features binary-guard --bin workspace-binary-guard
-	chown -R root:root "$(REPO_ROOT)/target"
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --features binary-guard --bin workspace-binary-guard
+	chown root:root "$(REPO_ROOT)/target"
+	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
 # =============================================================================
 # Cleanup & Compliance
