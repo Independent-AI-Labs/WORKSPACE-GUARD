@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-# getcap stub: fakes `getcap -r /` output for capability discovery
-# tests. Emits the contents of $GUARD_GETCAP_FIXTURE (a file path;
-# getcap-shaped lines) when set; otherwise emits nothing and exits 0.
-# Mirrors discover_caps_live which truncates out_file and returns 0
-# when getcap yields nothing.
+# getcap stub: fakes `getcap` output for capability discovery and
+# verification tests. Two modes:
+#   1. $GUARD_GETCAP_FIXTURE set: emit its contents verbatim
+#      (discovery tests; original behavior).
+#   2. $GUARD_SETCAP_DB set: answer per-path queries from the
+#      device:inode-keyed db written by the setcap stub, emitting
+#      getcap-shaped "path caps" for the queried file.
+# Otherwise emits nothing and exits 0.
 if [ -n "${GUARD_GETCAP_FIXTURE:-}" ] && [ -r "$GUARD_GETCAP_FIXTURE" ]; then
     cat "$GUARD_GETCAP_FIXTURE"
+    exit 0
+fi
+db="${GUARD_SETCAP_DB:-}"
+if [ -n "$db" ] && [ -f "$db" ]; then
+    # Last argument is the queried path (getcap [-r] <path>).
+    query="${!#}"
+    nulldev="${DEVNULL:-/dev/null}"
+    key="$(stat -c %d:%i "$query" 2>"$nulldev")"
+    if [ -n "$key" ]; then
+        awk -F'|' -v k="$key" -v p="$query" '$1 == k {print p" "$2}' "$db"
+    fi
 fi
 exit 0

@@ -34,17 +34,18 @@ teardown() { guard_teardown; }
     grep -q 'shell guard not yet implemented' "$op"
 }
 
-@test "guard-operator shell guard step soft-skips while scripts absent" {
+@test "guard-operator shell guard step activates now that scripts exist" {
     run bash -n "$GUARD_ROOT/scripts/guard-operator.sh"
     assert_success
-    [ ! -e "$GUARD_ROOT/scripts/install-shell-guard" ]
-    [ ! -e "$GUARD_ROOT/scripts/shell-guard-check" ]
+    [ -x "$GUARD_ROOT/scripts/install-shell-guard" ]
+    [ -x "$GUARD_ROOT/scripts/uninstall-shell-guard" ]
+    [ -x "$GUARD_ROOT/scripts/shell-guard-check" ]
     run bash -c '
         REPO_ROOT="'"$GUARD_ROOT"'"
         source <(sed -n "/^_shell_guard_available/,/^}/p" "'"$GUARD_ROOT"'/scripts/guard-operator.sh")
         _shell_guard_available
     '
-    assert_failure
+    assert_success
 }
 
 @test "guard Makefile declares shell guard install/uninstall/check targets" {
@@ -52,5 +53,8 @@ teardown() { guard_teardown; }
     grep -q '^install-shell-guard:' "$mk"
     grep -q '^uninstall-shell-guard:' "$mk"
     grep -q '^shell-guard-check:' "$mk"
-    grep -q 'scripts/install-shell-guard not yet implemented' "$mk"
+    grep -q 'bash scripts/install-shell-guard' "$mk"
+    grep -q 'bash scripts/uninstall-shell-guard' "$mk"
+    grep -q 'bash scripts/shell-guard-check' "$mk"
+    grep -q '^build-shell-guard:' "$mk"
 }

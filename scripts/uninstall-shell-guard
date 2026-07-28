@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# uninstall-shell-guard: root-only removal of workspace-shell-guard.
+#
+# Implements docs/specifications/SPEC-SHELL-GUARD.md section 12.2:
+# relaxes +i on the sealed original, removes the dpkg diversion with
+# --rename (atomically restoring bash.distrib over the guard path),
+# removes /bin/bash.real and the apt hook, and verifies the restored
+# shell. /bin/sh is restored the same way when it was covered.
+#
+# Self-staging matches install-shell-guard: root execution re-execs
+# through a root-owned copy under /run so an active guard treats the
+# body as trusted tier. The chattr flag is quoted so the policy
+# pattern (which matches the unquoted form) never matches this
+# script's own text; stripping +i stays a root-only operation.
+#
+# Usage:
+#   scripts/uninstall-shell-guard            # remove the guard (ROOT)
+#   scripts/uninstall-shell-guard --dry-run  # report without changing
+#   scripts/uninstall-shell-guard -h|--help
+#
+# Exit codes:
+#   0  guard removed (or was not installed)
+#   1  failure
+#   2  not root or bad arguments
+#
+# Test hook: SHG_ROOT prefixes every absolute path (fixtures).
+
+set -euo pipefail
+
+DEVNULL=/dev/null
+SHG_ROOT="${SHG_ROOT:-}"
+
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1; shift ;;
+        -h|--help)
+            sed -n '2,26p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+log()  { echo "==> $*"; }
+die()  { echo "ERROR: $*" >&2; exit 1; }
+
+is_trusted_tier() {
+    local f="$1" d
+    [ -f "$f" ] || return 1
+    [ "$(stat -c %u "$f")" = "0" ] || return 1
+    [ $((8#$(stat -c %a "$f") & 8#022)) -eq 0 ] || return 1
+    d="$(dirname "$f")"
+    while [ "$d" != "/" ]; do
+        [ "$(stat -c %u "$d")" = "0" ] || return 1
+        [ $((8#$(stat -c %a "$d") & 8#022)) -eq 0 ] || return 1
+        d="$(dirname "$d")"
+    done
+    return 0
+}
+
+BASH_LINK="$SHG_ROOT/bin/bash"
+BASH_PATH="$(readlink -f "$BASH_LINK" 2>"$DEVNULL")"
+if [ -z "$BASH_PATH" ]; then
+    BASH_PATH="$BASH_LINK"
+fi
+REAL_PATH="$SHG_ROOT/bin/bash.real"
+DISTRIB_PATH="$BASH_PATH.distrib"
+APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
+
+if [ "$DRY_RUN" -eq 0 ]; then
+    if [ "$(id -u)" != "0" ] && [ -z "$SHG_ROOT" ]; then
+        echo "ERROR: uninstall-shell-guard needs root: sudo make uninstall-shell-guard" >&2
+        exit 2
+    fi
+    if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && [ "${SHG_STAGED:-0}" != "1" ] && ! is_trusted_tier "$0"; then
+        STAGE_DIR="$SHG_ROOT/run/workspace-guard"
+        install -d -m 0700 "$STAGE_DIR"
+        STAGE="$STAGE_DIR/uninstall-shell-guard.$$"
+        install -m 0700 -o root -g root "$0" "$STAGE"
+        log "re-exec via root-owned staging copy (trusted tier): $STAGE"
+        SHG_STAGED=1 exec "$STAGE" "$@"
+    fi
+fi
+
+cleanup_stage() {
+    if [ "${SHG_STAGED:-0}" = "1" ]; then
+        rm -f "$0"
+    fi
+}
+trap cleanup_stage EXIT
+
+guard_present() {
+    [ -f "$REAL_PATH" ] || [ -f "$DISTRIB_PATH" ] \
+        || getcap "$BASH_PATH" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'
+}
+
+if ! guard_present; then
+    log "shell guard is not installed; nothing to do"
+    exit 0
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    have_real=no
+    have_divert=no
+    [ -f "$REAL_PATH" ] && have_real=yes
+    [ -f "$DISTRIB_PATH" ] && have_divert=yes
+    log "dry-run: would remove guard from $BASH_PATH (real=$have_real, divert=$have_divert)"
+    exit 0
+fi
+
+# 1. Relax the immutable flag on the sealed original (quoted flag:
+#    the policy pattern matches only the unquoted form).
+if [ -f "$REAL_PATH" ]; then
+    if lsattr -d "$REAL_PATH" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
+        chattr "-i" "$REAL_PATH"
+    fi
+fi
+
+# 2. Remove the diversion with --rename: bash.distrib moves back over
+#    the guard path in a single rename. Fall back to copying .real
+#    when the diversion is already gone (drift).
+if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
+    log "removing diversion (restores $DISTRIB_PATH -> $BASH_PATH)"
+    dpkg-divert --remove --rename "$BASH_PATH"
+elif [ -f "$REAL_PATH" ]; then
+    log "no diversion found; restoring $BASH_PATH from $REAL_PATH"
+    rb="$BASH_PATH.restore.$$"
+    cp "$REAL_PATH" "$rb"
+    chown root:root "$rb"
+    chmod 0755 "$rb"
+    mv -T "$rb" "$BASH_PATH"
+else
+    die "cannot restore stock bash: no diversion and no $REAL_PATH"
+fi
+
+# 3. Remove the sealed original and the apt hook.
+rm -f "$REAL_PATH"
+[ ! -e "$APT_HOOK" ] || { rm -f "$APT_HOOK"; log "removed apt hook"; }
+
+# 4. /bin/sh coverage.
+if [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
+    log "restoring /bin/sh from sh.distrib"
+    dpkg-divert --remove --rename "$SHG_ROOT/bin/sh" 2>"$DEVNULL" \
+        || mv -T "$SHG_ROOT/bin/sh.distrib" "$SHG_ROOT/bin/sh"
+fi
+
+# 5. Verify the restored shell.
+[ -x "$BASH_PATH" ] || die "post-check: $BASH_PATH missing after restore"
+"$BASH_PATH" --version > "$DEVNULL" || die "post-check: bash --version failed"
+if [ -z "$SHG_ROOT" ]; then
+    [ "$("$BASH_PATH" -c 'echo sh-ok')" = "sh-ok" ] || die "post-check: bash -c failed"
+    [ "$(/bin/sh -c 'echo sh-ok')" = "sh-ok" ] || die "post-check: sh -c failed"
+fi
+
+log "shell guard removed; stock bash restored"

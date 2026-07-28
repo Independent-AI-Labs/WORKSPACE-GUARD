@@ -303,19 +303,16 @@ install-shell-guard: ## Install shell guard at /bin/bash + /bin/sh (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-shell-guard needs root: sudo make install-shell-guard" >&2; exit 1; \
 	fi
-	test -x scripts/install-shell-guard && bash scripts/install-shell-guard \
-		|| { echo "NOTICE: scripts/install-shell-guard not yet implemented; docs/specifications/SPEC-SHELL-GUARD.md section 12 documents the procedure." >&2; exit 1; }
+	bash scripts/install-shell-guard
 
 uninstall-shell-guard: ## Uninstall shell guard, restore stock bash/sh (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-shell-guard needs root: sudo make uninstall-shell-guard" >&2; exit 1; \
 	fi
-	test -x scripts/uninstall-shell-guard && bash scripts/uninstall-shell-guard \
-		|| { echo "NOTICE: scripts/uninstall-shell-guard not yet implemented; docs/specifications/SPEC-SHELL-GUARD.md section 12.2 documents the procedure." >&2; exit 1; }
+	bash scripts/uninstall-shell-guard
 
 shell-guard-check: ## Read-only shell guard health check (modes, caps, divert, +i, hash)
-	test -x scripts/shell-guard-check && bash scripts/shell-guard-check \
-		|| { echo "NOTICE: scripts/shell-guard-check not yet implemented; docs/specifications/SPEC-SHELL-GUARD.md section 12.3 documents the checks." >&2; exit 1; }
+	bash scripts/shell-guard-check
 
 # =============================================================================
 # Build
@@ -340,6 +337,10 @@ build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins
 	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --features binary-guard --bin workspace-binary-guard
 	chown root:root "$(REPO_ROOT)/target"
 	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
+
+.PHONY: build-shell-guard
+build-shell-guard: ## Build the shell guard binary (release)
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --bin workspace-shell-guard
 
 # =============================================================================
 # Cleanup & Compliance

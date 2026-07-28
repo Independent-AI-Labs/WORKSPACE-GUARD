@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# 22-shell-guard-install.bats: fixture tests for the shell-guard
+# deployment scripts (install-shell-guard, uninstall-shell-guard,
+# shell-guard-check). Runs entirely under SHG_ROOT fake roots with
+# the chattr/lsattr/dpkg-divert/setcap/getcap stubs; no real system
+# path is touched. Stock bash and the guard build are both faked with
+# /bin/true copies (real ELF, distinct content via appended byte).
+
+load lib/harness
+
+setup() {
+    guard_setup
+    FAKE="$TEST_TMPDIR/root"
+    mkdir -p "$FAKE/bin" "$FAKE/etc/apt/apt.conf.d"
+    cp /bin/true "$FAKE/bin/bash"
+    GUARD_FIX="$TEST_TMPDIR/guard-bin"
+    cp /bin/true "$GUARD_FIX"
+    printf '#' >> "$GUARD_FIX"
+    export SHG_ROOT="$FAKE" SHG_GUARD_BIN="$GUARD_FIX"
+    export GUARD_DIVERT_DB="$TEST_TMPDIR/divert.db"
+    export GUARD_SETCAP_DB="$TEST_TMPDIR/setcap.db"
+    export GUARD_LSATTR_DB="$TEST_TMPDIR/lsattr.db"
+    export GUARD_STUB_LOG="$TEST_TMPDIR/stub.log"
+    export GUARD_LSATTR_IMMUTABLE="$GUARD_ROOT/config/*"
+}
+
+teardown() { guard_teardown; }
+
+INSTALL="$GUARD_ROOT/scripts/install-shell-guard"
+UNINSTALL="$GUARD_ROOT/scripts/uninstall-shell-guard"
+CHECK="$GUARD_ROOT/scripts/shell-guard-check"
+
+hash_of() { sha256sum "$1" | awk '{print $1}'; }
+
+@test "shell-guard-install: --help prints usage and exits 0" {
+    run bash "$INSTALL" --help
+    assert_success
+    assert_output --partial "install-shell-guard"
+    assert_output --partial "--dry-run"
+}
+
+@test "shell-guard-install: unknown arg exits 2" {
+    run bash "$INSTALL" --bogus
+    assert_failure
+    [ "$status" -eq 2 ]
+}
+
+@test "shell-guard-install: dry-run changes nothing" {
+    run bash "$INSTALL" --dry-run
+    assert_success
+    assert_output --partial "dry-run"
+    [ ! -e "$FAKE/bin/bash.real" ]
+    [ ! -e "$GUARD_DIVERT_DB" ]
+}
+
+@test "shell-guard-install: applies guard to a fresh fixture" {
+    run bash "$INSTALL"
+    assert_success
+    assert_output --partial "installed and verified"
+    # /bin/sh untouched (no sh in fixture)
+    assert_output --partial "left untouched"
+    # guard at the bash path, matching the fixture build byte-for-byte
+    [ "$(hash_of "$FAKE/bin/bash")" = "$(hash_of "$GUARD_FIX")" ]
+    [ "$(stat -c %a "$FAKE/bin/bash")" = "755" ]
+    # sealed original
+    [ -f "$FAKE/bin/bash.real" ]
+    [ "$(stat -c %a "$FAKE/bin/bash.real")" = "700" ]
+    # diverted original preserved
+    [ -f "$FAKE/bin/bash.distrib" ]
+    [ "$(hash_of "$FAKE/bin/bash.distrib")" = "$(hash_of /bin/true)" ]
+    # capabilities recorded against the installed inode
+    run getcap "$FAKE/bin/bash"
+    assert_output --partial "cap_dac_override=ep"
+    # immutable flag toggled via chattr stub
+    grep -q "chattr +i $FAKE/bin/bash.real" "$GUARD_STUB_LOG"
+    # apt hook written
+    [ -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
+}
+
+@test "shell-guard-install: second run is a reconciling no-op" {
+    run bash "$INSTALL"
+    assert_success
+    run bash "$INSTALL"
+    assert_success
+    assert_output --partial "already current"
+}
+
+@test "shell-guard-install: reconcile repairs a missing apt hook" {
+    run bash "$INSTALL"
+    assert_success
+    rm -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell"
+    run bash "$INSTALL"
+    assert_success
+    [ -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
+}
+
+@test "shell-guard-install: covers /bin/sh when it resolves to bash" {
+    ln -s bash "$FAKE/bin/sh"
+    run bash "$INSTALL"
+    assert_success
+    [ "$(hash_of "$FAKE/bin/sh")" = "$(hash_of "$GUARD_FIX")" ]
+    grep -qxF "$FAKE/bin/sh" "$GUARD_DIVERT_DB"
+}
+
+@test "shell-guard-check: reports NOT INSTALLED on an empty fixture" {
+    run bash "$CHECK"
+    [ "$status" -eq 2 ]
+    assert_output --partial "NOT INSTALLED"
+}
+
+@test "shell-guard-check: OK after install" {
+    run bash "$INSTALL"
+    assert_success
+    run bash "$CHECK"
+    assert_success
+    assert_output --partial "shell guard: OK"
+}
+
+@test "shell-guard-check: flags a missing apt hook as DRIFTED" {
+    run bash "$INSTALL"
+    assert_success
+    rm -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell"
+    run bash "$CHECK"
+    [ "$status" -eq 1 ]
+    assert_output --partial "DRIFTED"
+    assert_output --partial "apt hook missing"
+}
+
+@test "shell-guard-check: flags relaxed .real mode as DRIFTED" {
+    run bash "$INSTALL"
+    assert_success
+    chmod 0755 "$FAKE/bin/bash.real"
+    run bash "$CHECK"
+    [ "$status" -eq 1 ]
+    assert_output --partial "mode != 0700"
+}
+
+@test "shell-guard-check: flags a stale guard hash as DRIFTED" {
+    run bash "$INSTALL"
+    assert_success
+    printf 'x' >> "$FAKE/bin/bash"
+    run bash "$CHECK"
+    [ "$status" -eq 1 ]
+    assert_output --partial "hash differs"
+}
+
+@test "shell-guard-uninstall: restores stock bash and cleans up" {
+    run bash "$INSTALL"
+    assert_success
+    run bash "$UNINSTALL"
+    assert_success
+    assert_output --partial "stock bash restored"
+    [ "$(hash_of "$FAKE/bin/bash")" = "$(hash_of /bin/true)" ]
+    [ "$(stat -c %a "$FAKE/bin/bash")" = "755" ]
+    [ ! -e "$FAKE/bin/bash.real" ]
+    [ ! -e "$FAKE/bin/bash.distrib" ]
+    [ ! -e "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
+    [ ! -s "$GUARD_DIVERT_DB" ]
+    grep -q "chattr -i $FAKE/bin/bash.real" "$GUARD_STUB_LOG"
+}
+
+@test "shell-guard-uninstall: no-op when not installed" {
+    run bash "$UNINSTALL"
+    assert_success
+    assert_output --partial "nothing to do"
+}
+
+@test "shell-guard-uninstall: dry-run changes nothing" {
+    run bash "$INSTALL"
+    assert_success
+    run bash "$UNINSTALL" --dry-run
+    assert_success
+    [ -e "$FAKE/bin/bash.real" ]
+    [ -f "$GUARD_DIVERT_DB" ]
+}

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# setcap stub: records capability grants in $GUARD_SETCAP_DB keyed by
+# device:inode (one "dev:ino|caps" line per file, last write wins) so
+# the db survives the atomic mv installers use after setcap, matching
+# how real file capabilities ride the inode. Pairs with the getcap
+# stub. Logs to $GUARD_STUB_LOG when set. Set GUARD_SETCAP_FAIL=1 to
+# simulate a kernel that rejects file capabilities.
+log="${GUARD_STUB_LOG:-}"
+if [ -n "$log" ]; then
+    printf 'setcap %s\n' "$*" >> "$log"
+fi
+if [ "${GUARD_SETCAP_FAIL:-0}" = "1" ]; then
+    echo "setcap: Operation not permitted (stub)" >&2
+    exit 1
+fi
+db="${GUARD_SETCAP_DB:-}"
+if [ -n "$db" ] && [ $# -eq 2 ]; then
+    caps="$1"
+    path="$2"
+    key="$(stat -c %d:%i "$path")"
+    tmp="$db.tmp.$$"
+    if [ -f "$db" ]; then
+        awk -F'|' -v k="$key" '$1 != k' "$db" > "$tmp"
+    else
+        : > "$tmp"
+    fi
+    printf '%s|%s\n' "$key" "$caps" >> "$tmp"
+    mv "$tmp" "$db"
+fi
+exit 0

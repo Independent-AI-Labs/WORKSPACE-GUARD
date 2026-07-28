@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# shell-guard-check: read-only health check for workspace-shell-guard.
+#
+# Implements docs/specifications/SPEC-SHELL-GUARD.md section 12.3.
+# Verifies, without changing anything:
+#   - guard binary present at the resolved bash path, ELF, root:root
+#     0755, cap_dac_override=ep, hash-match against the repo build
+#     when available
+#   - /bin/bash.real sealed: root:root 0700, chattr +i, hash equal to
+#     the diverted original
+#   - dpkg-divert present for the resolved bash path (and /bin/sh
+#     when covered)
+#   - apt post-invoke hook installed
+#   - policy configs root-owned and immutable
+#
+# Output ends with one of: OK / DRIFTED / NOT INSTALLED.
+# Exit codes: 0 healthy, 1 drifted, 2 not installed.
+# Any user may run this; the script body deliberately contains no
+# policy-pattern text so it executes cleanly under an active guard
+# from any trust tier.
+#
+# Test hook: SHG_ROOT prefixes absolute paths; SHG_GUARD_BIN
+# overrides the reference guard binary.
+
+set -uo pipefail
+
+DEVNULL=/dev/null
+SHG_ROOT="${SHG_ROOT:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+GUARD_BIN="${SHG_GUARD_BIN:-$REPO_ROOT/target/release/workspace-shell-guard}"
+
+BASH_LINK="$SHG_ROOT/bin/bash"
+BASH_PATH="$(readlink -f "$BASH_LINK" 2>"$DEVNULL")"
+if [ -z "$BASH_PATH" ]; then
+    BASH_PATH="$BASH_LINK"
+fi
+REAL_PATH="$SHG_ROOT/bin/bash.real"
+DISTRIB_PATH="$BASH_PATH.distrib"
+APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
+CONFIG_DIR="$REPO_ROOT/config"
+
+PROBLEMS=0
+ok()   { echo "OK: $*"; }
+bad()  { echo "DRIFT: $*"; PROBLEMS=$((PROBLEMS + 1)); }
+
+hash_of() { sha256sum "$1" 2>"$DEVNULL" | awk '{print $1}'; }
+
+# --- presence gate -----------------------------------------------------------
+installed=0
+[ -f "$REAL_PATH" ] && installed=1
+[ -f "$DISTRIB_PATH" ] && installed=1
+if getcap "$BASH_PATH" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'; then
+    installed=1
+fi
+if [ "$installed" -eq 0 ]; then
+    echo "shell guard: NOT INSTALLED"
+    exit 2
+fi
+
+# --- guard binary -------------------------------------------------------------
+if [ ! -f "$BASH_PATH" ]; then
+    bad "$BASH_PATH missing"
+elif [ "$(dd if="$BASH_PATH" bs=4 count=1 2>"$DEVNULL" | od -An -tx1 | tr -d ' \n')" != "7f454c46" ]; then
+    bad "$BASH_PATH is not an ELF binary"
+else
+    # Owner assertions are skipped under SHG_ROOT fixtures (files are
+    # owned by the test user, not root).
+    [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$BASH_PATH")" = "root:root" ] || bad "$BASH_PATH not root:root"
+    [ "$(stat -c %a "$BASH_PATH")" = "755" ] || bad "$BASH_PATH mode != 0755"
+    if getcap "$BASH_PATH" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'; then
+        ok "$BASH_PATH caps"
+    else
+        bad "$BASH_PATH missing cap_dac_override=ep"
+    fi
+    if [ -x "$GUARD_BIN" ]; then
+        if [ "$(hash_of "$BASH_PATH")" = "$(hash_of "$GUARD_BIN")" ]; then
+            ok "$BASH_PATH matches repo build"
+        else
+            bad "$BASH_PATH hash differs from repo build (rebuild or reconcile)"
+        fi
+    fi
+fi
+
+# --- sealed original ----------------------------------------------------------
+if [ ! -f "$REAL_PATH" ]; then
+    bad "$REAL_PATH missing"
+else
+    [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$REAL_PATH")" = "root:root" ] || bad "$REAL_PATH not root:root"
+    [ "$(stat -c %a "$REAL_PATH")" = "700" ] || bad "$REAL_PATH mode != 0700"
+    if lsattr -d "$REAL_PATH" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
+        ok "$REAL_PATH immutable"
+    else
+        bad "$REAL_PATH missing +i"
+    fi
+    if [ -f "$DISTRIB_PATH" ] && [ -r "$REAL_PATH" ]; then
+        if [ "$(hash_of "$REAL_PATH")" = "$(hash_of "$DISTRIB_PATH")" ]; then
+            ok "$REAL_PATH matches diverted original"
+        else
+            bad "$REAL_PATH hash differs from $DISTRIB_PATH"
+        fi
+    fi
+fi
+
+# --- diversion -----------------------------------------------------------------
+if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
+    ok "diversion for $BASH_PATH"
+else
+    bad "no dpkg-divert for $BASH_PATH"
+fi
+if [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
+    if dpkg-divert --list "$SHG_ROOT/bin/sh" 2>"$DEVNULL" | grep -q "diversion of $SHG_ROOT/bin/sh"; then
+        ok "diversion for /bin/sh"
+    else
+        bad "sh.distrib present but no dpkg-divert for /bin/sh"
+    fi
+fi
+
+# --- apt hook -------------------------------------------------------------------
+if [ -f "$APT_HOOK" ]; then
+    ok "apt hook present"
+else
+    bad "apt hook missing: $APT_HOOK"
+fi
+
+# --- policy configs ---------------------------------------------------------------
+for f in shell_guard_policy.yaml shell_guard_policy.schema.yaml shell_guard_policy_matrix.yaml; do
+    p="$CONFIG_DIR/$f"
+    if [ ! -f "$p" ]; then
+        bad "policy config missing: $p"
+        continue
+    fi
+    [ -n "$SHG_ROOT" ] || [ "$(stat -c %u "$p")" = "0" ] || bad "$p not root-owned"
+    if lsattr -d "$p" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
+        ok "$f immutable"
+    else
+        bad "$p missing +i"
+    fi
+done
+
+# --- verdict -----------------------------------------------------------------------
+if [ "$PROBLEMS" -eq 0 ]; then
+    echo "shell guard: OK"
+    exit 0
+fi
+echo "shell guard: DRIFTED ($PROBLEMS problem(s))"
+exit 1
