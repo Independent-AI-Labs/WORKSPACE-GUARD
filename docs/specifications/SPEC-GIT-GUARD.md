@@ -257,7 +257,7 @@ BLOCKED: git <command> <reason> (<ISO-8601-timestamp>)
   → Hint: <alternative action>
 ```
 
-Written to both stderr and `/dev/tty` (if openable). The `/dev/tty` write bypasses stdout/stderr redirection: a user running `git reset --hard > /dev/null 2>&1` will still see the block message on their terminal.
+Written to both stderr and `/dev/tty` (if openable). The `/dev/tty` write bypasses stdout/stderr redirection: a user running `git reset --hard > /dev/null 2>&1` will still see the block message on their terminal. Note the `/dev/tty` write is defence in depth only: at the shell layer, output-suppression idioms themselves (`> /dev/null`, `| tail`, `|| true`) are blocked outright for `-c` strings, interactive input, and untrusted scripts by the shell guard (REQ-SHG-308/309/310, SPEC-SHELL-GUARD §6 steps 9-11).
 
 ### 4.2 Subprocess Checks
 

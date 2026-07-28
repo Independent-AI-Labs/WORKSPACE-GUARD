@@ -141,9 +141,36 @@ The guard classifies argv (after its own argv[0]) into three forms:
 
 | Form | Shape | Handling |
 |------|-------|----------|
-| Command string | `bash -c STR [name [args...]]`, `bash -xc STR`, `bash -- -c STR` | Tokenize STR (§5) |
-| Script file | `bash FILE [args...]`, `bash -- FILE` | Read FILE, tokenize content (§5); unreadable → warn + pass through |
+| Command string | `bash -c STR [name [args...]]`, `bash -xc STR`, `bash -- -c STR` | Tokenize STR (§5); full policy, no exemption |
+| Script file | `bash FILE [args...]`, `bash -- FILE` | Open `O_NOFOLLOW`, `fstat`, classify trust tier (§4.1), tokenize content (§5); unreadable → warn + pass through |
 | Interactive/login | `bash`, `bash -l`, `bash -i`, argv[0] `-bash` | Pass through unchanged |
+
+### 4.1 Script Trust Tiers (REQ-SHG-211)
+
+Invocation context (`-c` vs script vs TTY vs parent process) is
+NEVER a trust signal: the constrained party chooses the invocation
+form, so any context-based discrimination is exploitable by
+construction (`printf 'cmd | tail\n' > /tmp/x.sh && bash /tmp/x.sh`
+would walk around a `-c`-only ban). The only trust boundary is
+ownership provenance, which the agent cannot forge.
+
+A script file is **trusted tier** iff, at `open(O_NOFOLLOW)` +
+`fstat()` time:
+
+1. it is a regular file owned by UID 0,
+2. it is not group- or other-writable, and
+3. every parent directory component up to `/` is root-owned and not
+   group/other-writable.
+
+Trusted tier: policy violations are audit-logged as `would-block`
+warnings (stderr + log file) but NOT blocked. Rationale: dpkg
+maintainer scripts, cron jobs, and init scripts legitimately use
+`2>/dev/null`, `| tail`, even `killall`; blocking root-owned system
+code risks bricking boot and package operations, and the agent
+cannot author or modify it. Untrusted tier (everything else,
+including all agent-writable files and every `-c` string): the full
+block policy applies to all users including root. Root's channel
+for suppression idioms is `/bin/bash.real` directly.
 
 Parsing rules:
 
@@ -181,6 +208,12 @@ A command position begins after any of: start of input, `;`, `&&`,
 command positions (the definition site itself yields no command
 word).
 
+For every command position the tokenizer records the **connector**
+that introduced it (`start`, `;`, `&&`, `||`, `|`, `|&`, `newline`,
+`(`, `{`, `;;`, keyword). Connector provenance is policy input:
+REQ-SHG-308 fires only on positions introduced by `|`/`|&`, and
+REQ-SHG-310 only on positions introduced by `||`/`|`/`|&`.
+
 ### 5.2 Quoting and Escapes
 
 - `'...'`: literal; contributes text to the current word.
@@ -201,7 +234,12 @@ a validation error (exit 2).
 
 For each command position:
 
-1. Skip assignments (`NAME=value`) and redirections (`2>file`).
+1. Skip assignments (`NAME=value`). Redirections are NOT skipped:
+   every redirection operator (`>`, `>>`, `N>`, `N>>`, `&>`, `&>>`,
+   and their whitespace-separated target forms) is captured as an
+   `(operator, target)` pair with quotes/escapes stripped from the
+   target, and handed to the policy engine (§6 step 9, REQ-SHG-309).
+   `N>&M` fd-duplication forms carry no file target and are ignored.
 2. Strip quotes/escapes to compute the effective word.
 3. Unwrap transparent prefixes (with their options skipped):
    `command`, `exec`, `env`, `nohup`, `time`, `timeout`, `nice`,
@@ -209,13 +247,17 @@ For each command position:
 4. Reduce to basename: `/sbin/shutdown` → `shutdown`.
 5. If the word contains `=` or `$` after stripping (dynamic), it
    cannot be matched: the position is not blocked (deny-list
-   principle; residual risk §16).
+   principle; residual risk §16). A dynamic redirection TARGET (one
+   containing `$` or a substitution) likewise cannot be matched and
+   is not blocked.
 
 ---
 
 ## 6. Block Decision Engine
 
-Checks are applied to every command position; the first block wins:
+Checks are applied to every command position; the first block wins.
+For trusted-tier script bodies (§4.1), every BLOCK below is
+downgraded to a `would-block` audit warning.
 
 ```
 1. Reduced word in blocked set?            → BLOCK (exit 1)
@@ -236,9 +278,19 @@ Checks are applied to every command position; the first block wins:
 7. dd of= resolving to block device?       → BLOCK
    (canonicalise of= operand; S_ISBLK check; device-prefix list)
 8. mount/umount on guard-protected path?   → BLOCK
-9. swapoff -a?                             → BLOCK
-10. eval with static literal argument?     → recurse tokenizer into it
-11. ALL CLEAR → sanitise env, execve real shell
+9. Any captured redirection whose literal  → BLOCK
+   target is in suppression_redirect_targets?
+   (> /dev/null, >> /dev/null, 2> /dev/null, &> /dev/null,
+    >/dev/null 2>&1, quoted "/dev/null" forms)
+10. Connector is | or |& AND reduced word  → BLOCK
+    in suppression_pipe_sinks (tail, head)?
+    (bare `tail file` at a non-pipe position stays allowed)
+11. Connector is ||, |, or |& AND reduced  → BLOCK
+    word in suppression_null_commands (true, :)?
+    (bare `true` after ; or && stays allowed)
+12. swapoff -a?                            → BLOCK
+13. eval with static literal argument?     → recurse tokenizer into it
+14. ALL CLEAR → sanitise env, execve real shell
 ```
 
 Step 2 closes the shell-escape vector: the guarded pair cannot be
@@ -356,6 +408,23 @@ device_prefixes: [/dev/sd, /dev/nvme, /dev/mmcblk, /dev/vd,
 # mount/umount protected paths.
 protected_paths: [/usr/lib/workspace-guard]
 
+# Output-suppression pipe sinks (REQ-SHG-308): blocked only at
+# command positions introduced by | or |&.
+suppression_pipe_sinks:
+  - {name: tail, hint: "run without truncation; write long output to a file and read it with offset/limit"}
+  - {name: head, hint: "run without truncation; write long output to a file and read it with offset/limit"}
+
+# Output-suppression redirection targets (REQ-SHG-309): literal
+# byte match after quote/escape stripping.
+suppression_redirect_targets:
+  - {path: /dev/null, hint: "capture output and print it on failure instead of discarding it"}
+
+# Null-command swallows (REQ-SHG-310): blocked only when the
+# introducing connector is ||, |, or |&.
+suppression_null_commands:
+  - {name: "true", hint: "handle the exit code explicitly instead of masking it"}
+  - {name: ":",    hint: "handle the exit code explicitly instead of masking it"}
+
 # Transparent prefixes unwrapped before matching.
 prefix_commands: [command, exec, env, nohup, time, timeout, nice,
                   ionice, stdbuf, sudo, doas, xargs]
@@ -435,6 +504,29 @@ match nix::unistd::execve(real_path, &argv_c, &envp) {
 - `bash --version`, `bash --help`, interactive, and login forms
   reach the real shell byte-identical argv: observable behaviour is
   unchanged.
+
+### 9.1 Untrusted Script Exec: Sealed memfd (REQ-SHG-212)
+
+Scanning an agent-writable script by path and then letting the real
+shell re-open that path is a scan-then-exec TOCTOU race: content can
+be swapped between the guard's read and bash's open (the window
+spans the whole exec path). For untrusted-tier scripts the guard
+therefore executes the SCANNED bytes:
+
+1. Read the script from the `O_NOFOLLOW` fd used for tier
+   classification (never re-opened by path).
+2. Create a `memfd`, write the exact scanned bytes, seal it
+   (`F_ADD_SEALS`: `SEAL_SHRINK|SEAL_WRITE|SEAL_GROW|SEAL_SEAL`).
+3. Clear `FD_CLOEXEC`; `execve("/bin/bash.real", ["bash",
+   "/proc/self/fd/<n>", args...], clean_envp)`.
+
+Observable difference: `$0` and `BASH_SOURCE` name the
+`/proc/self/fd/<n>` path instead of the original script path.
+Scripts that resolve sibling files via `dirname "$0"` must be run
+from the trusted tier (root-owned) or invoked as
+`bash -c 'source ./x.sh'`; this is the documented cost of closing
+the race. Trusted-tier scripts are exec'd by path unchanged: their
+content cannot be swapped by the agent.
 
 ---
 
@@ -576,8 +668,10 @@ documented `// SAFETY:` FFI sites: `getauxval`, `lstat`).
 | Area | Test classes |
 |------|--------------|
 | argv classification | `-c`, bundled `-xc`, `--` separator, `name args` operands, script file, unreadable script, interactive, login argv[0], null bytes, oversize |
-| tokenizer | quoting, escapes, comments, here-doc skip, nested `$( )`, backquotes, function bodies, `case` arms, depth limit |
+| tokenizer | quoting, escapes, comments, here-doc skip, nested `$( )`, backquotes, function bodies, `case` arms, depth limit, connector provenance, redirection capture (fd-prefixed, quoted targets, `&>` forms) |
 | policy | every blocked family, `mkfs.*` glob, blocked shells (path-qualified `/usr/bin/zsh`, prefix-wrapped `env fish`, `busybox sh`, nested `bash -c` allowed), power verbs, kill matrix (§6.2), chattr/rm/swapoff flag gates, dd device detection, protected-path mounts, basename reduction, prefix unwrapping (`sudo pkill`, `env pkill`, `xargs pkill`) |
+| suppression | pipe sinks (`\| tail`, `\| tail -n N`, `2>&1 \| head`, `$(x \| tail)`), redirect targets (`> /dev/null`, `2>/dev/null`, `&> /dev/null`, `>/dev/null 2>&1`, `2>"/dev/null"`), null swallows (`\|\| true`, `\| true`, `\|\| :`), allowed controls (bare `tail file`, `true` after `;`/`&&`, `2>&1` alone) |
+| trust tiers | root-owned script exemption with `would-block` audit, agent-writable script full policy, memfd exec of scanned bytes (script-swap fixture stays blocked), `$0` divergence documented |
 | env | BASH_ENV/functions/LD_* dropped, PATH reset, OPENCODE_*/WORKSPACE_* preserved |
 | logging | block line format, truncation, secret redaction, log-open failure still blocks |
 | install | dry-run, idempotency, rollback on sanity-check failure, uninstall restores |
@@ -627,6 +721,19 @@ documented `// SAFETY:` FFI sites: `getauxval`, `lstat`).
 - **Script-scan gap**: an unreadable script file passes through
   unwatched (REQ-SHG-202); the real shell then fails identically for
   the non-root agent, so the gap is root-adjacent only.
+- **Trusted-tier indirection**: a root-owned script is
+  exempt-with-audit (§4.1). If existing root-owned content evaluates
+  caller-controlled input (e.g. a system script doing `eval "$1"`),
+  the agent could route a blocked idiom through it. The agent cannot
+  author such a script, only discover one; would-block audit lines
+  make the attempt visible. Operators should treat any
+  argument-evaluating root-owned script as a defect.
+- **Interpreter-internal suppression**: `python3 -c
+  'subprocess.run(..., stdout=subprocess.DEVNULL)'` hides output
+  without shell grammar. Not detectable at this layer (REQ-SHG-NG-07).
+- **memfd `$0` divergence**: untrusted scripts observe
+  `/proc/self/fd/<n>` as `$0`/`BASH_SOURCE` (§9.1); scripts that
+  depend on their own path must be trusted-tier or sourced.
 
 ---
 

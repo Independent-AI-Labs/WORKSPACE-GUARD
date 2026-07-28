@@ -132,7 +132,43 @@ handled by `make install-shell-guard`.
   script file and tokenize its content with the same engine as `-c`
   strings. If the file is unreadable, the guard shall pass through
   (the real shell will fail identically) and emit a warning to
-  stderr.
+  stderr. Script handling is tiered by ownership trust per
+  REQ-SHG-211.
+
+- **REQ-SHG-210**: The tokenizer shall record, for every command
+  position, the **connector** that introduced it (start-of-input,
+  `;`, `&&`, `||`, `|`, `|&`, newline, `(`, `{`, `;;`, keyword), and
+  shall capture every **redirection operator and target** attached to
+  the command (previously skipped per §5.4). Connector provenance and
+  redirection targets are inputs to the block policy (REQ-SHG-308,
+  REQ-SHG-309, REQ-SHG-310).
+
+- **REQ-SHG-211**: Script files shall be classified into two trust
+  tiers before scanning, via `open(O_NOFOLLOW)` + `fstat()`:
+  - **Trusted tier**: regular file, owned by UID 0, not group- or
+    other-writable, and every parent directory component up to the
+    filesystem root likewise root-owned and not group/other-writable.
+    Policy violations in trusted scripts are NOT blocked; they are
+    audit-logged as `would-block` warnings (stderr + log file).
+    Rationale: root-owned content (dpkg maintainer scripts, cron,
+    init) is trusted system code; the agent cannot author it, and
+    blocking it risks bricking boot/package operations.
+  - **Untrusted tier**: anything else. The full block policy applies
+    to all users including root.
+  Invocation context (`-c` vs script vs TTY vs parent process) shall
+  NOT be used as a trust signal: the constrained party chooses the
+  invocation form, so context-based discrimination is exploitable by
+  construction. Ownership provenance is the only trust boundary.
+
+- **REQ-SHG-212**: For untrusted-tier scripts, the guard shall close
+  the scan-then-exec TOCTOU race by executing the SCANNED bytes, not
+  the path: content is written to a sealed `memfd`
+  (`F_ADD_SEALS`: `SEAL_SHRINK|SEAL_WRITE|SEAL_GROW|SEAL_SEAL`), the
+  fd is inherited across `execve()`, and the real shell is invoked
+  with `/proc/self/fd/<n>` as the script operand. The observable
+  difference (`$0`/`BASH_SOURCE` name the fd path) is documented
+  (SPEC-SHELL-GUARD §9.1). Trusted-tier scripts are exec'd by path
+  (their content cannot be swapped by the agent).
 
 - **REQ-SHG-203**: The binary shall reject arguments containing null
   bytes (`\0`) with exit code 2.
@@ -174,7 +210,9 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-300**: The following commands shall be unconditionally
   blocked at any command position, for ALL users including root
   (exit 1). Root's operator channel is invoking `<path>.real`
-  directly, which only root can do:
+  directly, which only root can do. (Trusted-tier script bodies per
+  REQ-SHG-211 are exempt-with-audit for ALL REQ-SHG-3xx rules;
+  `-c` strings and interactive input are never exempt:)
   - Process signalling by name: `pkill`, `killall`, `skill`, `snice`
   - Power/session control: `shutdown`, `reboot`, `poweroff`, `halt`,
     `kexec`, `init`, `telinit`, `runlevel` (write forms), `loginctl`
@@ -231,6 +269,46 @@ handled by `make install-shell-guard`.
   guard and are allowed. The set shall be data-driven from the
   `blocked_shells` block of `config/shell_guard_policy.yaml`, matched
   by basename after prefix unwrapping (REQ-SHG-208/REQ-SHG-209).
+
+- **REQ-SHG-308**: A command position introduced by a pipe connector
+  (`|` or `|&`) whose reduced first word is in the
+  `suppression_pipe_sinks` set (`tail`, `head`) shall be blocked
+  (exit 1) for ALL users including root, in every context (`-c`
+  strings, interactive input, untrusted script bodies). Rationale:
+  piping command output through a truncation filter discards the
+  failure evidence the operator and the audit trail need; the
+  incident driver was `make check-push 2>&1 | tail -15` hiding the
+  one failing test. Bare `tail`/`head` on file operands (not after a
+  pipe) remain allowed: they read files, they do not silence a
+  command. The set shall be data-driven from the
+  `suppression_pipe_sinks` block of `config/shell_guard_policy.yaml`.
+
+- **REQ-SHG-309**: Any redirection operator (`>`, `>>`, `N>`,
+  `N>>`, `&>`, `&>>`) in any command position whose target, after
+  quote/escape stripping, is a literal member of
+  `suppression_redirect_targets` (`/dev/null`) shall be blocked
+  (exit 1) for ALL users including root, in every context. This
+  covers `> /dev/null`, `>> /dev/null`, `2> /dev/null`,
+  `&> /dev/null`, and combined forms such as `>/dev/null 2>&1`.
+  Rationale: discarding stdout/stderr is the same audit-trail
+  destruction as REQ-SHG-308 by a different spelling. Trusted-tier
+  scripts (REQ-SHG-211) are exempt-with-audit because system scripts
+  legitimately daemonise output. The set shall be data-driven from
+  the `suppression_redirect_targets` block.
+
+- **REQ-SHG-310**: A command position whose reduced first word is in
+  `suppression_null_commands` (`true`, `:`) AND whose introducing
+  connector is `||`, `|`, or `|&` shall be blocked (exit 1) for ALL
+  users including root. `cmd || true` masks a failing exit code;
+  `cmd | true` discards stdout. Bare `true`/`:` after `;`, `&&`, or
+  at start-of-input masks nothing and remains allowed. The set shall
+  be data-driven from the `suppression_null_commands` block.
+
+- **REQ-SHG-311**: The block message for REQ-SHG-308/309/310 shall
+  name the matched suppression rule and carry a remediation hint
+  from the policy entry, e.g.:
+  `BLOCKED: bash -c 'make check 2>&1 | tail -5' (output-suppression: pipe to 'tail') (<ts>)`
+  `  -> Hint: run without truncation; write long output to a file and read it with offset/limit`
 
 ---
 
@@ -333,14 +411,21 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-605**: Post-install verification shall confirm: correct
   modes/owners/caps; `bash -c 'echo ok'` succeeds for a non-root
   user; `bash -c 'pkill x'` is blocked with exit 1 for a non-root
-  user; `bash --version` works; interactive `bash -l` works.
+  user; `bash -c 'ls | tail'` and `bash -c 'ls 2>/dev/null'` are
+  blocked with exit 1 for a non-root user AND for root; a
+  trusted-tier fixture script (root-owned, mode 0755, under a
+  root-owned directory) containing `2>/dev/null` executes with a
+  `would-block` audit line; `bash --version` works; interactive
+  `bash -l` works.
 
 - **REQ-SHG-606**: Because `/bin/sh` and `/bin/bash` are on the
   critical path of every boot script and cron job, install shall
   verify the guard passes a sanity set of POSIX invocations (`sh -c`,
   `bash -c`, `bash script`, here-doc, pipeline, substitution) before
   committing the divert, and shall refuse to proceed (roll back)
-  otherwise.
+  otherwise. The sanity set shall include a dpkg-style root-owned
+  script exercising `2>/dev/null` to prove the trusted tier keeps
+  package operations working.
 
 ---
 
@@ -378,8 +463,15 @@ handled by `make install-shell-guard`.
   command substitution recursion (`$(pkill x)`), function-body
   scanning, quote stripping, here-doc skipping, the blocked-shells
   set (REQ-SHG-307) including path-qualified (`/usr/bin/zsh`) and
-  prefix-wrapped (`env fish`, `busybox sh`) forms, and pass-through
-  of benign commands.
+  prefix-wrapped (`env fish`, `busybox sh`) forms, the suppression
+  families (REQ-SHG-308 pipe sinks incl. `| tail -n N` and
+  `2>&1 | tail`, REQ-SHG-309 redirect targets incl. `2> /dev/null`,
+  `&> /dev/null`, `>/dev/null 2>&1`; REQ-SHG-310 `|| true` / `| true`
+  / `|| :` with allowed bare-`true` controls), trusted-tier
+  exemption-with-audit for root-owned scripts, the script-swap
+  TOCTOU fixture (blocked idiom introduced between write and exec is
+  still blocked via the sealed memfd), and pass-through of benign
+  commands.
 
 - **REQ-SHG-801**: The build-time policy matrix
   (`config/shell_guard_policy_matrix.yaml`) shall assert every case in the
@@ -387,9 +479,11 @@ handled by `make install-shell-guard`.
   build.
 
 - **REQ-SHG-802**: Rust unit tests shall cover the tokenizer as a
-  pure function (input bytes → command-position words) including
-  adversarial inputs: nested substitutions, mixed quoting, escaped
-  newlines, `case` arms, and prefix chains.
+  pure function (input bytes → command-position words, connectors,
+  and redirection pairs) including adversarial inputs: nested
+  substitutions, mixed quoting, escaped newlines, `case` arms,
+  prefix chains, quoted redirection targets (`2>"/dev/null"`),
+  and fd-prefixed redirects (`3>/dev/null`).
 
 - **REQ-SHG-803**: Env-sanitisation tests shall assert `BASH_ENV`,
   exported functions, and `LD_*` do not survive into the child
@@ -435,3 +529,11 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-NG-06**: Agent-side config (opencode `permission` rules,
   plugins) is out of scope: it is a complementary, user-space layer
   that this binary neither depends on nor manages.
+
+- **REQ-SHG-NG-07**: Suppression performed INSIDE an interpreter
+  (`python3 -c 'subprocess.run(..., stdout=subprocess.DEVNULL)'`,
+  redirecting to a log file that is never read) is not detectable by
+  a shell-layer tokenizer and is out of scope, per the same
+  interpreter-indirection boundary as REQ-SHG-NG-02. Suppression
+  spelled with shell grammar (pipes to `tail`/`head`, `/dev/null`
+  redirects, `|| true`) IS in scope (REQ-SHG-308/309/310).
