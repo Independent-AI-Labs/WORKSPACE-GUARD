@@ -1,0 +1,118 @@
+version: 1
+# Index of guard policy configuration files in this directory.
+# Consumed by the WORKSPACE-CI wiki (/guard page and search index) so the
+# rendered policy catalogue is derived from this repo instead of filename
+# heuristics. When adding a policy config, add an entry here.
+#   id          : file stem of the config (without .yaml)
+#   title       : human-readable policy name
+#   category    : grouping used for display (Git Guard / Shell Guard / ...)
+#   description : one-line summary of what the policy controls
+policies:
+  - id: git_guard_subcommands
+    title: Git Subcommand Policy
+    category: Git Guard
+    description: Allow/deny policy for git subcommands executed through the git-guard wrapper.
+  - id: git_guard_config_keys
+    title: Git Config Key Policy
+    category: Git Guard
+    description: Dangerous git config keys that guard blocks or vetoes (e.g. hooksPath, alias injection).
+  - id: git_guard_environment
+    title: Git Environment Policy
+    category: Git Guard
+    description: Environment variables guard sanitizes or blocks for git invocations (GIT_DIR, GIT_SSH_COMMAND, ...).
+  - id: git_guard_protected_branches
+    title: Protected Branch Policy
+    category: Git Guard
+    description: Branches protected from destructive history operations (force-push, reset, rebase).
+  - id: git_guard_resource_limits
+    title: Git Resource Limits
+    category: Git Guard
+    description: Resource limits applied to guarded git processes (CPU, memory, file sizes, timeouts).
+  - id: git_guard_policy_matrix
+    title: Git Policy Test Matrix
+    category: Git Guard
+    description: Expected block/allow outcomes consumed by the git-guard policy matrix tests.
+  - id: git_guard_attack_surface_matrix
+    title: Git Attack Surface Matrix
+    category: Git Guard
+    description: Exhaustive destructive-git attack surface derived from git.git source, used for coverage audits.
+  - id: git_ssh_allowlist
+    title: Git SSH Allowlist
+    category: Git Guard
+    description: SSH destinations the git-ssh-wrapper may connect to; everything else is refused.
+  - id: shell_guard_policy
+    title: Shell Guard Policy
+    category: Shell Guard
+    description: Pattern table for the shell guard (SPEC-SHELL-GUARD section 7): blocked shell commands and patterns.
+  - id: shell_guard_policy_matrix
+    title: Shell Policy Test Matrix
+    category: Shell Guard
+    description: Expected block/allow outcomes consumed by the shell-guard policy matrix tests.
+  - id: binary_guard_policy_rules
+    title: Binary Guard Policy Rules
+    category: Binary Guard
+    description: Full GTFOBins coverage rules for SUID/file-capability binaries, host-independent.
+  - id: ambient-allowlist
+    title: Ambient Capability Allowlist
+    category: Binary Guard
+    description: Ambient capability grants for git-guard workloads in capability mode.
+  - id: cap-allowlist
+    title: File Capability Allowlist
+    category: Binary Guard
+    description: Per-path file-capability allowlist restricted to system binaries.
+  - id: home-lock-users
+    title: Home Lock Users
+    category: Host Hardening
+    description: Users whose home directories are locked down (LOCAL ONLY: gitignored, per-host copy).
+  - id: host-provision
+    title: Host Provisioning
+    category: Host Hardening
+    description: Per-host provisioning settings (LOCAL ONLY: gitignored; see SPEC-HOST-PROVISION).
+  - id: system-deps
+    title: System Dependencies
+    category: Host Hardening
+    description: System dependencies for WORKSPACE-GUARD, checked and installed by make init / make init-check.
+  - id: shared_paths
+    title: Shared Path Constants
+    category: Shared
+    description: Path constants shared across guard policies and consumers.
+  - id: shared_locked_paths
+    title: Locked Path Policy
+    category: Shared
+    description: Paths locked against agent modification across the workspace.
+  - id: shared_host_profiles
+    title: Host Profiles
+    category: Shared
+    description: Hostname to git deployment class mapping; install targets assert the host before mutating the system.
+  - id: coverage_thresholds
+    title: Coverage Thresholds
+    category: Quality Gates
+    description: Test coverage thresholds enforced by the coverage no-devolution check.
+  - id: dead_code
+    title: Dead Code Detection
+    category: Quality Gates
+    description: Configuration for dead code detection (lib/checks_dead_code.sh).
+  - id: file_length_limits
+    title: File Length Limits
+    category: Quality Gates
+    description: Maximum allowed lines per file enforced by the file-length check.
+  - id: banned_words_exceptions
+    title: Banned Words Exceptions
+    category: Quality Gates
+    description: Exceptions to the banned-words scan.
+  - id: silent_swallow_exceptions
+    title: Silent Swallow Exceptions
+    category: Quality Gates
+    description: Exceptions to the error-swallowing pattern scan.
+  - id: sensitive_files_exceptions
+    title: Sensitive Files Exceptions
+    category: Quality Gates
+    description: Safe exceptions to the sensitive-files commit block.
+  - id: dependency_excludes
+    title: Dependency Excludes
+    category: Quality Gates
+    description: Dependencies excluded from dependency auditing.
+  - id: duplicate_dependency_excludes
+    title: Duplicate Dependency Excludes
+    category: Quality Gates
+    description: Dependencies intentionally declared in both workspace root and members, not flagged as redundant.
