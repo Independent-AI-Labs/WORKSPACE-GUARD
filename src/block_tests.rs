@@ -174,31 +174,29 @@ fn rebase_continue_allowed() {
 }
 
 #[test]
-fn sudo_gated_stash_drop() {
+fn stash_drop_blocked_even_for_root() {
     let mut state = empty_state("stash");
     state.has_stash_drop = true;
     let argv_os = argv(&["git", "stash", "drop"]);
-    let root = crate::is_config_privileged();
     let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
-    if root {
-        assert!(result.is_ok(), "root should be allowed: {:?}", result);
-    } else {
-        assert!(matches!(result, Err(GuardError::Blocked { .. })));
-    }
+    assert!(
+        matches!(result, Err(GuardError::Blocked { .. })),
+        "stash drop is blocked for all users (REQ-GGUARD-050): {:?}",
+        result
+    );
 }
 
 #[test]
-fn sudo_gated_stash_clear() {
+fn stash_clear_blocked_even_for_root() {
     let mut state = empty_state("stash");
     state.has_stash_clear = true;
     let argv_os = argv(&["git", "stash", "clear"]);
-    let root = crate::is_config_privileged();
     let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
-    if root {
-        assert!(result.is_ok(), "root should be allowed: {:?}", result);
-    } else {
-        assert!(matches!(result, Err(GuardError::Blocked { .. })));
-    }
+    assert!(
+        matches!(result, Err(GuardError::Blocked { .. })),
+        "stash clear is blocked for all users (REQ-GGUARD-050): {:?}",
+        result
+    );
 }
 
 #[test]

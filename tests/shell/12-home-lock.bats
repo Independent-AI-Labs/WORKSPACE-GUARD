@@ -21,7 +21,7 @@ teardown() { guard_teardown; }
 
 # Build a fake repo with real scripts and a fake home pointing into
 # $TEST_TMPDIR/fakehome. Sets FAKE_REPO, FAKE_HOME. The fake repo
-# carries a minimal guard_locked_paths.yaml with just the entries the
+# carries a minimal shared_locked_paths.yaml with just the entries the
 # test needs (overloaded by _write_locked_paths).
 _setup_home() {
     FAKE_REPO="$(make_fake_repo)"
@@ -31,7 +31,7 @@ _setup_home() {
     _write_locked_paths "$FAKE_REPO" ""
 }
 
-# Write a guard_locked_paths.yaml with a custom absolute_file_paths
+# Write a shared_locked_paths.yaml with a custom absolute_file_paths
 # block. Arguments are alternating "raw-path" "octal-mode-string" pairs.
 # An empty list writes a block with no entries.
 _write_locked_paths() {
@@ -50,7 +50,7 @@ _write_locked_paths() {
             printf '  "%s": 0o%s\n' "$p" "$m"
             i=$((i+2))
         done
-    } > "$dir/config/guard_locked_paths.yaml"
+    } > "$dir/config/shared_locked_paths.yaml"
 }
 
 # Materialize the listed fake-home paths with the given content so
@@ -115,7 +115,7 @@ STUB
 
 @test "install-home-lock: exits 2 when config missing" {
     _setup_home
-    rm -f "$FAKE_REPO/config/guard_locked_paths.yaml"
+    rm -f "$FAKE_REPO/config/shared_locked_paths.yaml"
     run bash "$FAKE_REPO/scripts/install-home-lock"
     assert_failure
     [ "$status" -eq 2 ]
@@ -235,7 +235,7 @@ STUB
     # Create the real /root/.gitconfig? Cannot, not root. Instead point
     # the test at a writable parent. Override the script's view by
     # re-rooting: write the path under $TEST_TMPDIR via a custom
-    # guard_locked_paths.yaml with an absolute fake path.
+    # shared_locked_paths.yaml with an absolute fake path.
     local fake_root="$TEST_TMPDIR/fakeroot/.gitconfig"
     _write_locked_paths "$FAKE_REPO" "$fake_root" "644"
     run env HOME="$FAKE_HOME" bash "$FAKE_REPO/scripts/install-home-lock"
@@ -531,7 +531,7 @@ EOF
     assert_output --partial "mode"
 }
 
-@test "home-drift-check: --quiet suppresses non-critical output" {
+@test "home-drift-check: no-drift run prints summary only, no detail lines" {
     _setup_home
     local p="$FAKE_HOME/.gitconfig"
     _make_home_files "~/.gitconfig" "g"
@@ -547,9 +547,11 @@ home_lock_state:
     expected_mode: "644"
     locked_at: "2026-01-01T00:00:00Z"
 EOF
-    run bash "$FAKE_REPO/scripts/home-drift-check" --quiet
+    run bash "$FAKE_REPO/scripts/home-drift-check"
     assert_success
-    refute_output --partial "Home drift check:"
+    assert_output --partial "Home drift check:"
+    assert_output --partial "0 critical"
+    refute_output --partial "CRITICAL:"
 }
 
 @test "home-drift-check: writes home-drift-report.yaml with summary" {

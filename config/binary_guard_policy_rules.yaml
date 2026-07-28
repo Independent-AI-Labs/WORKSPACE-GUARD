@@ -1,4 +1,4 @@
-# config/binary-policy-rules.yaml: full GTFOBins coverage, host-independent.
+# config/binary_guard_policy_rules.yaml: full GTFOBins coverage, host-independent.
 #
 # This is the catalog of policy rules for every exploitable binary listed in
 # the GTFOBins universe. It is hand-maintained and reviewed. It NEVER

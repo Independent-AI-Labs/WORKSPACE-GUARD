@@ -67,6 +67,35 @@ fn raise_child_dac_override() -> Result<(), GuardError> {
     Ok(())
 }
 
+/// Post-exec policy reconcile (REQ-GGUARD-176, SPEC-GIT-GUARD section
+/// 8). Runs only for mutating porcelains and only when a git dir was
+/// resolved. Drift is fatal to the guard invocation (EX_IOERR 74):
+/// the git result stands, the invariant does not. Root-only builds
+/// pass no git dir, so reconcile stays inert there.
+#[cfg(feature = "capability-mode")]
+fn post_exec_reconcile(git_dir: Option<&Path>, mutating: bool, git_code: i32) {
+    if !mutating {
+        return;
+    }
+    let gd = match git_dir {
+        Some(g) => g,
+        None => return,
+    };
+    let drift = crate::reconcile::run(gd);
+    if !drift.is_empty() {
+        eprintln!(
+            "FATAL: guard policy reconcile failed after git exited {}; \
+             the git operation stands but the policy-file invariant is broken. \
+             Repair via the operator relock path (see AGENTS.md):",
+            git_code
+        );
+        for d in &drift {
+            eprintln!("  {}", d);
+        }
+        std::process::exit(74);
+    }
+}
+
 pub fn set_resource_limits() {
     let _ = setrlimit(Resource::RLIMIT_NOFILE, NOFILE_LIMIT, NOFILE_LIMIT);
     let _ = setrlimit(Resource::RLIMIT_CORE, CORE_LIMIT, CORE_LIMIT);
@@ -230,6 +259,11 @@ pub fn execve_real_git(
     }
 
     let pid;
+    #[cfg(feature = "capability-mode")]
+    let mutating = state
+        .and_then(|s| s.subcommand.as_deref())
+        .map(crate::reconcile::is_mutating)
+        .unwrap_or(false);
     // SAFETY: libc::fork is an irreducible async-signal-safe primitive with no
     // safe nix substitute that preserves the exact fork-without-atfork-handler
     // semantics the guard depends on. Any allocation or lock acquisition between
@@ -278,17 +312,26 @@ pub fn execve_real_git(
             match waited {
                 Ok(WaitStatus::Exited(_, code)) => {
                     #[cfg(feature = "capability-mode")]
-                    relock(git_dir);
+                    {
+                        relock(git_dir);
+                        post_exec_reconcile(git_dir, mutating, code);
+                    }
                     std::process::exit(code);
                 }
                 Ok(WaitStatus::Signaled(_, sig, _)) => {
                     #[cfg(feature = "capability-mode")]
-                    relock(git_dir);
+                    {
+                        relock(git_dir);
+                        post_exec_reconcile(git_dir, mutating, 128 + sig as i32);
+                    }
                     std::process::exit(128 + sig as i32);
                 }
                 _ => {
                     #[cfg(feature = "capability-mode")]
-                    relock(git_dir);
+                    {
+                        relock(git_dir);
+                        post_exec_reconcile(git_dir, mutating, 1);
+                    }
                     std::process::exit(1);
                 }
             }

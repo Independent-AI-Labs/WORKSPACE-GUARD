@@ -43,7 +43,8 @@ model exercised in Tier 2.
 - **REQ-POD-003**: On Darwin, the pre-push hook (`ci-check-push`) shall run
   `make test-podman` instead of skipping Linux-only checks.
 - **REQ-POD-003a**: On Linux, the pre-push hook (`ci-check-push`) shall run
-  `make check-push`, which includes `make test-podman-provision` (host-provision
+  `make check-push`, which includes `make test-shell` (bats shell suite) and
+  `make test-podman-provision` (host-provision
   phases 0-4 in a privileged Podman container).
 - **REQ-POD-004**: On Darwin, pre-commit hooks for `cargo-fmt`, `cargo-clippy`,
   and `verify-coverage` may remain skipped on the host; Tier 1 inside the

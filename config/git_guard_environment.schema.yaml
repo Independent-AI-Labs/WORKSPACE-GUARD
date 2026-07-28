@@ -1,7 +1,7 @@
-# Schema for guard_environment.yaml: field-level documentation.
+# Schema for git_guard_environment.yaml: field-level documentation.
 #
 # Convention: one config/<name>.schema.yaml per config/<name>.yaml.
-config: guard_environment
+config: git_guard_environment
 description: "Environment variable policy: allowed vars, sudo-gated vars, and blocked hook-bypass vars."
 fields:
   - path: version

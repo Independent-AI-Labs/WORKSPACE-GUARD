@@ -15,7 +15,7 @@ One host runs one git class. Two git classes on one host is forbidden.
 
 ## Host binding
 
-`config/guard-host-profiles.yaml` maps `hostname -s` → class. Install refuses
+`config/shared_host_profiles.yaml` maps `hostname -s` → class. Install refuses
 unknown hosts and class mismatches. No env override.
 
 ## Installed record
@@ -48,5 +48,5 @@ and functional probe via `runuser`. `make check-guard` hard-fails.
 ## Removed
 
 - `make install-guard`, `make check-guard` (hard-fail)
-- `install_capability_delivery()`, pam git install, XOR/fallback probes
+- `install_capability_delivery()`, pam git install, XOR/secondary probes
 - `GUARD_ALLOW_FUNCTIONAL_FAIL`, `GUARD_DELIVERY`, class-switching env vars

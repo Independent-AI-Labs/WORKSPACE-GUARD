@@ -147,8 +147,10 @@ _run_drift() { run bash "$FAKE_REPO/scripts/suid-drift-check" "$@"; }
     unset GUARD_GETCAP_FIXTURE
     _run_drift
     assert_success
-    assert_output --partial "WARNING"
-    assert_output --partial "new SUID"
+    # Detail lines are buffered and only dumped on CRITICAL; the WARNING
+    # row lives in drift-report.yaml and the summary counts it.
+    refute_output --partial "new SUID"
+    assert_output --partial "1 warnings"
 }
 
 @test "drift-check: removed non-gtfobins SUID -> WARNING (exit 0)" {
@@ -161,8 +163,8 @@ _run_drift() { run bash "$FAKE_REPO/scripts/suid-drift-check" "$@"; }
     unset GUARD_GETCAP_FIXTURE
     _run_drift
     assert_success
-    assert_output --partial "WARNING"
-    assert_output --partial "removed SUID"
+    refute_output --partial "removed SUID"
+    assert_output --partial "1 warnings"
 }
 
 @test "drift-check: removed SUID -> WARNING" {
@@ -175,19 +177,20 @@ _run_drift() { run bash "$FAKE_REPO/scripts/suid-drift-check" "$@"; }
     unset GUARD_GETCAP_FIXTURE
     _run_drift
     assert_success
-    assert_output --partial "removed SUID"
+    refute_output --partial "removed SUID"
+    assert_output --partial "1 warnings"
 }
 
-@test "drift-check: --quiet suppresses WARNING lines" {
+@test "drift-check: removed-suid WARNING row still lands in drift-report.yaml" {
     _setup_drift
     _write_suid_baseline "$FAKE_REPO" "/usr/bin/sudo" "/usr/bin/passwd"
     _write_fcap_baseline "$FAKE_REPO"
     printf '%s\n' /usr/bin/sudo > "$TEST_TMPDIR/suid.lst"
     export GUARD_FIND_FIXTURE="$TEST_TMPDIR/suid.lst"
     unset GUARD_GETCAP_FIXTURE
-    _run_drift --quiet
+    _run_drift
     assert_success
-    refute_output --partial "WARNING:  removed SUID"
+    grep -q 'removed-suid' "$WORKSPACE_BINARY_GUARD_STATE_DIR/drift-report.yaml"
 }
 
 @test "drift-check: new cap on agent-accessible path -> CRITICAL" {
@@ -219,8 +222,8 @@ _run_drift() { run bash "$FAKE_REPO/scripts/suid-drift-check" "$@"; }
     export GUARD_GETCAP_FIXTURE="$TEST_TMPDIR/caps.lst"
     _run_drift
     assert_success
-    assert_output --partial "new file capability"
-    assert_output --partial "WARNING"
+    refute_output --partial "new file capability"
+    assert_output --partial "1 warnings"
 }
 
 @test "drift-check: new cap under /usr/lib -> CRITICAL (M2)" {

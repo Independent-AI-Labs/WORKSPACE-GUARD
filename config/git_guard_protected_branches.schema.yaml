@@ -1,7 +1,7 @@
-# Schema for guard_protected_branches.yaml: field-level documentation.
+# Schema for git_guard_protected_branches.yaml: field-level documentation.
 #
 # Convention: one config/<name>.schema.yaml per config/<name>.yaml.
-config: guard_protected_branches
+config: git_guard_protected_branches
 description: "Protected branch names and prefixes that require --ff-only/--rebase for pull and merge."
 fields:
   - path: version

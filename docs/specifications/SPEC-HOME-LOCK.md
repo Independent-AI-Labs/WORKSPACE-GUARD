@@ -37,7 +37,7 @@ git guard's `git config core.hooksPath` BLOCK still applies inside
 that editor shell if the operator tries to set a dangerous value.
 
 The protected set is data-driven from
-`config/guard_locked_paths.yaml` (the `absolute_file_paths:` block),
+`config/shared_locked_paths.yaml` (the `absolute_file_paths:` block),
 so new entries are added by editing the YAML and rerunning
 `make install-home-lock`: no script or binary rebuild required.
 
@@ -89,7 +89,7 @@ dangerous value inside that editor shell.
 ## 3. Config Schema
 
 The `absolute_file_paths:` block lives inside
-`config/guard_locked_paths.yaml` alongside the existing per-repo lock
+`config/shared_locked_paths.yaml` alongside the existing per-repo lock
 config:
 
 ```yaml
@@ -172,7 +172,7 @@ expand_tilde() {
 
 ```
 Usage: scripts/install-home-lock [--dry-run]
-Lock the absolute_file_paths entries in config/guard_locked_paths.yaml
+Lock the absolute_file_paths entries in config/shared_locked_paths.yaml
 (SPEC-HOME-LOCK 4.2). Root-only. Chowns each path to root:root and
 applies the configured mode. Edit locked files via sudoedit.
 Exit: 0 ok, 1 lock failure, 2 not root/missing config.
@@ -181,7 +181,7 @@ Exit: 0 ok, 1 lock failure, 2 not root/missing config.
 Flow:
 
 1. Parse args (`--dry-run`, `-h`/`--help`). Refuse non-root (exit 2).
-2. Verify `config/guard_locked_paths.yaml` exists (exit 2 if missing).
+2. Verify `config/shared_locked_paths.yaml` exists (exit 2 if missing).
 3. Parse the `absolute_file_paths:` block with awk into a temp file
    of `<expanded-path>\t<mode-octal>` rows. Strip non-octal and
    leading-zero from the mode. Error (exit 2) if zero entries.
@@ -254,15 +254,16 @@ Flow:
 ### 4.4 home-drift-check
 
 ```
-Usage: scripts/home-drift-check [--quiet]
+Usage: scripts/home-drift-check
 Compare live home-lock surface against home-lock-state.yaml.
 Report only; no auto-repair (preserves audit trail).
+Detail lines print only on CRITICAL drift; summary always prints.
 Exit: 0 no critical drift, 1 critical drift, 2 baseline missing.
 ```
 
 Flow:
 
-1. Parse args (`--quiet`, `-h`/`--help`). Any user may run.
+1. Parse args (`-h`/`--help`). Any user may run.
 2. If state file missing: error `baseline missing: <state>; run:
    make install-home-lock` and exit 2.
 3. Parse state with awk into `<path>\t<expected_mode>` rows. If zero
@@ -278,7 +279,8 @@ Flow:
    e. Append a row to the report: `- {path, class, detail, timestamp}`.
 6. Append the summary block: `critical: N`, `warnings: M`,
    `checked_at: <UTC ISO-8601>`.
-7. If not quiet: print banner + summary line.
+7. If CRITICAL > 0: dump the buffered detail lines to stdout. Then
+   print the banner + summary line (always).
 8. Exit 0 if CRITICAL == 0, else 1.
 
 Report file format (`/usr/lib/workspace-guard/home-drift-report.yaml`):
@@ -301,7 +303,7 @@ summary:
 ## 5. Makefile Targets
 
 ```makefile
-.PHONY: install-home-lock uninstall-home-lock home-drift-check home-drift-check-quiet
+.PHONY: install-home-lock uninstall-home-lock home-drift-check
 
 install-home-lock:
 	sudo scripts/install-home-lock
@@ -311,9 +313,6 @@ uninstall-home-lock:
 
 home-drift-check:
 	scripts/home-drift-check
-
-home-drift-check-quiet:
-	scripts/home-drift-check --quiet
 ```
 
 `install-home-lock` and `uninstall-home-lock` are wrapped in `sudo`
@@ -324,7 +323,7 @@ reads.
 
 ## 6. build.rs Integration
 
-`build.rs` parses `config/guard_locked_paths.yaml` (via serde_yaml)
+`build.rs` parses `config/shared_locked_paths.yaml` (via serde_yaml)
 and emits a `LOCKED_ABSOLUTE_FILE_PATHS` const table alongside the
 existing `LOCKED_RECURSIVE_TREE_PATHS`, `LOCKED_INDIVIDUAL_FILE_PATHS`,
 and `LOCKED_GLOB_PATTERNS` consts. The `LockedPathsConfig` struct
@@ -384,7 +383,7 @@ Test coverage matrix:
 |--------------------|--------------|
 | install-home-lock  | `--help`, unknown arg, missing config, no entries, `--dry-run`, create-missing (`touch`), create parent (`mkdir -p`), state-file write, state-field capture (orig owner + orig mode + expected mode + locked_at), mode 0644 (gitconfig), mode 0600 (authorized_keys), chown invoked, `~` expands to HOME at runtime, `/root/` absolute path, multiple entries, idempotent (fake stat) |
 | uninstall-home-lock| `--help`, unknown arg, state missing (exit 0 nothing-to-roll-back), state empty, `--dry-run`, restore original mode, clear state, multiple entries |
-| home-drift-check   | `--help`, unknown arg, baseline missing, baseline empty, no drift (fake stat), missing file CRITICAL, owner-changed CRITICAL, mode-changed CRITICAL, `--quiet`, writes report YAML |
+| home-drift-check   | `--help`, unknown arg, baseline missing, baseline empty, no drift (fake stat, summary-only output), missing file CRITICAL, owner-changed CRITICAL, mode-changed CRITICAL, writes report YAML |
 
 ---
 

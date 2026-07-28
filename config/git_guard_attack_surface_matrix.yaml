@@ -1,8 +1,8 @@
 # Exhaustive destructive-git attack surface derived from git.git source
 # (command-list.txt, builtin/checkout.c, builtin/restore.c, plumbing builtins).
-# Consumed by src/attack_surface_tests.rs; complements guard_policy_matrix.yaml.
+# Consumed by src/attack_surface_tests.rs; complements git_guard_policy_matrix.yaml.
 #
-# Schema matches guard_policy_matrix.yaml:
+# Schema matches git_guard_policy_matrix.yaml:
 #   id, argv, expect (blocked|allowed), reason_contains?, sudo_only?
 
 version: 1

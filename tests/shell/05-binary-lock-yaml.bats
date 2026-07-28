@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 05-binary-lock-yaml.bats: tests for scripts/lib/binary-lock-yaml.sh
-# (emit_binary_lock). The function joins config/binary-policy-rules.yaml
+# (emit_binary_lock). The function joins config/binary_guard_policy_rules.yaml
 # against the GTFOBins parse + live SUID/CAP surface and emits
 # res/binary-lock.yaml. These tests exercise the join logic: exact name
 # wins, tag catch-all, final deny-all, null vs non-null paths, and
@@ -127,7 +127,7 @@ _setup_emit() {
     _setup_emit
     emit_binary_lock
     local lk="$FAKE_REPO/res/binary-lock.yaml"
-    # git has an explicit name rule in binary-policy-rules.yaml (git-bypass).
+    # git has an explicit name rule in binary_guard_policy_rules.yaml (git-bypass).
     awk '/^  - name: "git"/{c=1} c && /policy:/{print; exit}' "$lk" \
         | grep -q 'deny-all-non-root'
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-home-lock: root-only locker for the absolute_file_paths block
-# of config/guard_locked_paths.yaml.
+# of config/shared_locked_paths.yaml.
 #
 # Implements docs/specifications/SPEC-HOME-LOCK.md section 4.2:
 # for every entry under absolute_file_paths the script chowns the file
@@ -28,13 +28,13 @@
 # Exit codes:
 #   0  all entries locked (or already locked)
 #   1  one or more entries failed to lock
-#   2  not root, missing guard_locked_paths.yaml, or bad arguments
+#   2  not root, missing shared_locked_paths.yaml, or bad arguments
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG="$REPO_ROOT/config/guard_locked_paths.yaml"
+CONFIG="$REPO_ROOT/config/shared_locked_paths.yaml"
 LIB_DIR="$SCRIPT_DIR/lib"
 source "$LIB_DIR/runtime_state.sh" || exit 1
 init_guard_runtime_state "$REPO_ROOT"
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             cat <<EOF
 Usage: $0 [--dry-run]
-Lock the absolute_file_paths entries in config/guard_locked_paths.yaml
+Lock the absolute_file_paths entries in config/shared_locked_paths.yaml
 (SPEC-HOME-LOCK 4.2). Root-only. Chowns each path to root:root and
 applies the configured mode. Edit locked files via sudoedit.
 Exit: 0 ok, 1 lock failure, 2 not root/missing config.

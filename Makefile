@@ -198,7 +198,7 @@ test-integration-root: ## Root-only integration tests (root)
 	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --test integration_test
 
 .PHONY: test-shell
-test-shell: ## Run the bats shell test suite (NOT gated in check-push).
+test-shell: ## Run the bats shell test suite (gated in check-push).
 	if ! command -v bats; then \
 		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
 		exit 1; \
@@ -210,10 +210,11 @@ test-shell: ## Run the bats shell test suite (NOT gated in check-push).
 # =============================================================================
 
 .PHONY: check-push
-check-push: ## Pre-push quality gate: fmt + clippy + check + tests + host-provision Podman E2E (Linux).
+check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests + host-provision Podman E2E (Linux).
 	$(MAKE) lint
 	$(MAKE) check
 	$(MAKE) test
+	$(MAKE) test-shell
 	$(MAKE) test-podman-provision
 
 # Podman test harness: macOS + Linux hosts without native Linux kernel.
@@ -296,6 +297,25 @@ check-guard: ## REMOVED - use check-guard-host-exec
 
 check-guard-host-exec: ## Check host-exec git-guard installation status
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
+
+.PHONY: install-shell-guard uninstall-shell-guard shell-guard-check
+install-shell-guard: ## Install shell guard at /bin/bash + /bin/sh (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: install-shell-guard needs root: sudo make install-shell-guard" >&2; exit 1; \
+	fi
+	test -x scripts/install-shell-guard && bash scripts/install-shell-guard \
+		|| { echo "NOTICE: scripts/install-shell-guard not yet implemented; docs/specifications/SPEC-SHELL-GUARD.md section 12 documents the procedure." >&2; exit 1; }
+
+uninstall-shell-guard: ## Uninstall shell guard, restore stock bash/sh (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: uninstall-shell-guard needs root: sudo make uninstall-shell-guard" >&2; exit 1; \
+	fi
+	test -x scripts/uninstall-shell-guard && bash scripts/uninstall-shell-guard \
+		|| { echo "NOTICE: scripts/uninstall-shell-guard not yet implemented; docs/specifications/SPEC-SHELL-GUARD.md section 12.2 documents the procedure." >&2; exit 1; }
+
+shell-guard-check: ## Read-only shell guard health check (modes, caps, divert, +i, hash)
+	test -x scripts/shell-guard-check && bash scripts/shell-guard-check \
+		|| { echo "NOTICE: scripts/shell-guard-check not yet implemented; docs/specifications/SPEC-SHELL-GUARD.md section 12.3 documents the checks." >&2; exit 1; }
 
 # =============================================================================
 # Build
@@ -395,12 +415,8 @@ sync-gtfobins-verify: ## Re-fetch sources and emit SHA-256 manifest of canonical
 	bash scripts/sync-gtfobins --verify
 
 .PHONY: drift-check
-drift-check: ## Compare live SUID/CAP surface against res/ baselines; exit 1 on CRITICAL
+drift-check: ## Compare live SUID/CAP surface against res/ baselines; detail dump only on CRITICAL; exit 1 on CRITICAL
 	bash scripts/suid-drift-check
-
-.PHONY: drift-check-quiet
-drift-check-quiet: ## Same as drift-check but stdout only on CRITICAL; /usr/lib/workspace-binary-guard/drift-report.yaml still written
-	bash scripts/suid-drift-check --quiet
 
 .PHONY: install-lock
 _INSTALL_LOCK_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-binary-guard)
@@ -520,8 +536,7 @@ provision-git-identities: ## Provision per-user gitconfig + SSH keys from config
 		|| { echo "ERROR: scripts/provision-user-git-identity missing" >&2; exit 1; }
 
 .PHONY: install-home-lock
-install-home-lock: ## Lock the absolute_file_paths entries in config/guard_locked_paths.yaml (ROOT)
-	if [ "$$(id -u)" != "0" ]; then \
+install-home-lock: ## Lock the absolute_file_paths entries in config/shared_locked_paths.yaml (ROOT)	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-home-lock needs root: sudo make install-home-lock" >&2; exit 1; \
 	fi
 	test -x scripts/install-home-lock && bash scripts/install-home-lock \
@@ -536,12 +551,8 @@ uninstall-home-lock: ## Rollback home lock: restore original owner/mode per /usr
 		|| { echo "NOTICE: scripts/uninstall-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: home-drift-check
-home-drift-check: ## Compare live home-lock surface against /usr/lib/workspace-guard/home-lock-state.yaml; exit 1 on CRITICAL
+home-drift-check: ## Compare live home-lock surface against /usr/lib/workspace-guard/home-lock-state.yaml; detail dump only on CRITICAL; exit 1 on CRITICAL
 	bash scripts/home-drift-check
-
-.PHONY: home-drift-check-quiet
-home-drift-check-quiet: ## Same as home-drift-check but stdout only on CRITICAL
-	bash scripts/home-drift-check --quiet
 
 .PHONY: install-auditd
 install-auditd: ## Install auditd rules + generated per-binary execve watches (ROOT)

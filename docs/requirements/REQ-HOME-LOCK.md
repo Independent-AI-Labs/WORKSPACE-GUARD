@@ -65,7 +65,7 @@ binary lock this complements is in
   - The `~` directory itself: same reason as `~/.ssh`.
 
 - **REQ-HL-004**: The protected set MUST be data-driven from
-  `config/guard_locked_paths.yaml` (the `absolute_file_paths:` block),
+  `config/shared_locked_paths.yaml` (the `absolute_file_paths:` block),
   not hardcoded in the scripts. New entries are added by editing the
   YAML and rerunning `make install-home-lock`: no script change
   required.
@@ -155,9 +155,10 @@ binary lock this complements is in
   means the baseline state file is missing entirely (run
   `make install-home-lock` first).
 
-- **REQ-HL-303**: `--quiet` shall suppress all non-CRITICAL output
-  (banner, summary line) but still print CRITICAL rows and still
-  write the report YAML.
+- **REQ-HL-303**: Detail rows shall be buffered and dumped to stdout
+  only when CRITICAL drift is present; the banner + summary line shall
+  always print, and the report YAML shall always be written. There is
+  no output-suppression flag (silent-swallow policy).
 
 - **REQ-HL-304**: The drift check shall write a structured report to
   `/usr/lib/workspace-guard/home-drift-report.yaml` with per-entry `path`, `class`,
@@ -199,8 +200,8 @@ binary lock this complements is in
 - **REQ-HL-500**: Install, uninstall, and drift-check shall each have
   a bats suite covering: `--help`, unknown arg, missing config/empty
   entries, `--dry-run`, the create-missing branch, the idempotent
-  branch (using a fake `stat` executable), the `--quiet` branch, and the report
-  YAML emissions.
+  branch (using a fake `stat` executable), the summary-only success
+  branch, and the report YAML emissions.
 
 - **REQ-HL-501**: Tests shall run as a non-root bats user. The
   root-only `chown` code path is exercised via a fake `chown` executable.

@@ -76,12 +76,12 @@ mod tests {
 
     #[test]
     fn audit_log_name_matches_guard_config() {
-        let raw = include_str!("../config/guard_paths.yaml");
-        let doc: Value = serde_yaml::from_str(raw).expect("guard_paths.yaml must parse");
+        let raw = include_str!("../config/shared_paths.yaml");
+        let doc: Value = serde_yaml::from_str(raw).expect("shared_paths.yaml must parse");
         let configured = doc
             .get("log_file")
             .and_then(Value::as_str)
-            .expect("guard_paths.yaml must define log_file");
+            .expect("shared_paths.yaml must define log_file");
         assert_eq!(configured, ops::LOG_FILE_NAME);
     }
 }

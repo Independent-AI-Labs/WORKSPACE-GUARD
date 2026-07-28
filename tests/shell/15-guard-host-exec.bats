@@ -9,7 +9,7 @@ teardown() { guard_teardown; }
 @test "guard-host-exec: host profile resolves vm-ws to host-exec" {
     local ci_root profiles
     ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
-    profiles="$GUARD_ROOT/config/guard-host-profiles.yaml"
+    profiles="$GUARD_ROOT/config/shared_host_profiles.yaml"
     run bash -c "
         _guard_dir='$GUARD_ROOT'
         source \"$ci_root/lib/guard-host-exec.sh\"

@@ -175,7 +175,6 @@ for each arg in argv[1..]:
 **Phase 3: Subcommand-specific flag collection:** After the subcommand is identified, continue scanning remaining args for subcommand-specific flags:
 
 - For `push`: check for `--force`, `-f`, `--force-with-lease` in remaining args
-- For `stash`: check for `drop` or `clear` as positional subcommands
 - For `branch`: check for `-D` in remaining args
 - For `commit`: check for `--amend` in remaining args
 - For `revert`: identify the target commit (first non-flag arg after `revert`, or HEAD)
@@ -204,7 +203,7 @@ The guard only needs to classify subcommands into two categories: **blocked unco
 | `reset` | `commit` (check for `--amend`) |
 | `checkout` | `branch` (check for `-D`) |
 | `clean` | `push` (check for `--force`/`-f`/`--force-with-lease`, background) |
-| `restore` | `stash` (check for `drop`/`clear`) |
+| `restore` | `revert` (check target is on origin) |
 | `rm` | `revert` (check target is on origin) |
 | `rebase` | `pull` (protected branch check) |
 | `gc` | `merge` (protected branch check) |
@@ -233,15 +232,14 @@ git -- --hard   # "--" makes "--hard" a pathspec, not a flag
 The guard applies checks in this order. The first block wins: later checks are not evaluated.
 
 ```
-1. Destructive subcommand? → BLOCK (reset, clean, restore, rm, rebase, gc, prune). Sudo-gated (non-root blocked, root allowed): submodule, checkout
+1. Destructive subcommand? → BLOCK (reset, clean, restore, rm, rebase, gc, prune, stash). Sudo-gated (non-root blocked, root allowed): submodule, checkout
 2. Global destructive flag? → BLOCK (--hard, --no-verify)
 3. Dangerous -c/-C key? → BLOCK (core.hooksPath, core.sshCommand, etc.)
 4. Subcommand-specific block?
-   4a. stash drop/clear (non-root)? → BLOCK
-   4b. branch -D? → BLOCK
-   4c. push --force/-f/--force-with-lease? → BLOCK
-   4d. push from background? → BLOCK
-   4e. commit --amend on pushed HEAD? → BLOCK
+   4a. branch -D? → BLOCK
+   4b. push --force/-f/--force-with-lease? → BLOCK
+   4c. push from background? → BLOCK
+   4d. commit --amend on pushed HEAD? → BLOCK
    4f. revert on unpushed commit? → BLOCK
 5. Protected branch rule?
    5a. pull on main/master without --ff-only/--rebase? → BLOCK
@@ -494,3 +492,93 @@ The value portion is replaced with `...` to avoid logging potentially sensitive 
 ### 7.4 Log Write Timing
 
 The log file is opened and written **only after** the block decision is made: not during argument processing. This minimises the number of file descriptors opened during the critical path.
+
+## 8. Post-Exec Policy Reconcile (REQ-GGUARD-174..178)
+
+### 8.1 Position in the Exec Flow
+
+```
+parse args -> block decision -> audit log (on block)
+  -> sanitise env -> loan caps (ambient/inheritable) -> exec git
+  -> wait -> reconcile policy manifest (this section) -> exit(git status)
+```
+
+Reconcile runs in the guard process AFTER `wait()` reaps git, while
+the guard still holds its own effective/permitted capability set. The
+ambient/inheritable loan applies only to the exec'd git; reconcile
+uses the guard's own `cap_chown`/`cap_fowner` from its permitted set.
+
+### 8.2 Trigger Set
+
+Reconcile runs only when ALL hold:
+
+1. git exited (any status; a failed merge still mutates the tree);
+2. the subcommand is in the mutating set: `pull, merge, checkout,
+   switch, restore, rebase, cherry-pick, revert, apply, am,
+   submodule` (update), `reset/clean` (root-only paths);
+3. the cwd is inside a guarded worktree (`.git` present).
+
+Read-only porcelains (`status, log, diff, fetch, show, ...`) skip
+reconcile: zero added latency on the hot path.
+
+### 8.3 Manifest
+
+Union of, in order:
+
+1. exemption policy files: covered via the compiled
+   `LOCKED_GLOB_PATTERNS` / `LOCKED_INDIVIDUAL_FILE_PATHS` from
+   `config/shared_locked_paths.yaml` (`*_exceptions.yaml`,
+   `exemption_files.yaml`, `.gitmodules`, ...). The guard parses no
+   YAML at runtime (REQ-GGUARD-172 dependency ceiling), so the CI
+   `exemption_files.yaml` manifest is honored through these compiled
+   filename patterns, which every CI exemption file matches;
+2. `<repo>/config/*.yaml` (policy configs; tracked or not, since untracked
+   policy files have no git audit trail and need reconcile most);
+3. `.git/hooks/*` and the two tier registries: ownership + immutable
+   check only (warn on drift, REQ-GGUARD-178; `+i` re-apply stays a
+   root-run repair action).
+
+### 8.4 Reconcile Algorithm (per manifest path)
+
+```
+lstat(path)
+  missing                       -> skip (not every repo has every file)
+  symlink (any kind)            -> WARN, skip (audit C3: never follow)
+  directory (config/, hooks/)   -> chown root:root, chmod 0755
+  regular file                  -> chown root:root, chmod 0644
+                                   (preserve exec bit for hooks:
+                                    0755 when any x bit was set)
+all via fchownat(AT_SYMLINK_NOFOLLOW) / fchmodat; no recursion beyond
+the manifest's explicit entries and the two named directories.
+```
+
+Failure of any single path: record, continue, then exit
+`EX_IOERR (74)` with the full drift list on stderr. The git result is
+NOT rolled back (the tree is valid; the invariant is not).
+
+### 8.5 What Reconcile Deliberately Does NOT Do
+
+- No `chattr` (needs `cap_linux_immutable`, which the guard does not
+  carry; tracked policy files no longer use `+i`, REQ-GGUARD-174).
+- No content validation (consumers validate; guard asserts
+  provenance only).
+- No locking around concurrent git processes (two reconciles
+  interleave safely: idempotent chown/chmod).
+
+### 8.6 One-Time Migration (root, operator)
+
+Per guarded repo: `chown root:root config/ config/*.yaml`,
+`chmod 0755 config/`, `chattr -i` tracked policy files (drop the
+flag), keep `+i` on `.git/hooks/*` + registries. Delivered as a
+`/tmp` operator script; never a committed target (AGENTS.md).
+
+### 8.7 Interactions
+
+- **stash**: blocked (REQ-GGUARD-050); reconcile does not special-case it.
+- **pre-push cap scrub** (`setpriv --inh-caps=-all`): unaffected; the
+  scrub targets the hook's children, reconcile runs in the guard
+  before the hook is ever spawned.
+- **root-only mode** (REQ-GGUARD-158): reconcile is inert. Root-only
+  builds resolve no git dir for the exec path and carry no caps; the
+  operator is root and keeps the invariant themselves. The module is
+  compiled only in capability mode.

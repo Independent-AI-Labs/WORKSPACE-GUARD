@@ -240,7 +240,7 @@ init-check:     install-system-deps --check (config/system-deps.yaml)
 test-podman:    init-check + scripts/test-in-podman.sh (all tiers)
 test-podman-quick: init-check + TEST_PODMAN_QUICK=1 + scripts/test-in-podman.sh
 test-podman-provision: init-check + scripts/podman/run-tier3-provision.sh (phases 0-4)
-check-push:     lint + check + test + test-podman-provision (Linux pre-push)
+check-push:     lint + check + test + test-shell + test-podman-provision (Linux pre-push)
 
 build-guard:      bash ../CI/scripts/bootstrap-workspace-guard build-only
 install-guard:    sudo bash ../CI/scripts/bootstrap-workspace-guard install-only

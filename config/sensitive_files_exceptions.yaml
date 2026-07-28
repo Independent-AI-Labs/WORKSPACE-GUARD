@@ -2,17 +2,17 @@ safe_exceptions:
   - .markdown_docs_exceptions.yaml
   - .gitleaks.toml
   - config.toml
-  - guard_config_keys.yaml
-  - guard_config_keys.schema.yaml
-  - guard_environment.yaml
-  - guard_environment.schema.yaml
-  - guard_subcommands.yaml
-  - guard_subcommands.schema.yaml
-  - guard_protected_branches.yaml
-  - guard_protected_branches.schema.yaml
-  - guard_resource_limits.yaml
-  - guard_resource_limits.schema.yaml
-  - guard_paths.yaml
-  - guard_paths.schema.yaml
-  - guard_locked_paths.yaml
-  - guard_locked_paths.schema.yaml
+  - git_guard_config_keys.yaml
+  - git_guard_environment.yaml
+  - git_guard_subcommands.yaml
+  - git_guard_protected_branches.yaml
+  - git_guard_resource_limits.yaml
+  - shared_paths.yaml
+  - shared_locked_paths.yaml
+  - git_guard_config_keys.schema.yaml
+  - git_guard_environment.schema.yaml
+  - git_guard_subcommands.schema.yaml
+  - git_guard_protected_branches.schema.yaml
+  - git_guard_resource_limits.schema.yaml
+  - shared_paths.schema.yaml
+  - shared_locked_paths.schema.yaml

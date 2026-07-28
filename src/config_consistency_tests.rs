@@ -57,17 +57,17 @@ const VALID_POLICIES: &[&str] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// config/guard_subcommands.yaml + guard_policy_matrix.yaml
+// config/git_guard_subcommands.yaml + git_guard_policy_matrix.yaml
 // ---------------------------------------------------------------------------
 
 #[test]
-fn guard_subcommands_parses() {
-    let _ = load_yaml("config/guard_subcommands.yaml");
+fn git_guard_subcommands_parses() {
+    let _ = load_yaml("config/git_guard_subcommands.yaml");
 }
 
 #[test]
-fn guard_subcommands_blocked_and_partial_disjoint() {
-    let doc = load_yaml("config/guard_subcommands.yaml");
+fn git_guard_subcommands_blocked_and_partial_disjoint() {
+    let doc = load_yaml("config/git_guard_subcommands.yaml");
     let blocked: HashSet<&str> = doc
         .get("blocked")
         .and_then(|v| v.as_sequence())
@@ -97,8 +97,8 @@ fn guard_subcommands_blocked_and_partial_disjoint() {
 }
 
 #[test]
-fn guard_subcommands_plumbing_in_blocked() {
-    let doc = load_yaml("config/guard_subcommands.yaml");
+fn git_guard_subcommands_plumbing_in_blocked() {
+    let doc = load_yaml("config/git_guard_subcommands.yaml");
     let blocked: HashSet<&str> = doc
         .get("blocked")
         .and_then(|v| v.as_sequence())
@@ -118,8 +118,8 @@ fn guard_subcommands_plumbing_in_blocked() {
 }
 
 #[test]
-fn guard_subcommands_switch_in_sudo_gated() {
-    let doc = load_yaml("config/guard_subcommands.yaml");
+fn git_guard_subcommands_switch_in_sudo_gated() {
+    let doc = load_yaml("config/git_guard_subcommands.yaml");
     let sudo: HashSet<&str> = doc
         .get("sudo_gated")
         .and_then(|v| v.as_sequence())
@@ -131,8 +131,8 @@ fn guard_subcommands_switch_in_sudo_gated() {
 }
 
 #[test]
-fn guard_policy_matrix_parses_with_cases() {
-    let doc = load_yaml("config/guard_policy_matrix.yaml");
+fn git_guard_policy_matrix_parses_with_cases() {
+    let doc = load_yaml("config/git_guard_policy_matrix.yaml");
     let cases = doc
         .get("cases")
         .and_then(|c| c.as_sequence())
@@ -145,9 +145,9 @@ fn guard_policy_matrix_parses_with_cases() {
 }
 
 #[test]
-fn guard_policy_matrix_covers_partial_subcommands() {
-    let subcommands = load_yaml("config/guard_subcommands.yaml");
-    let matrix = load_yaml("config/guard_policy_matrix.yaml");
+fn git_guard_policy_matrix_covers_partial_subcommands() {
+    let subcommands = load_yaml("config/git_guard_subcommands.yaml");
+    let matrix = load_yaml("config/git_guard_policy_matrix.yaml");
     let partial: HashSet<&str> = subcommands
         .get("partial")
         .and_then(|v| v.as_sequence())
@@ -175,8 +175,8 @@ fn guard_policy_matrix_covers_partial_subcommands() {
 }
 
 #[test]
-fn guard_policy_matrix_cases_have_unique_ids() {
-    let doc = load_yaml("config/guard_policy_matrix.yaml");
+fn git_guard_policy_matrix_cases_have_unique_ids() {
+    let doc = load_yaml("config/git_guard_policy_matrix.yaml");
     let cases = doc.get("cases").unwrap().as_sequence().unwrap();
     let mut seen = HashSet::new();
     for entry in cases {
@@ -438,17 +438,17 @@ fn fcap_baseline_paths_are_absolute_and_unique() {
 }
 
 // ---------------------------------------------------------------------------
-// config/guard_locked_paths.yaml absolute_file_paths (home-lock surface)
+// config/shared_locked_paths.yaml absolute_file_paths (home-lock surface)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn home_lock_paths_parses() {
-    let _ = load_yaml("config/guard_locked_paths.yaml");
+    let _ = load_yaml("config/shared_locked_paths.yaml");
 }
 
 #[test]
 fn home_lock_paths_are_absolute_or_tilde_prefixed() {
-    let doc = load_yaml("config/guard_locked_paths.yaml");
+    let doc = load_yaml("config/shared_locked_paths.yaml");
     let map = doc
         .get("absolute_file_paths")
         .and_then(|v| v.as_mapping())
@@ -465,7 +465,7 @@ fn home_lock_paths_are_absolute_or_tilde_prefixed() {
 
 #[test]
 fn home_lock_modes_are_in_valid_range() {
-    let doc = load_yaml("config/guard_locked_paths.yaml");
+    let doc = load_yaml("config/shared_locked_paths.yaml");
     let map = doc
         .get("absolute_file_paths")
         .unwrap()

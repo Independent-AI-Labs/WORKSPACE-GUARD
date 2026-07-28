@@ -301,8 +301,8 @@ requires no root and installs nothing.
 One line per mutation appended to the guard log file. The file name
 is a compiled-in constant (`LOG_FILE_NAME` in `yaml_edit_ops.rs`)
 that a unit test keeps identical to `log_file` in
-`config/guard_paths.yaml`; the path joins onto the operator home
-resolved via `SUDO_UID` -> `getpwuid` (fallback: euid's passwd
+`config/shared_paths.yaml`; the path joins onto the operator home
+resolved via `SUDO_UID` -> `getpwuid` (else: euid's passwd
 entry), never `$HOME`:
 
 ```

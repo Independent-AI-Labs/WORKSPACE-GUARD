@@ -30,13 +30,13 @@ copy_real_scripts() {
     chmod +x "$dir/scripts/"*
 }
 
-# Copy config/binary-policy-rules.yaml into the fake repo so
+# Copy config/binary_guard_policy_rules.yaml into the fake repo so
 # emit_binary_lock (sourced from scripts/lib/binary-lock-yaml.sh) can
 # join rules against the universe. Also creates config/ if absent.
 copy_real_config() {
     local dir="$1"
     mkdir -p "$dir/config"
-    cp "$GUARD_ROOT/config/binary-policy-rules.yaml" "$dir/config/"
+    cp "$GUARD_ROOT/config/binary_guard_policy_rules.yaml" "$dir/config/"
 }
 
 # Stage a fake guard binary at $dir/target/release/workspace-binary-guard
@@ -138,13 +138,13 @@ fake_konstruktoid_list() {
     printf '%s\n' "$@" > "$file"
 }
 
-# Copy config/guard_locked_paths.yaml into the fake repo so install-
+# Copy config/shared_locked_paths.yaml into the fake repo so install-
 # home-lock can read the absolute_file_paths block. Also copies the
 # real config dir if absent. Tests can later overwrite the YAML.
 copy_real_locked_paths() {
     local dir="$1"
     mkdir -p "$dir/config"
-    cp "$GUARD_ROOT/config/guard_locked_paths.yaml" "$dir/config/" 2>"$DEVNULL" || true
+    cp "$GUARD_ROOT/config/shared_locked_paths.yaml" "$dir/config/" 2>"$DEVNULL" || true
 }
 
 # Write a minimal fake /etc/passwd file at $1 with one user row. The

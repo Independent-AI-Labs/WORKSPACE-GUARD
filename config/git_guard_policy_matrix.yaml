@@ -277,10 +277,6 @@ cases:
     expect: blocked
     reason_contains: stash
 
-  - id: stash-list-allowed
-    argv: [git, stash, list]
-    expect: allowed
-
   - id: branch-force-delete
     argv: [git, branch, -D, feature]
     expect: blocked
@@ -342,11 +338,6 @@ cases:
     argv: [git, stash, clear]
     expect: blocked
     reason_contains: stash
-
-  - id: stash-clear-root-allowed
-    argv: [git, stash, clear]
-    expect: allowed
-    sudo_only: true
 
   - id: branch-force-rename
     argv: [git, branch, -M, old, new]
@@ -487,3 +478,18 @@ cases:
   - id: commit-normal-allowed
     argv: [git, commit, -m, msg]
     expect: allowed
+  - id: stash-list-blocked
+    argv:
+      - git
+      - stash
+      - list
+    expect: blocked
+    reason_contains: stash
+  - id: stash-clear-root-blocked
+    argv:
+      - git
+      - stash
+      - clear
+    expect: blocked
+    reason_contains: stash
+    sudo_only: true

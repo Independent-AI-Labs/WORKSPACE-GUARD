@@ -28,8 +28,11 @@ _chown_target_for_testagent() {
         return 0
     fi
     # Darwin Tier 0 leaves SUID fixtures here; virtiofs bind mounts reject chown on them.
-    rm -rf target/.bats-sync-live
+    rm -rf .bats-tmp/sync-live target/.bats-sync-live
     chown -R "$_TESTAGENT_USER:$_TESTAGENT_USER" target
+    if [[ -d .bats-tmp ]]; then
+        chown -R "$_TESTAGENT_USER:$_TESTAGENT_USER" .bats-tmp
+    fi
     _TARGET_CHOWNED=1
 }
 

@@ -14,10 +14,10 @@ REPO_CFG="$REPO_ROOT/config/host-provision.yaml"
 usage() {
     cat <<EOF
 Usage: $0 <up|refresh|check|down|reset>
-  up      Idempotent bring-up (provision + guard install as needed)
-  refresh Rebuild and force reinstall git guard after code changes
-  check   Read-only health check
-  down    Remove git guard; preserve provision state
+  up      Idempotent bring-up (provision + git guard + shell guard as needed)
+  refresh Rebuild and force reinstall git guard + shell guard after code changes
+  check   Read-only health check (git guard + shell guard)
+  down    Remove shell guard + git guard; preserve provision state
   reset   Purge all guard state then bring-up (requires GUARD_PURGE_CONFIRM=1)
 EOF
 }
@@ -72,6 +72,39 @@ _guard_needs_install() {
     return 1
 }
 
+_shell_guard_available() {
+    [[ -x "$REPO_ROOT/scripts/install-shell-guard" && -x "$REPO_ROOT/scripts/shell-guard-check" ]]
+}
+
+_shell_guard_check_status() {
+    bash "$REPO_ROOT/scripts/shell-guard-check" 2>&1
+}
+
+_shell_guard_needs_install() {
+    local out rc=0
+    out="$(_shell_guard_check_status)" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        return 0
+    fi
+    if grep -q 'NOT INSTALLED\|DRIFTED' <<<"$out"; then
+        return 0
+    fi
+    return 1
+}
+
+_shell_guard_up() {
+    if ! _shell_guard_available; then
+        echo "==> guard-up: shell guard not yet implemented (skip; SPEC-SHELL-GUARD)"
+        return 0
+    fi
+    if _shell_guard_needs_install; then
+        echo "==> guard-up: installing shell guard"
+        make -C "$REPO_ROOT" install-shell-guard
+        return 0
+    fi
+    echo "==> guard-up: shell guard already healthy"
+}
+
 guard_up() {
     require_root
     if _user_mgmt_enabled && [[ ! -f "$MARKER" ]]; then
@@ -90,20 +123,34 @@ guard_up() {
         return 0
     fi
     echo "==> guard-up: git guard already healthy"
+    _shell_guard_up
 }
 
 guard_refresh() {
     require_root
     echo "==> guard-refresh: rebuild + force reinstall"
     make -C "$REPO_ROOT" reconcile-guard-host-exec
+    if _shell_guard_available; then
+        echo "==> guard-refresh: reconcile shell guard"
+        make -C "$REPO_ROOT" install-shell-guard
+    fi
 }
 
 guard_check() {
-    _guard_check_status
+    local rc=0
+    _guard_check_status || rc=$?
+    if _shell_guard_available; then
+        _shell_guard_check_status || rc=$?
+    fi
+    return "$rc"
 }
 
 guard_down() {
     require_root
+    if [[ -x "$REPO_ROOT/scripts/uninstall-shell-guard" ]]; then
+        echo "==> guard-down: removing shell guard"
+        make -C "$REPO_ROOT" uninstall-shell-guard
+    fi
     echo "==> guard-down: removing git guard (provision state preserved)"
     make -C "$REPO_ROOT" uninstall-guard
 }

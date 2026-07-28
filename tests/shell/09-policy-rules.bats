@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 09-policy-rules.bats: structural validation of
-# config/binary-policy-rules.yaml. Verifies the rule ordering, policy
+# config/binary_guard_policy_rules.yaml. Verifies the rule ordering, policy
 # validity, tag-AND-name matching contract, and that the catch-all at
 # the tail covers all remaining GTFOBins entries. These are pure
 # config checks (no script execution).
@@ -10,7 +10,7 @@ load lib/harness
 setup()    { guard_setup; }
 teardown() { guard_teardown; }
 
-RULES="$GUARD_ROOT/config/binary-policy-rules.yaml"
+RULES="$GUARD_ROOT/config/binary_guard_policy_rules.yaml"
 
 @test "policy-rules: file exists" {
     [ -f "$RULES" ]

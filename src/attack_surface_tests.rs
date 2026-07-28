@@ -1,4 +1,4 @@
-//! Table-driven attack-surface tests from config/guard_attack_surface_matrix.yaml.
+//! Table-driven attack-surface tests from config/git_guard_attack_surface_matrix.yaml.
 //! Covers destructive paths catalogued from git.git source (checkout.c, restore.c,
 //! plumbing builtins, command-list.txt).
 
@@ -31,7 +31,7 @@ struct AttackSurfaceConfig {
 
 fn load_matrix() -> AttackSurfaceConfig {
     let path = format!(
-        "{}/config/guard_attack_surface_matrix.yaml",
+        "{}/config/git_guard_attack_surface_matrix.yaml",
         env!("CARGO_MANIFEST_DIR")
     );
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));

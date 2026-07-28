@@ -229,7 +229,7 @@ does NOT apply the lock (`src/gitdir.rs` is gated by
 
 ### 11.7.1 Config-Driven Locked Paths
 
-All locked paths are defined in `config/guard_locked_paths.yaml` -- NOT
+All locked paths are defined in `config/shared_locked_paths.yaml` -- NOT
 hardcoded in Rust. The YAML declares four categories:
 
 | Category | Description | Examples |
@@ -244,7 +244,7 @@ as it is already locked) with no depth limit -- deeply nested exception files in
 subprojects or vendor directories are caught. Supported glob forms: `*suffix`,
 `prefix*`, `*middle*`, and exact match.
 
-To add or remove a locked path, edit `config/guard_locked_paths.yaml` and
+To add or remove a locked path, edit `config/shared_locked_paths.yaml` and
 rebuild -- no Rust code changes needed.
 
 Best-effort: if a file cannot be read or stat'd, the error is logged and skipped

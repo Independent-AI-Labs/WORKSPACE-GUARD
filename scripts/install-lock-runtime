@@ -115,30 +115,30 @@ done < "$lock_surface_tmp"
 # entries fail) and feed the parse loops via herestring, which restores
 # the trailing newline command substitution drops.
 if [[ ${#_surface_paths[@]} -gt 0 ]]; then
-    _batch_out="$(stat -c '%a %n' -- "${_surface_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    _batch_out="$(stat -c '%a %n' -- "${_surface_paths[@]}" 2>"$DEVNULL")" || _rc=$?
     while IFS= read -r _line; do
         [[ -n "$_line" ]] || continue
         SURFACE_MODE["${_line#* }"]="${_line%% *}"
     done <<< "$_batch_out"
-    _batch_out="$(grep -la "workspace-guard" -- "${_surface_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    _batch_out="$(grep -la "workspace-guard" -- "${_surface_paths[@]}" 2>"$DEVNULL")" || _rc=$?
     while IFS= read -r _p; do
         [[ -n "$_p" ]] || continue
         SURFACE_IS_GUARD["$_p"]=1
     done <<< "$_batch_out"
 fi
 if [[ ${#_real_paths[@]} -gt 0 ]]; then
-    _batch_out="$(stat -c '%a %n' -- "${_real_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    _batch_out="$(stat -c '%a %n' -- "${_real_paths[@]}" 2>"$DEVNULL")" || _rc=$?
     while IFS= read -r _line; do
         [[ -n "$_line" ]] || continue
         REAL_MODE["${_line#* }"]="${_line%% *}"
     done <<< "$_batch_out"
-    _batch_out="$(sha256sum -- "${_real_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    _batch_out="$(sha256sum -- "${_real_paths[@]}" 2>"$DEVNULL")" || _rc=$?
     while IFS= read -r _line; do
         [[ -n "$_line" ]] || continue
         _h="${_line%% *}"; _p="${_line#* }"; _p="${_p# }"
         REAL_SHA["$_p"]="$_h"
     done <<< "$_batch_out"
-    _batch_out="$(lsattr -d -- "${_real_paths[@]}" 2>"$DEVNULL")"; _rc=$?
+    _batch_out="$(lsattr -d -- "${_real_paths[@]}" 2>"$DEVNULL")" || _rc=$?
     while IFS= read -r _line; do
         [[ -n "$_line" ]] || continue
         _a="${_line%% *}"; _p="${_line#* }"

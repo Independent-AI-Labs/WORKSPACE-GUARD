@@ -9,7 +9,7 @@ load lib/harness
 
 setup()    { guard_setup; load_fake_repo; }
 teardown() {
-    rm -rf "$GUARD_ROOT/target/.bats-sync-live"
+    rm -rf "$GUARD_ROOT/.bats-tmp/sync-live"
     unset GUARD_DECODE_CAPS_INCLUDE_FIXTURE_PATHS
     guard_teardown
 }
@@ -42,10 +42,11 @@ _setup_sync_repo() {
         "passwd" \
         "MOUNT"
 
-    # Readable fake SUID/CAP binaries outside /tmp (decode-caps excludes /tmp).
+    # Readable fake SUID/CAP binaries outside /tmp (decode-caps excludes /tmp)
+    # and outside target/ (sudo make build chowns target/ to root).
     # Real host SUID paths are unreadable on Darwin; fixtures must be
     # world-readable so stat/sha256sum exercise real file I/O.
-    SYNC_LIVE_ROOT="$GUARD_ROOT/target/.bats-sync-live"
+    SYNC_LIVE_ROOT="$GUARD_ROOT/.bats-tmp/sync-live"
     rm -rf "$SYNC_LIVE_ROOT"
     SYNC_SUDO="$SYNC_LIVE_ROOT/usr/bin/sudo"
     SYNC_PASSWD="$SYNC_LIVE_ROOT/usr/bin/passwd"

@@ -158,7 +158,7 @@ only `safe.directory` (existing privileged branch).
 ### 5.2 SSH wrapper injection (non-privileged)
 
 Guard injects into `git.original` child env (user cannot override ,  vars not in
-`config/guard_environment.yaml` `allowed` list):
+`config/git_guard_environment.yaml` `allowed` list):
 
 ```
 GIT_SSH_COMMAND=/usr/lib/workspace-guard/git-ssh-wrapper
@@ -180,7 +180,7 @@ GIT_SSH=/usr/lib/workspace-guard/git-ssh-wrapper
   lands on agent-readable disk
 - Installed with `cap_dac_override=ep` to read root `0600` keys
 
-`core.sshCommand` remains blocked for non-root ([config/guard_config_keys.yaml](../../config/guard_config_keys.yaml)).
+`core.sshCommand` remains blocked for non-root ([config/git_guard_config_keys.yaml](../../config/git_guard_config_keys.yaml)).
 
 ### 5.3 What agents cannot do
 

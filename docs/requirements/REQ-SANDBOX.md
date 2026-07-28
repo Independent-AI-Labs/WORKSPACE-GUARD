@@ -104,7 +104,7 @@ The threat model and CVE catalog that these requirements defend against are in
 ### 1.5 Per-Binary Policy
 
 - **REQ-LCK-040**: Every exploitable binary (full GTFOBins coverage) shall
-  have a rule in `config/binary-policy-rules.yaml` (host-independent:
+  have a rule in `config/binary_guard_policy_rules.yaml` (host-independent:
   name + tags keyed, first-match-wins) and a generated entry in
   `res/binary-lock.yaml` (per-host snapshot with `path` + `contained` flag)
   specifying: binary name, tags, guard behavior (deny-all for non-root,

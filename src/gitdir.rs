@@ -1,5 +1,5 @@
 //! Capability-mode ownership lock for all paths declared in
-//! `config/guard_locked_paths.yaml`.
+//! `config/shared_locked_paths.yaml`.
 //!
 //! Before delegating to the real git binary, the guard claims ownership
 //! of every path declared in the config: the `.git/` tree MINUS its
@@ -68,7 +68,7 @@
 //! ownership lock would just impede them and they can chown it back
 //! trivially (see docs/ROOT-ONLY-MODE.md).
 //!
-//! All locked paths are defined in `config/guard_locked_paths.yaml` --
+//! All locked paths are defined in `config/shared_locked_paths.yaml` --
 //! NOT hardcoded in Rust.  Edit the YAML and rebuild; no code changes
 //! needed to add or remove a locked path.
 
@@ -101,7 +101,7 @@ const DIR_MODE: u32 = 0o755;
 /// under `.git/` and none of them are policy input.
 const GITDIR_PRUNE_DIR_NAMES: [&str; 2] = ["objects", "lfs"];
 
-/// Lock all paths declared in `config/guard_locked_paths.yaml` for the
+/// Lock all paths declared in `config/shared_locked_paths.yaml` for the
 /// repo whose git dir is `git_dir` (already resolved by the caller, so
 /// both the pre-exec and post-exec passes share one `rev-parse`
 /// resolution).
@@ -169,7 +169,7 @@ fn lock_in_scope(toplevel: &Path) -> bool {
 
 /// Directory names the unified worktree glob walk never descends into.
 /// `.git` is always pruned (locked separately via lock_tree); the rest
-/// come from `config/guard_locked_paths.yaml` prune_dir_names.
+/// come from `config/shared_locked_paths.yaml` prune_dir_names.
 fn is_pruned_dir(name: &str) -> bool {
     name == ".git" || crate::LOCK_PRUNE_DIR_NAMES.contains(&name)
 }

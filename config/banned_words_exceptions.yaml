@@ -83,18 +83,21 @@ exceptions:
   - pattern: '/home/'
     paths: ['docs/specifications/SPEC-HOME-LOCK.md', 'docs/requirements/REQ-HOME-LOCK.md']
   # 8. The worktree-verb gate vocabulary. The `unlock` tokens in
-  #    src/block.rs and guard_policy_matrix.yaml are the literal git
+  #    src/block.rs and git_guard_policy_matrix.yaml are the literal git
   #    worktree subcommand names the allowlist must match on (`worktree
   #    unlock` is a legitimate maintenance verb we explicitly permit).
   #    Renaming is impossible: the strings ARE the CLI contract.
   - pattern: '\bunlocks?\b'
-    paths: ['src/block.rs', 'config/guard_policy_matrix.yaml']
+    paths: ['src/block.rs', 'config/git_guard_policy_matrix.yaml']
 
   # 9. Same worktree-verb gate vocabulary as entry 8, keyed to the
   #    exact `\bunlock\b` pattern string the banned-words gate reports.
   - pattern: '\bunlock\b'
-    paths: ['src/block.rs', 'config/guard_policy_matrix.yaml']
+    paths: ['src/block.rs', 'config/git_guard_policy_matrix.yaml']
   - pattern: \bsilent
     paths:
       - src/yaml_edit_schema.rs
       - src/yaml_edit_schema_tests.rs
+  - pattern: unsafe\s*\{
+    paths:
+      - src/reconcile.rs

@@ -9,8 +9,10 @@
 #
 # Usage:
 #   scripts/home-drift-check             # check + write home-drift-report.yaml
-#   scripts/home-drift-check --quiet     # stdout only on CRITICAL
 #   scripts/home-drift-check --help
+#
+# Output policy: detail lines are buffered and dumped to stdout only when
+# CRITICAL drift is found (exit 1); the one-line summary always prints.
 #
 # Exit codes:
 #   0  no CRITICAL drift
@@ -37,15 +39,14 @@ DRIFT_REPORT="$(home_drift_report_file)"
 
 DEVNULL=/dev/null
 
-QUIET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --quiet|-q) QUIET=1; shift ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--quiet]
+Usage: $0
 Compare live home-lock surface against home-lock-state.yaml.
 Report only; no auto-repair (preserves audit trail).
+Detail lines print only on CRITICAL drift; summary always prints.
 Exit: 0 no critical drift, 1 critical drift, 2 baseline missing.
 EOF
             exit 0 ;;
@@ -86,7 +87,8 @@ fi
 CRITICAL=0
 WARNINGS=0
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-log() { printf '%s\n' "$1"; }
+DETAIL=()
+log() { DETAIL+=("$1"); }
 gather() { printf '  - {path: "%s", class: "%s", detail: "%s", timestamp: "%s"}\n' "$1" "$2" "$3" "$NOW" >> "$DRIFT_REPORT"; }
 
 : > "$DRIFT_REPORT"
@@ -101,7 +103,7 @@ while IFS=$'\t' read -r path emode; do
     if [[ ! -e "$path" ]]; then
         cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
         msg="CRITICAL: $path vanished (suspected tamper)"
-        [[ "$QUIET" -ne 1 ]] && log "$msg"; gather "$path" "missing-file" "$cls" "no-file"
+        log "$msg"; gather "$path" "missing-file" "$cls" "no-file"
         continue
     fi
     cur_uid="$(stat -c '%u' "$path" 2>"$DEVNULL")" || cur_uid="?"
@@ -150,12 +152,12 @@ fi
     echo "  checked_at: $NOW"
 } >> "$DRIFT_REPORT"
 
-if [[ "$QUIET" -ne 1 ]]; then
-    echo "------------------------------------------------------------"
-    echo "Home drift check: $CRITICAL critical, $WARNINGS warnings"
-    echo "Report:           $DRIFT_REPORT"
+if [[ "$CRITICAL" -gt 0 ]]; then
+    printf '%s\n' ${DETAIL[@]+"${DETAIL[@]}"}
 fi
-
+echo "------------------------------------------------------------"
+echo "Home drift check: $CRITICAL critical, $WARNINGS warnings"
+echo "Report:           $DRIFT_REPORT"
 if [[ "$CRITICAL" -gt 0 ]]; then
     exit 1
 fi

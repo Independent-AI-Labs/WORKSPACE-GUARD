@@ -1,7 +1,7 @@
-# Schema for guard_locked_paths.yaml: field-level documentation.
+# Schema for shared_locked_paths.yaml: field-level documentation.
 #
 # Convention: one config/<name>.schema.yaml per config/<name>.yaml.
-config: guard_locked_paths
+config: shared_locked_paths
 description: "Locked path policy: which files and directory trees the guard locks to root:root in capability mode."
 fields:
   - path: version

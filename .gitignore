@@ -1,5 +1,6 @@
 .env
 /target
+/.bats-tmp
 
 # Fleet-specific identity (real emails/names). Copy from *.example on each host.
 config/home-lock-users.yaml

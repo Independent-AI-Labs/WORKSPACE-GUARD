@@ -216,7 +216,7 @@ splitting). The replacement:
   guard log file, recording: UTC timestamp, invoking user, intent,
   target file, key, and the field set. The log file name is a
   compiled-in constant that a unit test keeps identical to `log_file`
-  in `config/guard_paths.yaml`. The log path shall be joined onto the
+  in `config/shared_paths.yaml`. The log path shall be joined onto the
   invoking operator's home resolved via `SUDO_UID`/`getpwuid`, never
   via `$HOME` (which is root's home under sudo).
 

@@ -1,7 +1,7 @@
-# Schema for guard_paths.yaml: field-level documentation.
+# Schema for shared_paths.yaml: field-level documentation.
 #
 # Convention: one config/<name>.schema.yaml per config/<name>.yaml.
-config: guard_paths
+config: shared_paths
 description: "Filesystem paths and path patterns used by the guard for logging, child PATH, scripts, and workspace detection."
 fields:
   - path: version

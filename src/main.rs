@@ -16,6 +16,8 @@ mod exec;
 mod fetch;
 #[cfg(feature = "capability-mode")]
 mod gitdir;
+#[cfg(feature = "capability-mode")]
+mod reconcile;
 mod remote;
 mod vendored;
 mod wsroot;
@@ -329,7 +331,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         trace_end(t, "check_blocked");
 
         // Capability-mode ownership lock: claim all paths declared in
-        // config/guard_locked_paths.yaml (e.g. .git/ minus object
+        // config/shared_locked_paths.yaml (e.g. .git/ minus object
         // stores, .gitmodules, *_exceptions.yaml) as root:root before
         // any further git.original subprocess can fire a payload
         // planted inside them. Best-effort; never blocks a pass.

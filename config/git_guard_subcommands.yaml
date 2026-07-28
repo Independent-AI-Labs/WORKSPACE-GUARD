@@ -37,6 +37,7 @@ blocked:
   - update-index
   - merge-file
   - merge-index
+  - stash
 
 sudo_gated:
   - submodule
@@ -47,7 +48,6 @@ sudo_gated:
 partial:
   - rm
   - worktree
-  - stash
   - branch
   - push
   - commit

@@ -30,7 +30,7 @@ not a mutex. It is a recursive ownership and mode sweep:
    and anything not already `root:root` at the right mode gets
    `chown(0,0)` + `chmod`.
 3. Walks the full worktree once per filename glob pattern
-   (src/gitdir.rs:186-222). `config/guard_locked_paths.yaml:66-73`
+   (src/gitdir.rs:186-222). `config/shared_locked_paths.yaml:66-73`
    declares 7 glob patterns (`*_exceptions.yaml`, `*_excludes.yaml`,
    `coverage_thresholds.yaml`, `file_length_limits.yaml`,
    `dead_code.yaml`, `.markdown_docs_exceptions.yaml`,
@@ -138,7 +138,7 @@ F1. Double ownership sweep per invocation. src/main.rs:304-305,
 
 F2. Up to 8 worktree walks per sweep pass (7 file globs + 1 tree
     glob), each O(worktree). src/gitdir.rs:127-135, 186-255;
-    config/guard_locked_paths.yaml:43-73. `unsealed.contains` is a
+    config/shared_locked_paths.yaml:43-73. `unsealed.contains` is a
     linear scan per candidate (src/gitdir.rs:203). Fix: one walk, one
     matcher set, HashSet for unsealed paths.
 
@@ -216,7 +216,7 @@ F16. `build_sanitized_env` scans the strip list linearly per
 
 F17. `real_binary_path` probes multiple fixed directories with
     `exists()` per invocation. src/binary_guard.rs:206-225. Fix:
-    build.rs bakes the resolved path table; runtime fallback only.
+    build.rs bakes the resolved path table; runtime probe only.
 
 F18. Config-key glob matching allocates a fresh DP matrix per pattern
     per `-c` flag. src/config_keys.rs:3-58. Fix: pre-compile patterns

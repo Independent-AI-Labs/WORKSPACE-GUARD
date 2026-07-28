@@ -1,4 +1,4 @@
-# Schema for guard_subcommands.yaml: field-level documentation.
+# Schema for git_guard_subcommands.yaml: field-level documentation.
 #
 # Convention: one config/<name>.schema.yaml per config/<name>.yaml.
 # Consumed by the wiki's ConfigFieldTable component to render
@@ -13,7 +13,7 @@
 #     required:      true | false (defaults to false)
 #     default:       default value when omitted (omit if none)
 #     description:   human-readable description of the field
-config: guard_subcommands
+config: git_guard_subcommands
 description: "Git subcommand policy: which subcommands are blocked, partially blocked, or require contract checks."
 fields:
   - path: version

@@ -82,7 +82,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 
 ### 6. Subcommand-Specific Blocks
 
-- **REQ-GGUARD-050**: `stash` subcommand: block when any argument is `drop` or `clear` (non-root only; sudo-gated for root).
+- **REQ-GGUARD-050**: `stash` subcommand: unconditionally blocked for ALL users (including root), for every stash operation (push, pop, apply, list, show, drop, clear). Supersedes the prior drop/clear-only policy. Rationale: stash is unlink+recreate on the worktree, indistinguishable from exemption-file tampering at the syscall level, and it deadlocks on root-owned `chattr +i` policy files mid-merge leaving the tree half-applied. Sanctioned alternatives (AGENTS.md): `git worktree add /tmp/...` for baselines, `git diff > /tmp/patch` for snapshots.
 - **REQ-GGUARD-051**: `branch` subcommand: block when any argument is `-D` (force delete). The `-d` (safe delete) shall be allowed.
 - **REQ-GGUARD-052**: `push` subcommand: block when `--force`, `-f`, or `--force-with-lease` is present.
 - **REQ-GGUARD-053**: `push` subcommand: block when the process is **not in the foreground process group** of its controlling terminal. Detection: read `/proc/self/stat`, compare field 5 (pgrp) with field 8 (tpgid). If `tpgid > 0` and `pgrp != tpggid`, block. If `/proc/self/stat` is unreadable, emit a warning to stderr but allow the push (degraded operation).
@@ -162,8 +162,8 @@ This document specifies the requirements for the Rust binary. The installation/d
   - Relocation read-only (`relro = "full"`)
   - Stack protector enabled
   - Code generation with `overflow-checks = true` in debug, configurable in release
-- **REQ-GGUARD-121**: The binary shall minimise `unsafe` blocks to irreducible FFI. All `unsafe` blocks shall be documented with a `// SAFETY:` comment. The allowed irreducible sites are: `libc::getauxval(AT_SECURE)` (SUID detection, no `nix` wrapper), `libc::fork` (async-signal-safety hazard), `libc::_exit` (only async-signal-safe exit), and `libc::lchown` (nix::chown follows symlinks). Every other syscall MUST use a safe `nix` wrapper or `std` equivalent. The test module may retain raw `libc::fork`/`libc::_exit` so tests exercise the exact FFI the production path uses.
-- **REQ-GGUARD-122**: The binary shall NOT depend on any crate that performs network I/O, file system watching, or dynamic loading. Allowed crates: `std`, `libc` (for the four irreducible FFI sites in REQ-GGUARD-121), `nix` (safe wrappers for all other syscalls), and `caps` (optional, capability mode only). No `clap`; argument parsing is manual via `std::env::args_os()`.
+- **REQ-GGUARD-121**: The binary shall minimise `unsafe` blocks to irreducible FFI. All `unsafe` blocks shall be documented with a `// SAFETY:` comment. The allowed irreducible sites are: `libc::getauxval(AT_SECURE)` (SUID detection, no `nix` wrapper), `libc::fork` (async-signal-safety hazard), `libc::_exit` (only async-signal-safe exit), `libc::lchown` (nix::chown follows symlinks), and `libc::ioctl(FS_IOC_GETFLAGS)` (inode immutable-flag read for REQ-GGUARD-178, no `nix` wrapper). Every other syscall MUST use a safe `nix` wrapper or `std` equivalent. The test module may retain raw `libc::fork`/`libc::_exit` so tests exercise the exact FFI the production path uses.
+- **REQ-GGUARD-122**: The binary shall NOT depend on any crate that performs network I/O, file system watching, or dynamic loading. Allowed crates: `std`, `libc` (for the five irreducible FFI sites in REQ-GGUARD-121), `nix` (safe wrappers for all other syscalls), and `caps` (optional, capability mode only). No `clap`; argument parsing is manual via `std::env::args_os()`.
 - **REQ-GGUARD-123**: String allocations from user input (argv) shall be validated for UTF-8. Non-UTF-8 arguments shall be handled via `OsStr`/`OsString` and passed through to real git unmodified for non-blocking decisions.
 - **REQ-GGUARD-124**: The binary shall set its own `RLIMIT_NOFILE` to a reasonable limit (e.g., 256) and `RLIMIT_CORE` to 0 (no core dumps) before exec-ing real git, to limit blast radius.
 - **REQ-GGUARD-125**: The binary shall NOT open any file descriptors other than `/dev/tty`, `/proc/self/stat`, and the real git binary before exec-ing. No temporary files, no log file open during argument processing.
@@ -237,10 +237,58 @@ This document specifies the requirements for the Rust binary. The installation/d
       └── integration_test.rs
   ```
 - **REQ-GGUARD-171**: The `Cargo.toml` shall specify: `edition = "2021"`, `panic = "abort"`, `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`.
-- **REQ-GGUARD-172**: The allowed dependencies are `libc = "0.2"` (required, for the four irreducible FFI sites in REQ-GGUARD-121), `nix = "0.29"` (required, safe wrappers for all other syscalls; `default-features = false`, features `["user", "process", "signal", "resource", "fs"]`), and `caps = "0.5"` (optional, only for capability mode). No other crates shall be used.
+- **REQ-GGUARD-172**: The allowed dependencies are `libc = "0.2"` (required, for the five irreducible FFI sites in REQ-GGUARD-121), `nix = "0.29"` (required, safe wrappers for all other syscalls; `default-features = false`, features `["user", "process", "signal", "resource", "fs"]`), and `caps = "0.5"` (optional, only for capability mode). No other crates shall be used.
 - **REQ-GGUARD-173**: The `Cargo.toml` shall define the following feature flags:
   - `capability-mode` (default): enables `caps` dependency, cap checks
   - `root-only`: skips cap checks, verifies `geteuid() == 0`
+
+### 17. Guard-Mediated Policy-File Locking (no operator `chattr` cycle)
+
+Motivation (incident 2026-07-28): the `chattr +i` invariant on policy
+files is a point-in-time state applied by root-run locking processes
+(`install-hooks-recursive`, `workspace-yaml-edit`, one-off scripts).
+Any window without the flag (fresh clone, intentional unseal, failed
+`git stash pop`) is silently exploitable: root ownership alone does
+not protect a file whose parent directory is agent-owned, because
+unlink+recreate needs only directory write permission. Git operations
+and tampering are the same syscalls; only the actor differs. The
+guard is the one trusted channel through which git runs privileged
+(cap loan, REQ-GGUARD-15x), so the lock lifecycle belongs inside the
+guard, not in operator discipline.
+
+- **REQ-GGUARD-174**: Policy files and their directories shall be
+  root-owned: `config/` in guarded repos `root:root 0755`, tracked
+  policy files `root:root 0644`. For git-tracked policy files this
+  ownership+dir-control REPLACES `chattr +i`; immutability is no
+  longer part of the tracked-file invariant.
+- **REQ-GGUARD-175**: Git invoked through the guard wrapper shall be
+  able to write root-owned worktree paths (pull, merge, checkout,
+  switch, restore, rebase, cherry-pick, revert, apply, am, submodule
+  update) via the existing capability loan, with NO unseal/reseal
+  step and no operator action.
+- **REQ-GGUARD-176**: After any mutating porcelain exits, the guard
+  shall reconcile the policy manifest (union of WORKSPACE-CI
+  `config/exemption_files.yaml` and the repo's `config/*.yaml` policy
+  set): re-assert `root:root` and mode `0644` (regular files) via its
+  own `cap_chown`/`cap_fowner` (never loaned onward), never following
+  symlinks (`AT_SYMLINK_NOFOLLOW`; symlink entries are skipped with a
+  warning). Rationale: git's unlink+recreate creates agent-owned
+  inodes; reconcile restores the invariant in the same guard
+  invocation. Reconcile failure shall exit nonzero with a stderr
+  diagnostic but shall NOT roll back the completed git operation.
+- **REQ-GGUARD-177**: Fail-closed provenance backstop: `build.rs`
+  shall refuse to compile guard policy configs not owned by uid 0,
+  and CI consumers shall keep validating uid-0 ownership (already
+  deployed for exemption files). A missed reconcile shall halt the
+  pipeline, never silently pass.
+- **REQ-GGUARD-178**: `chattr +i` shall be retained ONLY for
+  `.git/hooks/*` (untracked, auto-executed) and the tier registries
+  (`ci/config/project_enforcement.yaml`,
+  `workspace/config/project_enforcement.yaml`): paths that never
+  change via `git pull`. The guard shall warn (stderr, non-blocking)
+  when reconcile finds these missing root ownership or the immutable
+  flag; re-applying `+i` remains a root-run repair action
+  (`install-hooks-recursive`), not a guard duty.
 
 ---
 

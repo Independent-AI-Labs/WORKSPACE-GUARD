@@ -5,8 +5,10 @@
 #
 # Usage:
 #   scripts/suid-drift-check             # check + write drift-report.yaml
-#   scripts/suid-drift-check --quiet     # stdout only on CRITICAL/WARNING
 #   scripts/suid-drift-check --help
+#
+# Output policy: detail lines are buffered and dumped to stdout only when
+# CRITICAL drift is found (exit 1); the one-line summary always prints.
 #
 # Exit codes (SPEC-AUDIT.md section 4.4):
 #   0  no CRITICAL drift (warnings/info allowed)
@@ -55,14 +57,13 @@ cleanup_temps() {
 }
 trap cleanup_temps EXIT
 
-QUIET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --quiet|-q) QUIET=1; shift ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--quiet]
+Usage: $0
 Compare live SUID/CAP surface against res/ baselines and report drift.
+Detail lines print only on CRITICAL drift; summary always prints.
 Exit: 0 no critical drift, 1 critical drift, 2 baseline missing.
 EOF
             exit 0 ;;
@@ -120,7 +121,8 @@ CRITICAL=0
 WARNINGS=0
 INFOS=0
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-log() { printf '%s\n' "$1"; }
+DETAIL=()
+log() { DETAIL+=("$1"); }
 gather() { printf '  - {path: "%s", type: "%s", class: "%s", detail: "%s", timestamp: "%s"}\n' "$1" "$2" "$3" "$4" "$NOW" >> "$DRIFT_REPORT"; }
 
 # agent_accessible PATH -> 0/1. /snap is read-only; everything under
@@ -174,7 +176,7 @@ while IFS= read -r path; do
         cls="WARNING"; WARNINGS=$((WARNINGS+1))
         msg="WARNING:  new SUID binary $path (not on GTFOBins; check apt history)"
     fi
-    [[ "$QUIET" -eq 1 && "$cls" == "WARNING" ]] || log "$msg"
+    log "$msg"
     gather "$path" "new-suid" "$cls" "gtfobins=$local_gtf"
 done < "$new_suids_tmp"
 
@@ -183,7 +185,7 @@ while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     msg="WARNING:  removed SUID binary $path (apt upgrade may have overwrote the guard)"
     WARNINGS=$((WARNINGS+1))
-    [[ "$QUIET" -eq 1 ]] || log "$msg"
+    log "$msg"
     gather "$path" "removed-suid" "WARNING" "guard-overwrite-suspected"
 done < "$rm_suids_tmp"
 
@@ -244,7 +246,7 @@ while IFS=$'\t' read -r path caps; do
         cls="WARNING"; WARNINGS=$((WARNINGS+1))
         msg="WARNING:  new file capability on $path ($caps)"
     fi
-    [[ "$QUIET" -eq 1 && "$cls" == "WARNING" ]] || log "$msg"
+    log "$msg"
     gather "$path" "new-cap" "$cls" "caps=$caps"
 done < "$new_caps_tmp"
 
@@ -252,7 +254,7 @@ while IFS=$'\t' read -r path old newc; do
     [[ -z "$path" ]] && continue
     cls="WARNING"; WARNINGS=$((WARNINGS+1))
     msg="WARNING:  file capability changed on $path: '$old' -> '$newc'"
-    [[ "$QUIET" -eq 1 ]] || log "$msg"
+    log "$msg"
     gather "$path" "changed-cap" "$cls" "from=$old to=$newc"
 done < "$ch_caps_tmp"
 
@@ -260,7 +262,7 @@ while IFS=$'\t' read -r path caps; do
     [[ -z "$path" ]] && continue
     cls="INFO"; INFOS=$((INFOS+1))
     msg="INFO:     file capability removed from $path (was $caps)"
-    [[ "$QUIET" -eq 1 ]] || log "$msg"
+    log "$msg"
     gather "$path" "removed-cap" "INFO" "was=$caps"
 done < "$rm_caps_tmp"
 
@@ -315,12 +317,12 @@ echo "" >> "$DRIFT_REPORT"
     echo "  checked_at: $NOW"
 } >> "$DRIFT_REPORT"
 
-if [[ "$QUIET" -ne 1 ]]; then
-    echo "------------------------------------------------------------"
-    echo "Drift check: $CRITICAL critical, $WARNINGS warnings, $INFOS info"
-    echo "Report:      $DRIFT_REPORT"
+if [[ "$CRITICAL" -gt 0 ]]; then
+    printf '%s\n' ${DETAIL[@]+"${DETAIL[@]}"}
 fi
-
+echo "------------------------------------------------------------"
+echo "Drift check: $CRITICAL critical, $WARNINGS warnings, $INFOS info"
+echo "Report:      $DRIFT_REPORT"
 if [[ "$CRITICAL" -gt 0 ]]; then
     exit 1
 fi

@@ -1,4 +1,4 @@
-//! Table-driven policy tests from config/guard_policy_matrix.yaml.
+//! Table-driven policy tests from config/git_guard_policy_matrix.yaml.
 
 use std::ffi::OsString;
 use std::fs;
@@ -26,7 +26,7 @@ struct PolicyMatrixConfig {
 
 fn load_matrix() -> PolicyMatrixConfig {
     let path = format!(
-        "{}/config/guard_policy_matrix.yaml",
+        "{}/config/git_guard_policy_matrix.yaml",
         env!("CARGO_MANIFEST_DIR")
     );
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));

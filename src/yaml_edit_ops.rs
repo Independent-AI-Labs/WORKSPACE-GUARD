@@ -18,7 +18,7 @@ use crate::yaml_edit_engine as engine;
 use crate::yaml_edit_schema as schema;
 use crate::yaml_edit_splice as splice;
 
-/// Mirrors `log_file` in config/guard_paths.yaml; a unit test keeps
+/// Mirrors `log_file` in config/shared_paths.yaml; a unit test keeps
 /// the two in sync.
 pub const LOG_FILE_NAME: &str = ".workspace-guard.log";
 const LOCK_PATH: &str = "/var/lib/workspace-guard/yaml-edit.lock";

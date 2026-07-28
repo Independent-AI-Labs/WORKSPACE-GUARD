@@ -4,7 +4,7 @@
 **Date:** 2026-07-14  
 **Location:** `docs/PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md`
 
-This document is the single authoritative plan. Active specifications (`SPEC-GIT-GUARD-INSTALL.md`, etc.) remain wrong until Phase 5 completes. No partial workarounds, no runtime probing, no fallback paths.
+This document is the single authoritative plan. Active specifications (`SPEC-GIT-GUARD-INSTALL.md`, etc.) remain wrong until Phase 5 completes. No partial workarounds, no runtime probing, no alternate install paths.
 
 ---
 
@@ -18,7 +18,7 @@ The repo also documents five incompatible delivery mechanisms (SUID 4555, file c
 
 **What this change deletes:**
 
-- `install_capability_delivery()` and all XOR / probe / fallback install logic
+- `install_capability_delivery()` and all XOR / probe / secondary install logic
 - `GUARD_ALLOW_FUNCTIONAL_FAIL`, `GUARD_DELIVERY`, `GUARD_HOST_PROFILE`, and any env var that switches class
 - Universal pam drift and `guard_capability_delivery_healthy()` OR logic
 - Permissive dual-path `workload_has_cap()` without reading installed class
@@ -43,7 +43,7 @@ The repo also documents five incompatible delivery mechanisms (SUID 4555, file c
 
 `workspace-binary-guard` is **deny-non-root** on SUID/cap binaries - capability removal / root-only gate, not cap delivery to agents. One binary copied to many paths; policy by `basename(argv[0])`; real binary at `<path>.real` mode 0700. It does **not** share git deployment classes or `/usr/lib/workspace-guard/deployment-class`. Program II needs its own installed record under `/usr/lib/workspace-binary-guard/` if drift tracking is added later.
 
-`BUILD_MODE=root-only` is orthogonal to deployment class - CI/PRoot only, never in `guard-host-profiles.yaml`, never on framework dev hosts.
+`BUILD_MODE=root-only` is orthogonal to deployment class - CI/PRoot only, never in `shared_host_profiles.yaml`, never on framework dev hosts.
 
 ### 2.2 Git deployment classes
 
@@ -78,7 +78,7 @@ Both **`WORKSPACE-GUARD/Makefile`** and **`CI/Makefile`** get the same targets i
 
 Hostname → class in versioned config:
 
-`config/guard-host-profiles.yaml`
+`config/shared_host_profiles.yaml`
 
 ```yaml
 profiles:
@@ -138,7 +138,7 @@ Error message names installed class and `make install-guard-host-exec`. No “tr
 |-----------|--------|
 | `GUARD_DELIVERY`, `GUARD_HOST_PROFILE`, any env var switching class | Backdoor |
 | `GUARD_ALLOW_FUNCTIONAL_FAIL` | Leaves broken guard installed |
-| `install_capability_delivery()` and XOR / probe / fallback logic | Caused vm-ws outage |
+| `install_capability_delivery()` and XOR / probe / secondary-path logic | Caused vm-ws outage |
 | pam + file-cap on same host | Dual path |
 | `make install-guard` without class suffix (except hard-fail) | Hides intent |
 | `FORCE_ROOT_ONLY` on framework dev hosts | Env override of safety |
@@ -199,7 +199,7 @@ Phases 1-5 ship together. No vm-ws recovery until the full set merges.
 - Delete: `install_capability_delivery()`, pam install functions used only for git delivery, `GUARD_ALLOW_FUNCTIONAL_FAIL` branches
 - Add: `install_guard_host_exec()` in `CI/lib/guard-install.sh` (or dedicated `guard-host-exec.sh`)
 - host-exec: setcap, scrub pam artifacts (`/etc/security/capability.conf` marker block, pam stack lines), write `deployment-class=host-exec`, verify `runuser -u agent -- git --version`
-- Assert `config/guard-host-profiles.yaml` `hostname -s` match
+- Assert `config/shared_host_profiles.yaml` `hostname -s` match
 - Refuse class mismatch without uninstall
 - **WORKSPACE-GUARD/Makefile** and **CI/Makefile:** `install-guard-host-exec`, `check-guard-host-exec`; `install-guard` / `check-guard` → hard error
 
@@ -226,7 +226,7 @@ Phases 1-5 ship together. No vm-ws recovery until the full set merges.
 - **REQ-GGUARD-148:** class-specific drift only; delete “reconcile any legacy mixed state” wording
 - **REQ-GGUARD-001:** five caps
 - README, SPEC-INSTALL, SPEC-HARDENING, ambient/cap allowlists aligned to host-exec / sandbox-service
-- Remove SUID 4555, pam-universal, bootstrap setcap auto-detect fallback
+- Remove SUID 4555, pam-universal, bootstrap setcap auto-detect secondary path
 - Document Program II deny-non-root model separately from git classes
 - Promote delivery rules into `docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md` (new spec, derived from this plan)
 - Update this file status to IMPLEMENTED
@@ -235,10 +235,10 @@ Phases 1-5 ship together. No vm-ws recovery until the full set merges.
 
 ## 7. Definition of done
 
-- [ ] `config/guard-host-profiles.yaml` exists; vm-ws → host-exec; matching uses `hostname -s`
+- [ ] `config/shared_host_profiles.yaml` exists; vm-ws → host-exec; matching uses `hostname -s`
 - [ ] `install-guard-host-exec` and `check-guard-host-exec` in both Makefiles; `install-guard` hard-fails
 - [ ] Zero class-switching env vars in code
-- [ ] Zero install probe / XOR / fallback
+- [ ] Zero install probe / XOR / secondary paths
 - [ ] Runtime enforces class from `deployment-class`
 - [ ] host-exec scrub removes pam artifacts
 - [ ] Drift/check uses `runuser` verify for host-exec

@@ -99,7 +99,7 @@ flowchart TB
 
 | Check | Result |
 |-------|--------|
-| Host profile | `vm-ws` → `host-exec` ([config/guard-host-profiles.yaml](../config/guard-host-profiles.yaml)) |
+| Host profile | `vm-ws` → `host-exec` ([config/shared_host_profiles.yaml](../config/shared_host_profiles.yaml)) |
 | Deployment class file | `/usr/lib/workspace-guard/deployment-class` = `host-exec` |
 | Git Guard | `/usr/bin/git` = guard; `/usr/bin/git.original` mode `0700`; file caps present |
 | Binary lock | `res/suid-baseline.yaml`: all 8 SUID binaries `contained: false`; no widespread `*.real` wrappers |
@@ -136,7 +136,7 @@ sudo make install-auditd            # optional
 
 ### 4.1 Program I ,  what it covers
 
-Source: [src/block.rs](../src/block.rs), [config/guard_subcommands.yaml](../config/guard_subcommands.yaml), [config/guard_environment.yaml](../config/guard_environment.yaml).
+Source: [src/block.rs](../src/block.rs), [config/git_guard_subcommands.yaml](../config/git_guard_subcommands.yaml), [config/git_guard_environment.yaml](../config/git_guard_environment.yaml).
 
 - Destructive git subcommands and plumbing bypasses
 - Global flags (`--no-verify`, force push, etc.)
@@ -228,7 +228,7 @@ Gaps are numbered for traceability. Severity: **C** = critical (OS destruction o
 | **GAP-H02** | Alternate git binaries (`~/bin`, nix, compiled git) | [SPEC-GIT-GUARD-HARDENING.md](specifications/SPEC-GIT-GUARD-HARDENING.md) §11; install warns only | Install hardening |
 | **GAP-H03** | `~/.gitconfig` direct write without home-lock (documented CI incident) | [REQ-HOME-LOCK.md](requirements/REQ-HOME-LOCK.md) Background | III |
 | **GAP-H04** | `~/.bashrc` / `~/.profile` never locked ,  PATH/alias persistence | [REQ-HOME-LOCK.md](requirements/REQ-HOME-LOCK.md) REQ-HL-NG-02 | III extension or host |
-| **GAP-H05** | Child `PATH` includes `/usr/local/bin` for git subprocesses | [config/guard_paths.yaml](../config/guard_paths.yaml) | I (subprocess scope only) |
+| **GAP-H05** | Child `PATH` includes `/usr/local/bin` for git subprocesses | [config/shared_paths.yaml](../config/shared_paths.yaml) | I (subprocess scope only) |
 | **GAP-H06** | Transient `CAP_DAC_OVERRIDE` on host-exec git invocation | [src/main.rs](../src/main.rs), [src/exec.rs](../src/exec.rs) | I design tradeoff |
 
 ### 5.4 MEDIUM ,  operational / deployment
@@ -317,7 +317,7 @@ Sources are cached in [docs/references/](references/SOURCES.md) (offline-verifia
 | Practice | Source | WORKSPACE-GUARD alignment | Gap |
 |----------|--------|---------------------------|-----|
 | Audit all SUID binaries; remove unnecessary setuid | [cis-dil-benchmark-suid-rb.html](references/cis-dil-benchmark-suid-rb.html), [konstruktoid-suid-list.txt](references/konstruktoid-suid-list.txt) | `sync-gtfobins` + baseline | **install-lock not run** ,  8 SUID bins exposed |
-| GTFOBins-aware containment | [gtfobins-suid.html](references/gtfobins-suid.html) | `config/binary-policy-rules.yaml` | Policies exist; **not enforced on host** |
+| GTFOBins-aware containment | [gtfobins-suid.html](references/gtfobins-suid.html) | `config/binary_guard_policy_rules.yaml` | Policies exist; **not enforced on host** |
 
 ### 7.2 Capability hardening ,  least privilege per service
 
@@ -538,8 +538,8 @@ WORKSPACE-GUARD **correctly protects git abuse** on `vm-ws` but **does not prote
 
 | Topic | Path |
 |-------|------|
-| Git blocks | [src/block.rs](../src/block.rs), [config/guard_subcommands.yaml](../config/guard_subcommands.yaml) |
-| Binary catalog | [res/binary-lock.yaml](../res/binary-lock.yaml), [config/binary-policy-rules.yaml](../config/binary-policy-rules.yaml) |
+| Git blocks | [src/block.rs](../src/block.rs), [config/git_guard_subcommands.yaml](../config/git_guard_subcommands.yaml) |
+| Binary catalog | [res/binary-lock.yaml](../res/binary-lock.yaml), [config/binary_guard_policy_rules.yaml](../config/binary_guard_policy_rules.yaml) |
 | SUID baseline | [res/suid-baseline.yaml](../res/suid-baseline.yaml) |
 | Sandbox unit | [config/systemd/workspace-agent@.service](../config/systemd/workspace-agent@.service) |
 | Sandbox spec | [docs/specifications/SPEC-SANDBOX.md](specifications/SPEC-SANDBOX.md) |

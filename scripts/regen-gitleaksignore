@@ -29,7 +29,7 @@ if ! command -v gitleaks; then
 fi
 
 # Use uv-managed interpreter for hermetic execution (no bare calls).
-uvpy=(uv run --quiet python)
+uvpy=(uv run python)
 
 tmpf=$(mktemp)
 trap 'rm -f "$tmpf"' EXIT

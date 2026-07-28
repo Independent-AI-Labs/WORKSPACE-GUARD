@@ -1,7 +1,7 @@
-# Schema for guard_resource_limits.yaml: field-level documentation.
+# Schema for git_guard_resource_limits.yaml: field-level documentation.
 #
 # Convention: one config/<name>.schema.yaml per config/<name>.yaml.
-config: guard_resource_limits
+config: git_guard_resource_limits
 description: "Resource limit thresholds and contract-check timing parameters."
 fields:
   - path: version

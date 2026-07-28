@@ -1,5 +1,5 @@
-# Schema for guard_policy_matrix.yaml
-config: guard_policy_matrix
+# Schema for git_guard_policy_matrix.yaml
+config: git_guard_policy_matrix
 description: "Table-driven expected outcomes for git-guard policy enforcement tests."
 fields:
   - path: version
