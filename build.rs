@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 mod build_binary_guard;
+mod build_shell_guard;
 
 pub(crate) fn default_version() -> u32 {
     1
@@ -443,4 +444,6 @@ fn main() {
     if env::var_os("CARGO_FEATURE_BINARY_GUARD").is_some() {
         build_binary_guard::emit_binary_guard_config(Path::new(&manifest));
     }
+
+    build_shell_guard::emit_shell_guard_config(Path::new(&manifest));
 }

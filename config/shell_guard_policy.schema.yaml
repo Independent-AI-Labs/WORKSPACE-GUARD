@@ -1,0 +1,33 @@
+# Schema for shell_guard_policy.yaml: field-level documentation.
+#
+# Convention: one config/<name>.schema.yaml per config/<name>.yaml.
+# Consumed by the wiki's ConfigFieldTable component to render
+# field/type/default/description for the configuration reference.
+config: shell_guard_policy
+description: "Shell-guard deny policy: a flat table of {id, regex, hint} patterns matched against raw command text."
+fields:
+  - path: version
+    type: integer
+    required: true
+    default: 1
+    description: "Schema version. Bumped when the YAML shape changes."
+
+  - path: patterns
+    type: list
+    required: true
+    description: "Ordered pattern table. The FIRST matching entry is the reported rule, so specific patterns precede bare command names they contain."
+
+  - path: patterns[].id
+    type: string
+    required: true
+    description: "Stable rule identifier used in block messages, audit log lines, and the policy matrix (e.g. suppress-pipe)."
+
+  - path: patterns[].regex
+    type: string
+    required: true
+    description: "Bytes-regex matched unanchored against the raw command text. Connector context is spelled in the pattern (e.g. a leading pipe). Must compile as a regex::bytes::Regex."
+
+  - path: patterns[].hint
+    type: string
+    required: true
+    description: "Remediation hint printed in the block message and audit log for this rule."

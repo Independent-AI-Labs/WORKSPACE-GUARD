@@ -1,0 +1,104 @@
+# Expected block/allow outcomes for shell-guard policy tests.
+# Consumed by the shell-guard matrix tests at test time and validated
+# at build time (every pattern id has >=1 blocked row).
+#
+# Schema:
+#   version : schema version (currently 1)
+#   cases   : list of { id, input, expect, rule? }
+#     input : raw command text as passed to bash -c (or script body)
+#     expect: blocked | allowed
+#     rule  : for blocked cases, the expected matching pattern id
+
+version: 1
+
+cases:
+  # --- destructive commands ---
+  - {id: pkill-bare,        input: "pkill -f opencode",        expect: blocked, rule: process-by-name}
+  - {id: pkill-sudo,        input: "sudo pkill x",             expect: blocked, rule: process-by-name}
+  - {id: killall-path,      input: "/usr/bin/killall x",       expect: blocked, rule: process-by-name}
+  - {id: shutdown-now,      input: "shutdown now",             expect: blocked, rule: power-command}
+  - {id: reboot-plain,      input: "reboot",                   expect: blocked, rule: power-command}
+  - {id: mkfs-plain,        input: "mkfs /dev/sda1",           expect: blocked, rule: fs-destroy}
+  - {id: mkfs-ext4,         input: "mkfs.ext4 /dev/sda1",      expect: blocked, rule: fs-destroy}
+  - {id: fdisk-dev,         input: "fdisk /dev/sda",           expect: blocked, rule: fs-destroy}
+  - {id: parted-mklabel,    input: "parted /dev/sda mklabel gpt", expect: blocked, rule: fs-destroy}
+  - {id: wipefs-all,        input: "wipefs -a /dev/sda",       expect: blocked, rule: fs-destroy}
+  - {id: pkillx-allowed,    input: "pkillx --version",         expect: allowed}
+  - {id: word-not-blocked,  input: "echo shutdowns",           expect: allowed}
+
+  # --- shell escape ---
+  - {id: zsh-bare,          input: "zsh",                      expect: blocked, rule: alt-shell}
+  - {id: zsh-path,          input: "/usr/bin/zsh -c 'echo hi'", expect: blocked, rule: alt-shell}
+  - {id: fish-env,          input: "env fish",                 expect: blocked, rule: alt-shell}
+  - {id: busybox-sh,        input: "busybox sh -c 'id'",       expect: blocked, rule: busybox-shell}
+  - {id: busybox-ls-ok,     input: "busybox ls /tmp",          expect: allowed}
+  - {id: nested-bash-ok,    input: "bash -c 'echo nested'",    expect: allowed}
+
+  # --- power verbs ---
+  - {id: systemctl-poweroff, input: "systemctl poweroff",      expect: blocked, rule: power-verb}
+  - {id: systemctl-kill,    input: "systemctl kill sshd",      expect: blocked, rule: power-verb}
+  - {id: loginctl-suspend,  input: "loginctl suspend",         expect: blocked, rule: power-verb}
+  - {id: systemctl-status-ok, input: "systemctl status sshd",  expect: allowed}
+
+  # --- kill matrix ---
+  - {id: kill-pid-ok,       input: "kill 1234",                expect: allowed}
+  - {id: kill-sig-pid-ok,   input: "kill -9 1234",             expect: allowed}
+  - {id: kill-term-multi-ok, input: "kill -TERM 1234 1235",    expect: allowed}
+  - {id: kill-list-ok,      input: "kill -l",                  expect: allowed}
+  - {id: kill-jobspec,      input: "kill %1",                  expect: blocked, rule: kill-mass}
+  - {id: kill-all,          input: "kill -9 -1",               expect: blocked, rule: kill-mass}
+  - {id: kill-neg-pgrp,     input: "kill -9 -1234",            expect: blocked, rule: kill-mass}
+  - {id: kill-probe-ok,     input: "kill -0 1234",             expect: allowed}
+
+  # --- flag-gated ---
+  - {id: chattr-i,          input: "chattr -i /usr/bin/git",   expect: blocked, rule: chattr-strip}
+  - {id: chattr-plus-ok,    input: "chattr +i /tmp/x",         expect: allowed}
+  - {id: rm-nopreserve,     input: "rm -rf --no-preserve-root /", expect: blocked, rule: rm-rootfs}
+  - {id: rm-normal-ok,      input: "rm -rf /tmp/build",        expect: allowed}
+  - {id: swapoff-a,         input: "swapoff -a",               expect: blocked, rule: swap-teardown}
+  - {id: swapoff-file-ok,   input: "swapoff /swapfile",        expect: allowed}
+
+  # --- dd / mounts ---
+  - {id: dd-device,         input: "dd if=/dev/zero of=/dev/sda", expect: blocked, rule: dd-device}
+  - {id: dd-nvme,           input: "dd if=x of=/dev/nvme0n1",  expect: blocked, rule: dd-device}
+  - {id: dd-file-ok,        input: "dd if=/dev/zero of=file.img bs=1M count=1", expect: allowed}
+  - {id: umount-guard,      input: "umount /usr/lib/workspace-guard", expect: blocked, rule: mount-protected}
+  - {id: mount-other-ok,    input: "mount /dev/sdb1 /mnt",     expect: allowed}
+
+  # --- suppression: pipe sinks (REQ-SHG-308) ---
+  - {id: pipe-tail,         input: "make check 2>&1 | tail -15", expect: blocked, rule: suppress-pipe}
+  - {id: pipe-tail-bare,    input: "dmesg | tail",             expect: blocked, rule: suppress-pipe}
+  - {id: pipe-head,         input: "ls 2>&1 | head",           expect: blocked, rule: suppress-pipe}
+  - {id: subst-pipe-tail,   input: "echo $(ls | tail)",        expect: blocked, rule: suppress-pipe}
+  - {id: tail-file-ok,      input: "tail -n 5 /var/log/syslog", expect: allowed}
+  - {id: head-file-ok,      input: "head file.txt",            expect: allowed}
+
+  # --- suppression: /dev/null redirects (REQ-SHG-309) ---
+  - {id: null-stdout,       input: "cmd > /dev/null",          expect: blocked, rule: suppress-null}
+  - {id: null-append,       input: "cmd >> /dev/null",         expect: blocked, rule: suppress-null}
+  - {id: null-stderr,       input: "cmd 2>/dev/null",          expect: blocked, rule: suppress-null}
+  - {id: null-stderr-spaced, input: "cmd 2> /dev/null",        expect: blocked, rule: suppress-null}
+  - {id: null-both-amp,     input: "cmd &> /dev/null",         expect: blocked, rule: suppress-null}
+  - {id: null-combined,     input: "cmd >/dev/null 2>&1",      expect: blocked, rule: suppress-null}
+  - {id: null-quoted,       input: "cmd 2>\"/dev/null\"",      expect: blocked, rule: suppress-null}
+  - {id: dup-fd-ok,         input: "cmd 2>&1",                 expect: allowed}
+
+  # --- suppression: null-command swallows (REQ-SHG-310) ---
+  - {id: swallow-or-true,   input: "make test || true",        expect: blocked, rule: suppress-swallow}
+  - {id: swallow-pipe-true, input: "cmd | true",               expect: blocked, rule: suppress-swallow}
+  - {id: swallow-or-colon,  input: "cmd || :",                 expect: blocked, rule: suppress-swallow}
+  - {id: true-start-ok,     input: "true; echo done",          expect: allowed}
+  - {id: true-and-ok,       input: "x && true",                expect: allowed}
+
+  # --- documented false positive / evasion controls ---
+  - {id: quoted-pipe-tail,  input: "echo \"use | tail to truncate\"", expect: blocked, rule: suppress-pipe}
+  - {id: quote-split-evades, input: "pki''ll -f x",            expect: allowed}
+
+  # --- static eval / substitution (literal text matches) ---
+  - {id: eval-literal,      input: "eval 'pkill x'",           expect: blocked, rule: process-by-name}
+  - {id: subst-pkill,       input: "echo $(pkill x)",          expect: blocked, rule: process-by-name}
+
+  # --- benign pass-through ---
+  - {id: echo-ok,           input: "echo hello",               expect: allowed}
+  - {id: pipeline-ok,       input: "grep foo bar.txt | wc -l", expect: allowed}
+  - {id: make-ok,           input: "make lint && make check",  expect: allowed}

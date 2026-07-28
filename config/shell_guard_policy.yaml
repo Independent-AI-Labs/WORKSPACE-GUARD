@@ -1,0 +1,66 @@
+version: 1
+
+# Pattern table for the shell guard (SPEC-SHELL-GUARD §7).
+# Every entry: stable rule id (block messages, audit logs, policy
+# matrix), a bytes-regex matched UNANCHORED against the raw command
+# text (command string or script content), and a remediation hint.
+# Adding a rule is a YAML edit plus rebuild; no Rust changes.
+#
+# Connector context is spelled in the regex (REQ-SHG-206): a rule
+# that only applies after a pipe includes the pipe. Quotes and
+# comments are not special (REQ-SHG-207). The FIRST matching entry
+# in this file is the reported rule, so more specific patterns are
+# listed before the bare command names they contain.
+patterns:
+  # --- power verbs (before power-command: 'systemctl poweroff'
+  # contains the bare word 'poweroff') ---
+  - id: power-verb
+    regex: '\b(systemctl|loginctl)\s+[^;|&]*\b(poweroff|reboot|halt|kexec|soft-reboot|suspend|hibernate|hybrid-sleep|kill)\b'
+    hint: "power actions are an operator operation"
+  # --- destructive commands (REQ-SHG-300) ---
+  - id: process-by-name
+    regex: '\b(pkill|killall|skill|snice)\b'
+    hint: "use kill <pid> on the specific process"
+  - id: power-command
+    regex: '\b(shutdown|reboot|poweroff|halt|kexec|telinit)\b'
+    hint: "power actions are an operator operation"
+  - id: fs-destroy
+    regex: '\b(wipefs|fdisk|sfdisk|cfdisk|parted|mkfs(\.[a-z0-9]+)?)\b'
+    hint: "filesystem/partition destruction is blocked"
+  # --- shell escape (REQ-SHG-307) ---
+  - id: alt-shell
+    regex: '\b(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)\b'
+    hint: "only bash/sh are permitted on this host"
+  - id: busybox-shell
+    regex: '\bbusybox\s+(sh|ash)\b'
+    hint: "only bash/sh are permitted on this host"
+  # --- kill mass-target forms (REQ-SHG-301) ---
+  - id: kill-mass
+    regex: '\bkill\b[^;|&]*(\s-1(\s|$)|%|\s-[0-9]{2,}(\s|$))'
+    hint: "use kill <pid> on the specific process"
+  # --- flag-gated (REQ-SHG-300) ---
+  - id: chattr-strip
+    regex: '\bchattr\b[^;|&]*\s-[a-zA-Z]*i\b'
+    hint: "immutability strip is blocked"
+  - id: rm-rootfs
+    regex: '\brm\b[^;|&]*--no-preserve-root'
+    hint: "root-fs deletion is blocked"
+  - id: dd-device
+    regex: '\bdd\b[^;|&]*\bof=/dev/(sd|nvme|mmcblk|vd|mapper/|disk/)'
+    hint: "writing block devices is blocked"
+  - id: mount-protected
+    regex: '\b(u?mount)\b[^;|&]*/usr/lib/workspace-guard'
+    hint: "guard mountpoints are protected"
+  - id: swap-teardown
+    regex: '\bswapoff\b[^;|&]*\s-a\b'
+    hint: "swap teardown is blocked"
+  # --- output suppression (REQ-SHG-308/309/310) ---
+  - id: suppress-pipe
+    regex: '\|&?\s*(tail|head)\b'
+    hint: "run without truncation; write long output to a file and read it with offset/limit"
+  - id: suppress-null
+    regex: '(&?>|[0-9]+>>?)\s*"?/dev/null"?'
+    hint: "capture output and print it on failure instead of discarding it"
+  - id: suppress-swallow
+    regex: '(\|\||\|&?)\s*(true\b|:)'
+    hint: "handle the exit code explicitly instead of masking it"

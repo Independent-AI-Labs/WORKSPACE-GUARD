@@ -29,11 +29,11 @@ user-writable config and are trivially bypassed by editing
 closes the vector at the binary layer: a compiled Rust binary
 installed as a **root-owned replacement at `/bin/bash`** (and
 `/bin/sh` where it resolves to bash), with the real shell sealed as
-`<path>.real` (mode 0700 root:root). The guard tokenizes every `-c`
-command string (and script file content) in compiled code, blocks
-known-destructive commands at every command position, sanitises the
-environment, and only then `execve()`s the real shell with privileges
-dropped. A non-root agent cannot read or execute the real shell
+`<path>.real` (mode 0700 root:root). The guard scans every `-c`
+command string (and script file content) against a compiled regex
+pattern table, blocks known-destructive and output-suppression
+idioms anywhere in the text, sanitises the environment, and only
+then `execve()`s the real shell with privileges dropped. A non-root agent cannot read or execute the real shell
 directly, and cannot bypass the guard by reading its source: it is a
 compiled binary, not a script.
 
@@ -129,19 +129,55 @@ handled by `make install-shell-guard`.
   the argument immediately following the flag bundle containing `c`.
 
 - **REQ-SHG-202**: For form (b), the guard shall open and read the
-  script file and tokenize its content with the same engine as `-c`
-  strings. If the file is unreadable, the guard shall pass through
-  (the real shell will fail identically) and emit a warning to
-  stderr. Script handling is tiered by ownership trust per
+  script file and scan its content with the same pattern table as
+  `-c` strings. If the file is unreadable, the guard shall pass
+  through (the real shell will fail identically) and emit a warning
+  to   stderr. Script handling is tiered by ownership trust per
   REQ-SHG-211.
 
-- **REQ-SHG-210**: The tokenizer shall record, for every command
-  position, the **connector** that introduced it (start-of-input,
-  `;`, `&&`, `||`, `|`, `|&`, newline, `(`, `{`, `;;`, keyword), and
-  shall capture every **redirection operator and target** attached to
-  the command (previously skipped per §5.4). Connector provenance and
-  redirection targets are inputs to the block policy (REQ-SHG-308,
-  REQ-SHG-309, REQ-SHG-310).
+- **REQ-SHG-203**: The binary shall reject arguments containing null
+  bytes (`\0`) with exit code 2.
+
+- **REQ-SHG-204**: Command strings and script content larger than 1
+  MiB shall be rejected with exit code 2 (resource bound).
+
+- **REQ-SHG-205**: Policy matching shall be a **regex pattern
+  table** applied to the raw command text (command string or script
+  content) as bytes. There is no tokenizer and no AST: each policy
+  entry is a `{id, regex, hint}` pattern compiled in from
+  `config/shell_guard_policy.yaml`; a match anywhere in the text
+  triggers the entry's decision. Patterns shall be matched with a
+  byte-oriented regex engine so non-UTF-8 input cannot bypass or
+  crash the scan.
+
+- **REQ-SHG-206**: Because there is no tokenizer, **connector
+  context shall be encoded in the patterns themselves**. A rule that
+  only applies after a pipe spells the pipe in its pattern
+  (`\|\s*(tail|head)\b`); a rule that only applies after `||` spells
+  it (`\|\|\s*(true|:)\b`). Bare words without the connector
+  (`tail file`, `true` after `;`) do not match and stay allowed.
+
+- **REQ-SHG-207**: The scanner shall NOT strip quotes or skip
+  comments: a pattern match inside quoted text or a comment blocks
+  identically (e.g. `echo "use | tail"` is blocked). These false
+  positives are accepted and documented (SPEC-SHELL-GUARD §16);
+  root's channel for them is `<path>.real` directly.
+
+- **REQ-SHG-208**: Known evasion classes of raw-text matching:
+  quote-splitting (`pki''ll`), variable indirection (`$X` holding a
+  blocked command), dynamic `eval`, shall be documented as
+  residual risks (SPEC-SHELL-GUARD §16). They are NOT closed at this
+  layer.
+
+- **REQ-SHG-209**: Prefix commands (`sudo`, `env`, `nice`, ...)
+  shall NOT be unwrapped: word-boundary patterns already match the
+  command name anywhere in the text (`sudo pkill` matches
+  `\bpkill\b`).
+
+- **REQ-SHG-210**: The pattern table shall be data-driven from
+  `config/shell_guard_policy.yaml`, compiled into the binary by
+  `build.rs`. Adding or changing a rule is a YAML edit plus rebuild;
+  no Rust changes.
 
 - **REQ-SHG-211**: Script files shall be classified into two trust
   tiers before scanning, via `open(O_NOFOLLOW)` + `fstat()`:
@@ -170,49 +206,19 @@ handled by `make install-shell-guard`.
   (SPEC-SHELL-GUARD §9.1). Trusted-tier scripts are exec'd by path
   (their content cannot be swapped by the agent).
 
-- **REQ-SHG-203**: The binary shall reject arguments containing null
-  bytes (`\0`) with exit code 2.
-
-- **REQ-SHG-204**: Command strings and script content larger than 1
-  MiB shall be rejected with exit code 2 (resource bound).
-
-- **REQ-SHG-205**: The tokenizer shall identify **command positions**
-  per the shell grammar: after `;`, `&&`, `||`, `|`, `|&`, newline,
-  `(`, `{`, `case`-arm `;;`, and the keywords `then`, `else`,
-  `elif`, `do`. Function definitions shall be tokenized so their
-  bodies are scanned as ordinary command positions.
-
-- **REQ-SHG-206**: The tokenizer shall recurse into command
-  substitutions `$( ... )` and backquotes `` ` ... ` `` and apply the
-  same command-position rules to the inner text.
-
-- **REQ-SHG-207**: The tokenizer shall strip single quotes, double
-  quotes (preserving `$()`/backquote detection inside them), and
-  backslash escapes when computing the effective first word of each
-  command. Here-document bodies shall be skipped as data. Comments
-  shall be skipped.
-
-- **REQ-SHG-208**: The first word of each command position shall be
-  reduced to its basename before policy matching:
-  `/sbin/shutdown` matches the `shutdown` policy entry.
-
-- **REQ-SHG-209**: The following transparent prefix commands shall be
-  unwrapped (with their own options skipped) until the real command
-  word is reached: `command`, `exec`, `env`, `nohup`, `time`,
-  `timeout`, `nice`, `ionice`, `stdbuf`, `sudo`, `doas`, `xargs`.
-  `xargs` shall always match against a denied-command result (the
-  piped-in argv is unknowable) when the unwrapped command is blocked.
-
 ---
 
 ## 4. Block Policy (REQ-SHG-300 series)
 
 - **REQ-SHG-300**: The following commands shall be unconditionally
-  blocked at any command position, for ALL users including root
+  blocked anywhere in the command text (word-boundary pattern match),
+  for ALL users including root
   (exit 1). Root's operator channel is invoking `<path>.real`
   directly, which only root can do. (Trusted-tier script bodies per
   REQ-SHG-211 are exempt-with-audit for ALL REQ-SHG-3xx rules;
-  `-c` strings and interactive input are never exempt:)
+  `-c` strings and untrusted script bodies are never exempt.
+  Interactive shells are pass-through per REQ-SHG-200: typed REPL
+  input is unscanned.)
   - Process signalling by name: `pkill`, `killall`, `skill`, `snice`
   - Power/session control: `shutdown`, `reboot`, `poweroff`, `halt`,
     `kexec`, `init`, `telinit`, `runlevel` (write forms), `loginctl`
@@ -230,17 +236,18 @@ handled by `make install-shell-guard`.
     (`/usr/lib/workspace-guard`, any `<path>.real` mountpoint)
 
 - **REQ-SHG-301**: `kill` (binary AND shell builtin) shall be blocked
-  unless every signal target operand is a numeric PID or numeric
-  `%`-free jobless form: `kill 1234`, `kill -9 1234`,
-  `kill -TERM 1234 1235` are allowed; `kill %1`, `kill -9 -1`
-  (process-group `-1` = "all processes"), and name-based forms are
-  blocked. Negative PID `-1` shall always be blocked.
+  when its operand text contains a job spec (`%`), a `-1` target
+  (process-group `-1` = "all processes"), or a negative PID
+  (`-1234`): `kill 1234`, `kill -9 1234`, `kill -TERM 1234 1235`
+  are allowed; `kill %1`, `kill -9 -1`, `kill -9 -1234` are blocked.
+  Implemented as pattern-table entries over the raw text.
 
 - **REQ-SHG-302**: `dd` shall be blocked when its `of=` operand
-  resolves (after canonicalisation) to a block device
-  (`lstat`/`stat` `S_ISBLK`) or matches a device prefix
-  (`/dev/sd*`, `/dev/nvme*`, `/dev/mmcblk*`, `/dev/vd*`,
-  `/dev/mapper/*`, `/dev/disk/*`).
+  matches a device prefix pattern (`/dev/sd*`, `/dev/nvme*`,
+  `/dev/mmcblk*`, `/dev/vd*`, `/dev/mapper/*`, `/dev/disk/*`).
+  Raw-text matching has no canonicalisation or `S_ISBLK` runtime
+  check; symlink indirection for `of=` is a documented residual
+  (SPEC-SHELL-GUARD §16).
 
 - **REQ-SHG-303**: Policy evaluation shall happen BEFORE any exec.
   A blocked invocation shall never reach `execve()`.
@@ -250,9 +257,10 @@ handled by `make install-shell-guard`.
   itself remains the authority on syntax errors.
 
 - **REQ-SHG-305**: `eval` with a static (fully literal) argument
-  string shall have that string tokenized recursively and subjected
-  to the same policy. Dynamic `eval` of expanded variables is a
-  documented residual risk (SPEC-SHELL-GUARD §16).
+  string needs no special handling: the literal appears in the raw
+  text and the pattern table matches it (`eval 'pkill x'` matches
+  `\bpkill\b`). Dynamic `eval` of expanded variables is a documented
+  residual risk (SPEC-SHELL-GUARD §16).
 
 - **REQ-SHG-306**: The block message shall include the blocked
   command, the matched policy rule, a timestamp (ISO 8601), and a
@@ -260,7 +268,7 @@ handled by `make install-shell-guard`.
   `/dev/tty` (if openable) so it survives `> /dev/null 2>&1`.
 
 - **REQ-SHG-307**: Invocation of any shell binary OTHER than the
-  guarded pair shall be blocked at any command position (exit 1),
+  guarded pair shall be blocked anywhere in the command text (exit 1),
   for ALL users including root. The blocked set shall include at
   minimum: `zsh`, `dash`, `fish`, `nu`, `ksh`, `ksh93`, `mksh`,
   `csh`, `tcsh`, `ash`, `yash`, `rc`, `elvish`, `xonsh`, `pwsh`,
@@ -268,41 +276,40 @@ handled by `make install-shell-guard`.
   `busybox ash`). Nested invocations of `bash` and `sh` re-enter the
   guard and are allowed. The set shall be data-driven from the
   `blocked_shells` block of `config/shell_guard_policy.yaml`, matched
-  by basename after prefix unwrapping (REQ-SHG-208/REQ-SHG-209).
+  by word-boundary pattern anywhere in the text (REQ-SHG-205).
 
-- **REQ-SHG-308**: A command position introduced by a pipe connector
-  (`|` or `|&`) whose reduced first word is in the
-  `suppression_pipe_sinks` set (`tail`, `head`) shall be blocked
-  (exit 1) for ALL users including root, in every context (`-c`
-  strings, interactive input, untrusted script bodies). Rationale:
-  piping command output through a truncation filter discards the
-  failure evidence the operator and the audit trail need; the
-  incident driver was `make check-push 2>&1 | tail -15` hiding the
-  one failing test. Bare `tail`/`head` on file operands (not after a
-  pipe) remain allowed: they read files, they do not silence a
-  command. The set shall be data-driven from the
+- **REQ-SHG-308**: Command text containing a pipe (`|` or `|&`)
+  followed by a member of the `suppression_pipe_sinks` set (`tail`,
+  `head`) shall be blocked (exit 1) for ALL users including root, in
+  every scanned context (`-c` strings, untrusted script bodies). The
+  connector is encoded in the pattern (REQ-SHG-206), so bare
+  `tail`/`head` on file operands (not after a pipe) remain allowed:
+  they read files, they do not silence a command. Rationale: piping
+  command output through a truncation filter discards the failure
+  evidence the operator and the audit trail need; the incident
+  driver was `make check-push 2>&1 | tail -15` hiding the one
+  failing test. The set shall be data-driven from the
   `suppression_pipe_sinks` block of `config/shell_guard_policy.yaml`.
 
-- **REQ-SHG-309**: Any redirection operator (`>`, `>>`, `N>`,
-  `N>>`, `&>`, `&>>`) in any command position whose target, after
-  quote/escape stripping, is a literal member of
+- **REQ-SHG-309**: Command text containing a redirection (`>`,
+  `>>`, `N>`, `N>>`, `&>`, `&>>`) whose target is a member of
   `suppression_redirect_targets` (`/dev/null`) shall be blocked
-  (exit 1) for ALL users including root, in every context. This
-  covers `> /dev/null`, `>> /dev/null`, `2> /dev/null`,
+  (exit 1) for ALL users including root, in every scanned context.
+  This covers `> /dev/null`, `>> /dev/null`, `2> /dev/null`,
   `&> /dev/null`, and combined forms such as `>/dev/null 2>&1`.
   Rationale: discarding stdout/stderr is the same audit-trail
   destruction as REQ-SHG-308 by a different spelling. Trusted-tier
   scripts (REQ-SHG-211) are exempt-with-audit because system scripts
-  legitimately daemonise output. The set shall be data-driven from
-  the `suppression_redirect_targets` block.
+  legitimately probe with suppressed stderr. The set shall be
+  data-driven from the `suppression_redirect_targets` block.
 
-- **REQ-SHG-310**: A command position whose reduced first word is in
-  `suppression_null_commands` (`true`, `:`) AND whose introducing
-  connector is `||`, `|`, or `|&` shall be blocked (exit 1) for ALL
-  users including root. `cmd || true` masks a failing exit code;
-  `cmd | true` discards stdout. Bare `true`/`:` after `;`, `&&`, or
-  at start-of-input masks nothing and remains allowed. The set shall
-  be data-driven from the `suppression_null_commands` block.
+- **REQ-SHG-310**: Command text containing `||`, `|`, or `|&`
+  followed by a member of `suppression_null_commands` (`true`, `:`)
+  shall be blocked (exit 1) for ALL users including root.
+  `cmd || true` masks a failing exit code; `cmd | true` discards
+  stdout. Bare `true`/`:` after `;`, `&&`, or at start-of-input
+  masks nothing and remains allowed. The set shall be data-driven
+  from the `suppression_null_commands` block.
 
 - **REQ-SHG-311**: The block message for REQ-SHG-308/309/310 shall
   name the matched suppression rule and carry a remediation hint
@@ -437,18 +444,20 @@ handled by `make install-shell-guard`.
   path shall complete in under 5ms.
 
 - **REQ-SHG-701**: Dependencies shall be limited to `std`, `libc`
-  (irreducible FFI only), and `nix` (safe wrappers). No `clap`, no
-  regex engine: tokenization and matching are hand-rolled to keep the
-  dependency surface minimal. `unsafe` is limited to documented
-  `// SAFETY:` FFI sites (`getauxval`, `lstat` on `.real`).
+  (irreducible FFI only), `nix` (safe wrappers), and the `regex`
+  crate (already a workspace dependency; used with
+  `regex::bytes::Regex` for byte-exact matching). No `clap`.
+  `unsafe` is limited to documented `// SAFETY:` FFI sites
+  (`getauxval`, `lstat` on `.real`, `memfd_create`, `fcntl`).
 
 - **REQ-SHG-702**: The guard shall NOT spawn any subprocess for
   parsing or decision logic. The only process transition is the final
   `execve()`.
 
 - **REQ-SHG-703**: Non-UTF-8 bytes in the command string shall not
-  cause a pass-through bypass: tokenization operates on bytes, and
-  policy matching is byte-exact on the reduced command word.
+  cause a pass-through bypass: patterns are matched against raw
+  bytes (`regex::bytes::Regex`), never against a UTF-8-validated
+  string.
 
 ---
 
@@ -457,33 +466,34 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-800**: A bats suite `tests/shell/21-shell-guard.bats`
   shall cover: `--help`/usage errors, null-byte rejection, oversize
   rejection, each unconditional block family (REQ-SHG-300), the
-  `kill` numeric-PID matrix (allowed and blocked forms), `dd of=`
-  device detection, prefix-command unwrapping (`sudo pkill`,
-  `env pkill`, `xargs pkill`), basename reduction (`/sbin/shutdown`),
-  command substitution recursion (`$(pkill x)`), function-body
-  scanning, quote stripping, here-doc skipping, the blocked-shells
-  set (REQ-SHG-307) including path-qualified (`/usr/bin/zsh`) and
-  prefix-wrapped (`env fish`, `busybox sh`) forms, the suppression
-  families (REQ-SHG-308 pipe sinks incl. `| tail -n N` and
-  `2>&1 | tail`, REQ-SHG-309 redirect targets incl. `2> /dev/null`,
-  `&> /dev/null`, `>/dev/null 2>&1`; REQ-SHG-310 `|| true` / `| true`
-  / `|| :` with allowed bare-`true` controls), trusted-tier
-  exemption-with-audit for root-owned scripts, the script-swap
-  TOCTOU fixture (blocked idiom introduced between write and exec is
-  still blocked via the sealed memfd), and pass-through of benign
-  commands.
+  `kill` matrix (allowed and blocked forms), `dd of=` device-prefix
+  detection, prefixed forms (`sudo pkill`, `env pkill`), path-qualified
+  names (`/sbin/shutdown`), command substitution (`$(pkill x)`: the
+  literal text matches), the blocked-shells set (REQ-SHG-307)
+  including path-qualified (`/usr/bin/zsh`) and prefix-wrapped
+  (`env fish`, `busybox sh`) forms, the suppression families
+  (REQ-SHG-308 pipe sinks incl. `| tail -n N` and `2>&1 | tail`,
+  REQ-SHG-309 redirect targets incl. `2> /dev/null`, `&> /dev/null`,
+  `>/dev/null 2>&1`; REQ-SHG-310 `|| true` / `| true` / `|| :` with
+  allowed bare-`true` controls), the documented false positive
+  (`echo "use | tail"` blocks), trusted-tier exemption-with-audit
+  for root-owned scripts, the script-swap TOCTOU fixture (blocked
+  idiom introduced between write and exec is still blocked via the
+  sealed memfd), and pass-through of benign commands.
 
 - **REQ-SHG-801**: The build-time policy matrix
   (`config/shell_guard_policy_matrix.yaml`) shall assert every case in the
   matrix agrees with the compiled policy; a disagreement fails the
   build.
 
-- **REQ-SHG-802**: Rust unit tests shall cover the tokenizer as a
-  pure function (input bytes → command-position words, connectors,
-  and redirection pairs) including adversarial inputs: nested
-  substitutions, mixed quoting, escaped newlines, `case` arms,
-  prefix chains, quoted redirection targets (`2>"/dev/null"`),
-  and fd-prefixed redirects (`3>/dev/null`).
+- **REQ-SHG-802**: Rust unit tests shall cover the pattern table as
+  pure functions (input bytes → first matching rule, if any)
+  including adversarial inputs: patterns inside quotes (match:
+  documented false positive), non-UTF-8 bytes, pipe-sink patterns
+  with options (`| tail -n 5`), spaced redirections (`2> /dev/null`),
+  quoted targets (`2>"/dev/null"`: matches, quotes are not
+  stripped), and connector-less controls (`tail file`, `true` after
+  `;`) that must NOT match.
 
 - **REQ-SHG-803**: Env-sanitisation tests shall assert `BASH_ENV`,
   exported functions, and `LD_*` do not survive into the child
@@ -491,9 +501,9 @@ handled by `make install-shell-guard`.
 
 - **REQ-SHG-804**: Config consistency tests in
   `src/config_consistency_tests.rs` shall verify
-  `config/shell_guard_policy.yaml` parses, every blocked entry is a
-  bare command name (no path separator), and device prefixes are
-  absolute.
+  `config/shell_guard_policy.yaml` parses, every pattern compiles as
+  a valid bytes-regex, every entry carries a non-empty hint, and
+  every matrix case references a known rule id.
 
 ---
 
@@ -520,11 +530,10 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-NG-04**: The guard never prompts. It blocks or allows.
   Interactive approval flows belong to the agent's permission layer.
 
-- **REQ-SHG-NG-05**: The guard does NOT re-implement shell parsing in
-  full POSIX completeness. The tokenizer covers the grammar needed to
-  find command positions reliably; anything unrecognised fails open
-  to the real shell (REQ-SHG-304), with recursion into substitutions
-  ensuring the common obfuscations are still scanned.
+- **REQ-SHG-NG-05**: The guard does NOT re-implement shell parsing.
+  Raw-text pattern matching has no grammar awareness: anything the
+  patterns do not match fails open to the real shell (REQ-SHG-304),
+  and the evasion classes of REQ-SHG-208 are accepted residuals.
 
 - **REQ-SHG-NG-06**: Agent-side config (opencode `permission` rules,
   plugins) is out of scope: it is a complementary, user-space layer
@@ -533,7 +542,7 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-NG-07**: Suppression performed INSIDE an interpreter
   (`python3 -c 'subprocess.run(..., stdout=subprocess.DEVNULL)'`,
   redirecting to a log file that is never read) is not detectable by
-  a shell-layer tokenizer and is out of scope, per the same
+  a shell-layer text scan and is out of scope, per the same
   interpreter-indirection boundary as REQ-SHG-NG-02. Suppression
   spelled with shell grammar (pipes to `tail`/`head`, `/dev/null`
   redirects, `|| true`) IS in scope (REQ-SHG-308/309/310).

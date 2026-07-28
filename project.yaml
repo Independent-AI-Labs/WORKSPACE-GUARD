@@ -1,0 +1,12 @@
+version: 1
+project:
+  slug: workspace-guard
+  displayName: WORKSPACE-GUARD
+  repoName: WORKSPACE-GUARD
+  language: Rust
+  icon: ri-shield-keyhole-line
+  logo: res/LOGO.png
+  description: >-
+    Compiled Rust guards wrapping the most abusable surfaces of an agent dev
+    machine, vetting every git invocation for destructive history and policy
+    bypass while containing GTFOBins-class SUID and file-capability escapes.

@@ -20,32 +20,34 @@ Agent / user invokes: bash -c '<command string>'     (or: bash script.sh, sh -c 
         ┌─────────────────────┼──────────────────────────┐
         │                     │                          │
         ▼                     ▼                          ▼
-  Classify argv         Tokenize command           Sanitise env
-  (-c / script /        string (or script          (allow-list,
-   interactive)          file) into command         PATH reset,
-                         positions, recurse         drop BASH_ENV,
-                         into $( ) / ` `            LD_*, funcs)
+  Classify argv         Scan raw text against      Sanitise env
+  (-c / script /        the compiled regex         (allow-list,
+   interactive)          pattern table (command     PATH reset,
+                         string or script file      drop BASH_ENV,
+                         content, as bytes)         LD_*, funcs)
         │                     │                          │
         └─────────────────────┼──────────────────────────┘
                               │
-                        Any blocked command
-                        at any command position?
+                        Any pattern matches?
                             ┌──┴──┐
                           YES     NO
                            │       │
                            ▼       ▼
                     Block + log  execve("/bin/bash.real",
-                    (exit 1)     original argv, clean envp)
-                                 real shell: root:root 0700, +i
+                    (exit 1;     original argv, clean envp)
+                    trusted-tier
+                    scripts:     real shell: root:root 0700, +i
+                    would-block
+                    audit + run)
 ```
 
 The guard is a **thin capability-enabled wrapper**. Its sole purpose
 is to:
 
-1. Tokenize the command string (or script content) into command
-   positions.
-2. Match every command-position word against the compiled deny
-   policy.
+1. Acquire the text to scan (the `-c` command string or the script
+   file content).
+2. Match the raw text, as bytes, against the compiled regex deny
+   policy. There is no tokenizer and no parsing.
 3. Sanitise the execution environment.
 4. If safe, `execve()` the verified real shell with the original
    argv.
@@ -57,12 +59,13 @@ compiled in from `config/shell_guard_policy.yaml` via `build.rs`.
 
 ### Key Design Principle
 
-> **Deny-list on command positions, not allow-list.** The shell's
-> legitimate surface is unbounded; the catastrophic surface (kill the
+> **Deny-list on raw text, not allow-list.** The shell's legitimate
+> surface is unbounded; the catastrophic surface (kill the
 > supervisor, power off the host, destroy filesystems, strip
-> immutability) is small and enumerable. The guard blocks the
-> catastrophic set at every command position and passes everything
-> else through.
+> immutability, suppress output) is small and enumerable. The guard
+> blocks the catastrophic set wherever its pattern appears in the
+> text and passes everything else through. Patterns live in
+> root-owned YAML; adding a rule never requires a Rust change.
 
 ---
 
@@ -91,9 +94,9 @@ The threat, in order of severity:
 shell at `/bin/bash.real` is mode 0700 root:root: a non-root agent
 cannot read or execute it directly, cannot `LD_PRELOAD` around the
 guard (§8), and cannot learn a bypass by reading guard source. The
-guard tokenizes the command string before any exec and blocks the
-catastrophic set unconditionally. Root's operator channel is invoking
-`/bin/bash.real` directly.
+guard pattern-scans the command string before any exec and blocks
+the catastrophic set unconditionally. Root's operator channel is
+invoking `/bin/bash.real` directly.
 
 ---
 
@@ -141,9 +144,9 @@ The guard classifies argv (after its own argv[0]) into three forms:
 
 | Form | Shape | Handling |
 |------|-------|----------|
-| Command string | `bash -c STR [name [args...]]`, `bash -xc STR`, `bash -- -c STR` | Tokenize STR (§5); full policy, no exemption |
-| Script file | `bash FILE [args...]`, `bash -- FILE` | Open `O_NOFOLLOW`, `fstat`, classify trust tier (§4.1), tokenize content (§5); unreadable → warn + pass through |
-| Interactive/login | `bash`, `bash -l`, `bash -i`, argv[0] `-bash` | Pass through unchanged |
+| Command string | `bash -c STR [name [args...]]`, `bash -xc STR` | Scan STR against the pattern table (§5); full policy, no exemption |
+| Script file | `bash FILE [args...]`, `bash -- FILE` | Open `O_NOFOLLOW`, `fstat`, classify trust tier (§4.1), scan content (§5); unreadable → warn + pass through |
+| Interactive/login | `bash`, `bash -l`, `bash -i`, argv[0] `-bash` | Pass through unchanged (typed REPL input is unscanned; the guard wraps process spawn, not the line editor) |
 
 ### 4.1 Script Trust Tiers (REQ-SHG-211)
 
@@ -193,114 +196,85 @@ argv[0] `sh`, so bash runs in POSIX mode exactly as before.
 
 ---
 
-## 5. Command-String Tokenizer
+## 5. Raw-Text Pattern Scanner
 
-The tokenizer is a hand-rolled byte-level scanner (no regex, no
-external crate). It does not build an AST; it finds **command
-positions** and, for each, the effective first word.
+There is no tokenizer. The scanner takes the text to check (the
+`-c` string or the script content) as raw bytes and runs every
+compiled pattern from the policy table over it. The first match
+wins. Matching uses `regex::bytes::Regex` so non-UTF-8 input is
+scanned byte-exactly (REQ-SHG-205, REQ-SHG-703).
 
-### 5.1 Command Positions
+### 5.1 Pattern Semantics
 
-A command position begins after any of: start of input, `;`, `&&`,
-`||`, `|`, `|&`, newline, `(`, `{`, `;;` (case arm), or the keywords
-`then`, `else`, `elif`, `do`. A function definition
-`name() { ...; }` is tokenized so its body contributes its own
-command positions (the definition site itself yields no command
-word).
+- Patterns are matched unanchored, anywhere in the text.
+- Word boundaries (`\b`) delimit command names: `\bpkill\b` matches
+  `sudo pkill -f x`, `/usr/bin/pkill x`, and `$(pkill x)`, but not
+  `pkillx`.
+- **Connector context is spelled in the pattern** (REQ-SHG-206):
+  `\|\s*(tail|head)\b` fires only after a pipe; `\|\|\s*(true|:)\b`
+  only after `||`. Bare `tail file` and bare `true` after `;` never
+  match.
+- Quotes and comments are NOT special (REQ-SHG-207): `echo "a | tail"`
+  matches the pipe-sink pattern and is blocked. Accepted false
+  positive; root's channel is `/bin/bash.real`.
+- Quote-splitting evasion (`pki''ll`), variable indirection, and
+  dynamic `eval` do NOT match and are documented residuals (§16,
+  REQ-SHG-208).
 
-For every command position the tokenizer records the **connector**
-that introduced it (`start`, `;`, `&&`, `||`, `|`, `|&`, `newline`,
-`(`, `{`, `;;`, keyword). Connector provenance is policy input:
-REQ-SHG-308 fires only on positions introduced by `|`/`|&`, and
-REQ-SHG-310 only on positions introduced by `||`/`|`/`|&`.
+### 5.2 Size and Depth Bounds
 
-### 5.2 Quoting and Escapes
-
-- `'...'`: literal; contributes text to the current word.
-- `"..."`: literal except `$( )`, backquotes, and `\`-escapes, which
-  are still recognised (so `"$(pkill x)"` is scanned).
-- `\X`: contributes literal `X` to the current word.
-- `#` at a word start: comment to end of line; skipped.
-- Here-docs: after `<<[-]DELIM`, lines up to `DELIM` are skipped as
-  data (no command positions inside).
-
-### 5.3 Command Substitution Recursion
-
-`$( ... )` and `` ` ... ` `` are tokenized recursively with the full
-rule set. Nesting depth is bounded at 32; deeper input is treated as
-a validation error (exit 2).
-
-### 5.4 First-Word Reduction
-
-For each command position:
-
-1. Skip assignments (`NAME=value`). Redirections are NOT skipped:
-   every redirection operator (`>`, `>>`, `N>`, `N>>`, `&>`, `&>>`,
-   and their whitespace-separated target forms) is captured as an
-   `(operator, target)` pair with quotes/escapes stripped from the
-   target, and handed to the policy engine (§6 step 9, REQ-SHG-309).
-   `N>&M` fd-duplication forms carry no file target and are ignored.
-2. Strip quotes/escapes to compute the effective word.
-3. Unwrap transparent prefixes (with their options skipped):
-   `command`, `exec`, `env`, `nohup`, `time`, `timeout`, `nice`,
-   `ionice`, `stdbuf`, `sudo`, `doas`, `xargs`.
-4. Reduce to basename: `/sbin/shutdown` → `shutdown`.
-5. If the word contains `=` or `$` after stripping (dynamic), it
-   cannot be matched: the position is not blocked (deny-list
-   principle; residual risk §16). A dynamic redirection TARGET (one
-   containing `$` or a substitution) likewise cannot be matched and
-   is not blocked.
+- Command strings and script content over 1 MiB: exit 2
+  (REQ-SHG-204). No recursion exists, so there is no depth bound;
+  regex compilation happens once at startup from the compiled-in
+  pattern strings, and matching is linear-time (the `regex` crate
+  guarantees no catastrophic backtracking).
 
 ---
 
-## 6. Block Decision Engine
+## 6. Block Decision
 
-Checks are applied to every command position; the first block wins.
-For trusted-tier script bodies (§4.1), every BLOCK below is
-downgraded to a `would-block` audit warning.
+Every pattern in the policy table is tried against the raw text; the
+first match wins. For trusted-tier script bodies (§4.1), a match is
+downgraded to a `would-block` audit warning and execution continues.
+
+The pattern groups (exact regexes live in
+`config/shell_guard_policy.yaml`, §7):
 
 ```
-1. Reduced word in blocked set?            → BLOCK (exit 1)
-   (pkill, killall, skill, snice, shutdown, reboot, poweroff,
-    halt, kexec, init, telinit, mkfs, mkfs.*, fdisk, sfdisk,
-    cfdisk, parted, wipefs)
-2. Reduced word in blocked_shells set?     → BLOCK
-   (zsh, dash, fish, nu, ksh, ksh93, mksh, csh, tcsh, ash, yash,
-    rc, elvish, xonsh, pwsh, powershell; busybox with a shell
-    applet: busybox sh / busybox ash)
-3. systemctl/loginctl power verb?          → BLOCK
-   (poweroff, reboot, halt, kexec, soft-reboot, suspend,
-    hibernate, hybrid-sleep; plus systemctl kill)
-4. kill with non-numeric or -1 target?     → BLOCK
-   (kill %1, kill -9 -1, kill <name>; kill <pid>..., kill -SIG <pid> allowed)
-5. chattr with -i flag?                    → BLOCK
-6. rm with --no-preserve-root?             → BLOCK
-7. dd of= resolving to block device?       → BLOCK
-   (canonicalise of= operand; S_ISBLK check; device-prefix list)
-8. mount/umount on guard-protected path?   → BLOCK
-9. Any captured redirection whose literal  → BLOCK
-   target is in suppression_redirect_targets?
-   (> /dev/null, >> /dev/null, 2> /dev/null, &> /dev/null,
-    >/dev/null 2>&1, quoted "/dev/null" forms)
-10. Connector is | or |& AND reduced word  → BLOCK
-    in suppression_pipe_sinks (tail, head)?
-    (bare `tail file` at a non-pipe position stays allowed)
-11. Connector is ||, |, or |& AND reduced  → BLOCK
-    word in suppression_null_commands (true, :)?
-    (bare `true` after ; or && stays allowed)
-12. swapoff -a?                            → BLOCK
-13. eval with static literal argument?     → recurse tokenizer into it
-14. ALL CLEAR → sanitise env, execve real shell
+1. Destructive commands      \b(pkill|killall|skill|snice|shutdown|
+                              reboot|poweroff|halt|kexec|telinit|
+                              wipefs|fdisk|sfdisk|cfdisk|parted|
+                              mkfs(\.[a-z0-9]+)?)\b        → BLOCK
+2. Shell escape              \b(zsh|dash|fish|nu|ksh93?|mksh|tcsh?|
+                              ash|yash|rc|elvish|xonsh|pwsh|
+                              powershell)\b, \bbusybox\s+(sh|ash)\b
+                                                             → BLOCK
+3. Power verbs               \b(systemctl|loginctl)\s+[^;|&]*
+                              \b(poweroff|reboot|halt|kexec|
+                              soft-reboot|suspend|hibernate|
+                              hybrid-sleep|kill)\b         → BLOCK
+4. kill mass-target forms    \bkill\b[^;|&]*(\s-1(\s|$)|%|
+                              \s-[0-9]{2,}(\s|$))          → BLOCK
+5. chattr -i                 \bchattr\b[^;|&]*\s-i\b       → BLOCK
+6. rm --no-preserve-root     \brm\b[^;|&]*--no-preserve-root → BLOCK
+7. dd of= device             \bdd\b[^;|&]*\bof=/dev/(sd|nvme|
+                              mmcblk|vd|mapper/|disk/)     → BLOCK
+8. mount/umount protected    \b(u?mount)\b[^;|&]*
+                              /usr/lib/workspace-guard     → BLOCK
+9. swapoff -a                \bswapoff\b[^;|&]*\s-a\b      → BLOCK
+10. Suppression pipe sinks   \|\s*(tail|head)\b            → BLOCK
+11. Suppression redirects    (&?>|[0-9]+>>?)\s*/dev/null   → BLOCK
+12. Suppression null swallows (\|\||\|&?)\s*(true|:)\b     → BLOCK
+13. ALL CLEAR → sanitise env, execve real shell
 ```
 
-Step 2 closes the shell-escape vector: the guarded pair cannot be
+Group 2 closes the shell-escape vector: the guarded pair cannot be
 used as a springboard to an unguarded interpreter. Nested `bash` /
 `sh` invocations are NOT blocked: they resolve to the guard's own
 paths and re-enter the guard, so policy is re-applied at every
-nesting level. `busybox` is unwrapped one extra level: its first
-operand is the applet name, and only shell applets (`sh`, `ash`)
-match step 2; other applets pass (the binary lock covers SUID
-busybox, SPEC-BINARY-LOCK).
+nesting level. Only the `busybox sh`/`busybox ash` shell applets
+match; other applets pass (the binary lock covers SUID busybox,
+SPEC-BINARY-LOCK).
 
 ### 6.1 Block Messages
 
@@ -326,109 +300,67 @@ the specific process instead".
 | `kill -9 -1234` (negative pgrp) | block |
 | `kill -0 1234` | allow (existence probe) |
 
-Rule: after the signal option (`-SIGNAME`, `-s SIGNAME`, `-n SIGNUM`,
-or `-l`/`-L`), every remaining operand must match `^[0-9]+$`.
+Rule: the pattern fires on a job spec (`%`), a `-1` target, or a
+negative multi-digit PID anywhere in the `kill` operand text; pure
+numeric-PID forms never match.
 
 ---
 
 ## 7. Policy Config Schema
 
 `config/shell_guard_policy.yaml` (with sibling
-`shell_guard_policy.schema.yaml`), compiled in by `build.rs`:
+`shell_guard_policy.schema.yaml`), compiled in by `build.rs`. The
+schema is a flat pattern table: every rule is `{id, regex, hint}`;
+the regexes are the group shapes of §6 written out in full. Example
+excerpt:
 
 ```yaml
 version: 1
 
-# Unconditionally blocked command names (bare names; basename match).
-blocked_commands:
-  - {name: pkill,    hint: "use kill <pid> on the specific process"}
-  - {name: killall,  hint: "use kill <pid> on the specific process"}
-  - {name: skill,    hint: "use kill <pid> on the specific process"}
-  - {name: shutdown, hint: "power actions are an operator operation"}
-  - {name: reboot,   hint: "power actions are an operator operation"}
-  - {name: poweroff, hint: "power actions are an operator operation"}
-  - {name: halt,     hint: "power actions are an operator operation"}
-  - {name: kexec,    hint: "power actions are an operator operation"}
-  - {name: init,     hint: "power actions are an operator operation"}
-  - {name: telinit,  hint: "power actions are an operator operation"}
-  - {name: wipefs,   hint: "filesystem destruction is blocked"}
-  - {name: fdisk,    hint: "partition-table edits are blocked"}
-  - {name: sfdisk,   hint: "partition-table edits are blocked"}
-  - {name: cfdisk,   hint: "partition-table edits are blocked"}
-  - {name: parted,   hint: "partition-table edits are blocked"}
-
-# Glob-style families (mkfs, mkfs.ext4, mkfs.xfs, ...).
-blocked_globs:
-  - {pattern: "mkfs.*", hint: "filesystem creation is blocked"}
-
-# Shell escape: invocation of any shell other than the guarded
-# bash/sh pair is blocked (REQ-SHG-307). Matched by basename after
-# prefix unwrapping. bash and sh are deliberately absent: nested
-# invocations re-enter the guard.
-blocked_shells:
-  - {name: zsh,        hint: "only bash/sh are permitted on this host"}
-  - {name: dash,       hint: "only bash/sh are permitted on this host"}
-  - {name: fish,       hint: "only bash/sh are permitted on this host"}
-  - {name: nu,         hint: "only bash/sh are permitted on this host"}
-  - {name: ksh,        hint: "only bash/sh are permitted on this host"}
-  - {name: ksh93,      hint: "only bash/sh are permitted on this host"}
-  - {name: mksh,       hint: "only bash/sh are permitted on this host"}
-  - {name: csh,        hint: "only bash/sh are permitted on this host"}
-  - {name: tcsh,       hint: "only bash/sh are permitted on this host"}
-  - {name: ash,        hint: "only bash/sh are permitted on this host"}
-  - {name: yash,       hint: "only bash/sh are permitted on this host"}
-  - {name: rc,         hint: "only bash/sh are permitted on this host"}
-  - {name: elvish,     hint: "only bash/sh are permitted on this host"}
-  - {name: xonsh,      hint: "only bash/sh are permitted on this host"}
-  - {name: pwsh,       hint: "only bash/sh are permitted on this host"}
-  - {name: powershell, hint: "only bash/sh are permitted on this host"}
-
-# busybox applets that count as shells for the one-level applet
-# unwrap (busybox sh / busybox ash are blocked; other applets pass).
-busybox_shell_applets: [sh, ash]
-
-# Power verbs for service/session managers.
-power_verbs:
-  systemctl: [poweroff, reboot, halt, kexec, soft-reboot, suspend,
-              hibernate, hybrid-sleep, kill]
-  loginctl:  [poweroff, reboot, halt, suspend, hibernate,
-              hybrid-sleep, soft-reboot]
-
-# Flag-gated blocks.
-flag_blocks:
-  - {command: chattr, flag: "-i", hint: "immutability strip is blocked"}
-  - {command: rm, flag: "--no-preserve-root", hint: "root-fs deletion is blocked"}
-  - {command: swapoff, flag: "-a", hint: "swap teardown is blocked"}
-
-# dd device prefixes (of= canonicalised then prefix-matched, plus
-# S_ISBLK check).
-device_prefixes: [/dev/sd, /dev/nvme, /dev/mmcblk, /dev/vd,
-                  /dev/mapper/, /dev/disk/]
-
-# mount/umount protected paths.
-protected_paths: [/usr/lib/workspace-guard]
-
-# Output-suppression pipe sinks (REQ-SHG-308): blocked only at
-# command positions introduced by | or |&.
-suppression_pipe_sinks:
-  - {name: tail, hint: "run without truncation; write long output to a file and read it with offset/limit"}
-  - {name: head, hint: "run without truncation; write long output to a file and read it with offset/limit"}
-
-# Output-suppression redirection targets (REQ-SHG-309): literal
-# byte match after quote/escape stripping.
-suppression_redirect_targets:
-  - {path: /dev/null, hint: "capture output and print it on failure instead of discarding it"}
-
-# Null-command swallows (REQ-SHG-310): blocked only when the
-# introducing connector is ||, |, or |&.
-suppression_null_commands:
-  - {name: "true", hint: "handle the exit code explicitly instead of masking it"}
-  - {name: ":",    hint: "handle the exit code explicitly instead of masking it"}
-
-# Transparent prefixes unwrapped before matching.
-prefix_commands: [command, exec, env, nohup, time, timeout, nice,
-                  ionice, stdbuf, sudo, doas, xargs]
+# Every entry: stable rule id (used in block messages, audit logs,
+# and the policy matrix), a bytes-regex matched unanchored against
+# the raw command text, and a remediation hint.
+patterns:
+  # --- destructive commands (REQ-SHG-300) ---
+  - {id: process-by-name,  regex: '\b(pkill|killall|skill|snice)\b',
+     hint: "use kill <pid> on the specific process"}
+  - {id: power-command,    regex: '\b(shutdown|reboot|poweroff|halt|kexec|telinit)\b',
+     hint: "power actions are an operator operation"}
+  - {id: fs-destroy,       regex: '\b(wipefs|fdisk|sfdisk|cfdisk|parted|mkfs(\.[a-z0-9]+)?)\b',
+     hint: "filesystem/partition destruction is blocked"}
+  # --- shell escape (REQ-SHG-307) ---
+  - {id: alt-shell,        regex: '\b(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)\b',
+     hint: "only bash/sh are permitted on this host"}
+  - {id: busybox-shell,    regex: '\bbusybox\s+(sh|ash)\b',
+     hint: "only bash/sh are permitted on this host"}
+  # --- power verbs / kill / flags / dd / mounts / swap (REQ-SHG-300..302) ---
+  - {id: power-verb,       regex: '\b(systemctl|loginctl)\s+[^;|&]*\b(poweroff|reboot|halt|kexec|soft-reboot|suspend|hibernate|hybrid-sleep|kill)\b',
+     hint: "power actions are an operator operation"}
+  - {id: kill-mass,        regex: '\bkill\b[^;|&]*(\s-1(\s|$)|%|\s-[0-9]{2,}(\s|$))',
+     hint: "use kill <pid> on the specific process"}
+  - {id: chattr-strip,     regex: '\bchattr\b[^;|&]*\s-i\b',
+     hint: "immutability strip is blocked"}
+  - {id: rm-rootfs,        regex: '\brm\b[^;|&]*--no-preserve-root',
+     hint: "root-fs deletion is blocked"}
+  - {id: dd-device,        regex: '\bdd\b[^;|&]*\bof=/dev/(sd|nvme|mmcblk|vd|mapper/|disk/)',
+     hint: "writing block devices is blocked"}
+  - {id: mount-protected,  regex: '\b(u?mount)\b[^;|&]*/usr/lib/workspace-guard',
+     hint: "guard mountpoints are protected"}
+  - {id: swap-teardown,    regex: '\bswapoff\b[^;|&]*\s-a\b',
+     hint: "swap teardown is blocked"}
+  # --- output suppression (REQ-SHG-308/309/310) ---
+  - {id: suppress-pipe,    regex: '\|\s*(tail|head)\b',
+     hint: "run without truncation; write long output to a file and read it with offset/limit"}
+  - {id: suppress-null,    regex: '(&?>|[0-9]+>>?)\s*/dev/null',
+     hint: "capture output and print it on failure instead of discarding it"}
+  - {id: suppress-swallow, regex: '(\|\||\|&?)\s*(true|:)\b',
+     hint: "handle the exit code explicitly instead of masking it"}
 ```
+
+Adding a rule is a YAML edit (via the secure editor) plus rebuild;
+the Rust code never changes. `build.rs` validates that every pattern
+compiles as a bytes-regex, every id is unique, and every matrix case
+references a known id.
 
 `config/shell_guard_policy_matrix.yaml` holds the case matrix
 (`input` → `blocked`|`allowed`, with expected rule) validated at
@@ -648,18 +580,22 @@ path = "src/shell_guard.rs"
 ```
 
 ```
-src/shell_guard.rs          # entry, argv classification, exec
-src/shell_tokenizer.rs      # byte-level command-position scanner (§5)
-src/shell_policy.rs         # decision engine (§6), compiled tables
-src/shell_env.rs            # env allow-list construction (§8)
+src/shell_guard.rs          # the whole guard: argv classification,
+                            # text acquisition, trust tiers, pattern
+                            # scan, env allow-list, memfd/path exec
 ```
 
-`build.rs` parses `config/shell_guard_policy.yaml` into a compiled
-`SHELL_POLICY` table and validates `config/shell_guard_policy_matrix.yaml`
+Single-file design (~400 lines): the scanner is a regex-table loop,
+so the tokenizer/policy/env modules of earlier drafts collapse into
+one auditable unit. `build.rs` parses
+`config/shell_guard_policy.yaml` into a compiled
+`SHELL_PATTERNS` table (`&[(&str /*id*/, &str /*regex*/, &str /*hint*/)]`)
+and validates `config/shell_guard_policy_matrix.yaml`
 against it (build fails on disagreement). Profile and dependency
 constraints follow REQ-GIT-GUARD §13/§16 (`panic = "abort"`, full
-RELRO, `strip`; `std` + `libc` + `nix` only; `unsafe` limited to
-documented `// SAFETY:` FFI sites: `getauxval`, `lstat`).
+RELRO, `strip`; `std` + `libc` + `nix` + `regex` only; `unsafe`
+limited to documented `// SAFETY:` FFI sites: `getauxval`, `lstat`,
+`memfd_create`, `fcntl`).
 
 ---
 
@@ -668,8 +604,8 @@ documented `// SAFETY:` FFI sites: `getauxval`, `lstat`).
 | Area | Test classes |
 |------|--------------|
 | argv classification | `-c`, bundled `-xc`, `--` separator, `name args` operands, script file, unreadable script, interactive, login argv[0], null bytes, oversize |
-| tokenizer | quoting, escapes, comments, here-doc skip, nested `$( )`, backquotes, function bodies, `case` arms, depth limit, connector provenance, redirection capture (fd-prefixed, quoted targets, `&>` forms) |
-| policy | every blocked family, `mkfs.*` glob, blocked shells (path-qualified `/usr/bin/zsh`, prefix-wrapped `env fish`, `busybox sh`, nested `bash -c` allowed), power verbs, kill matrix (§6.2), chattr/rm/swapoff flag gates, dd device detection, protected-path mounts, basename reduction, prefix unwrapping (`sudo pkill`, `env pkill`, `xargs pkill`) |
+| scanner | non-UTF-8 input, patterns inside quotes match (documented false positive), quote-split evasion does NOT match (documented residual), 1 MiB bound |
+| policy | every pattern family: destructive set, `mkfs.*`, blocked shells (path-qualified `/usr/bin/zsh`, prefixed `env fish`, `busybox sh`, nested `bash -c` allowed), power verbs, kill matrix (§6.2), chattr/rm/swapoff flag gates, dd device prefixes, protected-path mounts |
 | suppression | pipe sinks (`\| tail`, `\| tail -n N`, `2>&1 \| head`, `$(x \| tail)`), redirect targets (`> /dev/null`, `2>/dev/null`, `&> /dev/null`, `>/dev/null 2>&1`, `2>"/dev/null"`), null swallows (`\|\| true`, `\| true`, `\|\| :`), allowed controls (bare `tail file`, `true` after `;`/`&&`, `2>&1` alone) |
 | trust tiers | root-owned script exemption with `would-block` audit, agent-writable script full policy, memfd exec of scanned bytes (script-swap fixture stays blocked), `$0` divergence documented |
 | env | BASH_ENV/functions/LD_* dropped, PATH reset, OPENCODE_*/WORKSPACE_* preserved |
@@ -692,11 +628,14 @@ documented `// SAFETY:` FFI sites: `getauxval`, `lstat`).
 - Blocked invocations are always logged; logging failure never
   downgrades a block.
 - A non-root agent CANNOT escape to an unguarded shell from within
-  the guarded pair: other shell binaries are blocked at any command
-  position, and nested `bash`/`sh` re-enters the guard.
-- Common obfuscations (path-qualified names, `sudo`/`env` prefixes,
-  `$( )` nesting, quoting, function bodies) are structurally covered
-  by the tokenizer, not by pattern luck.
+  the guarded pair: other shell names are blocked by word-boundary
+  pattern anywhere in the text, and nested `bash`/`sh` re-enters the
+  guard.
+- Common invocations (path-qualified names, `sudo`/`env` prefixes,
+  `$( )` nesting, function bodies) match because word-boundary
+  patterns fire anywhere in the raw text; the evasion classes that
+  remain (quote-splitting, variable indirection) are documented in
+  §16.
 
 ---
 
@@ -708,7 +647,19 @@ documented `// SAFETY:` FFI sites: `getauxval`, `lstat`).
   (SPEC-BINARY-LOCK) and auditd (SPEC-AUDIT), not by this guard.
 - **Dynamic eval**: `eval "$x"` where `$x` expands to a blocked
   command is not statically knowable. Static-literal eval IS scanned
-  (REQ-SHG-305).
+  (REQ-SHG-305): the literal appears in the raw text.
+- **Quote-splitting evasion**: `pki''ll`, `p\kill`, `$'pki'LL`-style
+  reassembly produces a blocked command whose raw text never
+  contains it. Raw-text matching cannot see through shell word
+  reassembly (REQ-SHG-208). Containment for the agent is that these
+  forms are conspicuous in review and audit, unlike the one-character
+  suppression idioms this guard exists to kill.
+- **Quoted-text false positives**: patterns match inside quotes and
+  comments (`echo "use | tail"` blocks). Accepted by design
+  (REQ-SHG-207); root's channel for such text is `/bin/bash.real`.
+- **dd symlink indirection**: `dd of=` matching is prefix-based on
+  the literal path; a symlink to a block device under a non-device
+  path is not resolved (no canonicalisation in a text scan).
 - **Alternative shells**: invocation of other shells from within a
   guarded shell is blocked by basename (§6 step 2). The residual is
   a shell binary renamed or copied to an unlisted name (e.g. a
