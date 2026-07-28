@@ -266,6 +266,9 @@ fn main() {
         "shared_paths.yaml",
         "shared_locked_paths.yaml",
         "git_ssh_allowlist.yaml",
+        "shell_guard_policy.yaml",
+        "shell_guard_policy.schema.yaml",
+        "shell_guard_policy_matrix.yaml",
     ];
     check_config_provenance(&config_dir, &config_files);
 
