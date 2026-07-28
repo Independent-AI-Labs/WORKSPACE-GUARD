@@ -567,6 +567,53 @@ wires the shell guard in alongside the git guard:
   (install is idempotent/reconciling, REQ-SHG-603).
 - `guard-check`: runs both health checks; combined exit status.
 
+### 12.4 QEMU Guest E2E (`scripts/qemu/e2e-shell-guard-guest.sh`)
+
+Authoritative end-to-end suite (REQ-SHG-805/806), driven from the
+WORKSPACE-VM repo by `make test-vm-shell-guard`
+(`tests/e2e/test_vm_qemu_shell_guard.py`, reusing
+`workspace/config/vm-guard-qemu.yaml`). It may also be chained
+behind `E2E_SHELL_GUARD=1` at the end of `scripts/qemu/e2e-guest.sh`.
+Self-contained bash (the guest has no bats), six phases:
+
+0. **preflight**: root gate, clean-slate uninstall when a previous
+   partial run left the guard in, stock-bash baseline hash.
+1. **build**: `cargo build` (debug + release) with the guest's
+   rustup env.
+2. **standalone battery**: scratch guard copy +
+   `cap_dac_override=ep` against a manual `/bin/bash.real`; the
+   AT_SECURE gate (no-cap copy exits 3), the full 15-rule block
+   matrix, argv classification, env hygiene, rlimits, trust tiers,
+   sealed-memfd exec, audit (format, redaction), oversize bound,
+   and fail-closed verify (relaxed `.real` mode exits 3).
+3. **install lifecycle**: check reports NOT INSTALLED, install,
+   check OK, structural assertions (seal, +i, caps, divert, hook,
+   hash), live-fire through the installed `/bin/bash` as root and
+   as the non-root `workspace` user (per-user audit), idempotent
+   reinstall.
+4. **survivability**: hook content, divert listing, login shells
+   for the non-root user, the post-transaction repair loop.
+5. **reconcile**: missing-hook and stale-binary drift are reported
+   DRIFTED and repaired; fail-closed proof (cap-stripped guard
+   exits 3) plus the recovery runbook: stage the installer
+   root-owned and run it under the sealed `/bin/bash.real`
+   (REQ-SHG-806).
+6. **uninstall**: NOT INSTALLED afterwards, sealed original/divert/
+   hook removed, `/bin/bash` byte-identical to the phase-0
+   baseline, unguarded behaviour confirmed.
+
+The suite is authoritative in the QEMU guest only: rootless
+containers cannot establish AT_SECURE (their overlay stores file
+capabilities as `user.overlay` xattrs the kernel never honors),
+and Ubuntu hosts restrict unprivileged user namespaces via
+AppArmor, so neither podman nor namespace nesting can substitute.
+
+The script body follows the same pattern-dodge discipline as
+`scripts/install-shell-guard`: it must run to completion (and be
+re-runnable for cleanup) while the guard is active, so probe
+strings are built by concatenation and no barred idiom appears
+literally.
+
 ---
 
 ## 13. Rust Project Structure and build.rs

@@ -505,6 +505,29 @@ handled by `make install-shell-guard`.
   a valid bytes-regex, every entry carries a non-empty hint, and
   every matrix case references a known rule id.
 
+- **REQ-SHG-805**: An authoritative end-to-end suite
+  (`scripts/qemu/e2e-shell-guard-guest.sh`, driven by the
+  WORKSPACE-VM pytest `tests/e2e/test_vm_qemu_shell_guard.py`,
+  `make test-vm-shell-guard`) shall run inside a bare QEMU Linux
+  guest as real root and cover: the full runtime block matrix
+  through a capability-context guard, the install lifecycle
+  (NOT INSTALLED -> install -> OK, idempotent reconcile), live-fire
+  blocks through the installed `/bin/bash` as root and as a
+  non-root user (with per-user audit), survivability (dpkg divert,
+  apt hook, login shells), drift repair (missing hook, stale
+  binary), and uninstall with byte-identical stock restore.
+  Rootless container runtimes cannot establish AT_SECURE (file
+  capabilities are stored as `user.overlay` xattrs the kernel
+  ignores), so the capability-context battery is authoritative in
+  the QEMU guest only.
+
+- **REQ-SHG-806**: The QEMU suite shall verify the fail-closed
+  property and its recovery runbook: stripping the guard's file
+  capability makes every new shell exit 3, and recovery is staged
+  root-owned execution of the installer under the sealed
+  `/bin/bash.real` (0700, root-only), after which
+  `shell-guard-check` reports OK.
+
 ---
 
 ## 10. Non-Goals

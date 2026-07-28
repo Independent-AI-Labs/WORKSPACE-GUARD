@@ -33,4 +33,9 @@ cd "${_GUARD_ROOT}"
 echo "==> QEMU guest: host-exec E2E (authoritative)..."
 bash scripts/podman/e2e-host-exec.sh
 
+if [[ "${E2E_SHELL_GUARD:-0}" == "1" ]]; then
+    echo "==> QEMU guest: shell-guard E2E (authoritative)..."
+    bash scripts/qemu/e2e-shell-guard-guest.sh
+fi
+
 echo "==> QEMU guest E2E complete"
