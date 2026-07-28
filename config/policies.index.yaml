@@ -43,7 +43,7 @@ policies:
   - id: shell_guard_policy
     title: Shell Guard Policy
     category: Shell Guard
-    description: Pattern table for the shell guard (SPEC-SHELL-GUARD section 7): blocked shell commands and patterns.
+    description: 'Pattern table for the shell guard (SPEC-SHELL-GUARD section 7): blocked shell commands and patterns.'
   - id: shell_guard_policy_matrix
     title: Shell Policy Test Matrix
     category: Shell Guard
@@ -63,11 +63,11 @@ policies:
   - id: home-lock-users
     title: Home Lock Users
     category: Host Hardening
-    description: Users whose home directories are locked down (LOCAL ONLY: gitignored, per-host copy).
+    description: 'Users whose home directories are locked down (LOCAL ONLY: gitignored, per-host copy).'
   - id: host-provision
     title: Host Provisioning
     category: Host Hardening
-    description: Per-host provisioning settings (LOCAL ONLY: gitignored; see SPEC-HOST-PROVISION).
+    description: 'Per-host provisioning settings (LOCAL ONLY: gitignored; see SPEC-HOST-PROVISION).'
   - id: system-deps
     title: System Dependencies
     category: Host Hardening
