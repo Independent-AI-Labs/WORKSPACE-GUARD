@@ -250,6 +250,19 @@ _clear_stub_env() {
 guard_setup() {
     _setup_tmpdir
     _clear_stub_env
+    # Hermetic PATH: hook contexts (pre-commit/pre-push) invoke the suite
+    # with a PATH that lacks the sbin dirs, so root-tier tools (visudo,
+    # useradd) vanish and tests fail nondeterministically depending on
+    # who invoked bats. Append (never prepend) so stubs keep priority.
+    case ":$PATH:" in
+        *:/usr/sbin:*) ;;
+        *) PATH="$PATH:/usr/sbin" ;;
+    esac
+    case ":$PATH:" in
+        *:/sbin:*) ;;
+        *) PATH="$PATH:/sbin" ;;
+    esac
+    export PATH
     export WORKSPACE_GUARD_STATE_DIR="$TEST_TMPDIR/guard-state"
     export WORKSPACE_BINARY_GUARD_STATE_DIR="$TEST_TMPDIR/binary-guard-state"
     mkdir -p "$WORKSPACE_GUARD_STATE_DIR" "$WORKSPACE_BINARY_GUARD_STATE_DIR"
