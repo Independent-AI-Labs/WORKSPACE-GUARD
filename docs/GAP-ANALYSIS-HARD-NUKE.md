@@ -203,7 +203,7 @@ Gaps are numbered for traceability. Severity: **C** = critical (OS destruction o
 
 | ID | Gap | Evidence | Guard layer that should close it |
 |----|-----|----------|----------------------------------|
-| **GAP-C01** | Unguarded shell/build tools (`make`, `cargo`, `bash`, `interpreted runtime`, `node`) can write block devices or invoke disk utilities | [REQUIREMENTS.md](../REQUIREMENTS.md) §Non-Requirements; no wrap targets in Makefile/README | II-B sandbox (Landlock + `PrivateDevices`) |
+| **GAP-C01** | Unguarded shell/build tools (`make`, `cargo`, `bash`, `interpreted runtime`, `node`) can write block devices or invoke disk utilities | [REQUIREMENTS.md](../REQUIREMENTS.md) §Non-Requirements; no wrap targets in Makefile/README | II-B sandbox (Landlock + `PrivateDevices`). **Partially mitigated (2026-07):** the shell guard (`workspace-shell-guard` at `/bin/bash`) blocks `dd of=/dev/...`, `mkfs*`, `wipefs`, `swapoff`, `chattr -i`, and mounts of guard paths in every non-root `-c` string and untrusted script (SPEC-SHELL-GUARD §6). Build tools that exec disk utilities directly (not via bash) remain unguarded until II-B. |
 | **GAP-C02** | No `/dev/sd*`, `/dev/nvme*`, `of=/dev/` policy anywhere in guard config or Rust | Grep: zero matches in `src/`, `config/` | II-B or new path-policy layer |
 | **GAP-C03** | `dd` catalog-only; `path: null`, `reject_patterns: []` | [res/binary-lock.yaml](../res/binary-lock.yaml) | II-A extension + arg-validate |
 | **GAP-C04** | `mkfs`, `wipefs`, `parted`, `fdisk`, `losetup`, `blockdev` not in policy catalog | [res/binary-lock.yaml](../res/binary-lock.yaml) grep | II-A extension |

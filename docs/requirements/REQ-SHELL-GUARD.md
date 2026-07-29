@@ -92,7 +92,8 @@ handled by `make install-shell-guard`.
   the binary lock's `.real` sealing).
 
 - **REQ-SHG-102**: The binary shall detect privileged execution via
-  `getauxval(AT_SECURE)`. If `AT_SECURE == 0` (no capability context),
+  the `AT_SECURE` auxiliary-vector entry (read from
+  `/proc/self/auxv`). If `AT_SECURE == 0` (no capability context),
   the binary shall refuse to operate and exit with code 3.
 
 - **REQ-SHG-103**: Before `execve()`, the binary shall verify that
@@ -396,10 +397,13 @@ handled by `make install-shell-guard`.
   rather than failing. `make uninstall-shell-guard` shall fully
   reverse the install.
 
-- **REQ-SHG-601**: Install shall relocate the real shell: copy
-  `/bin/bash` to `/bin/bash.real`, `chown root:root`, `chmod 0700`,
-  `chattr +i`, verify the copy by checksum, and only then install the
-  guard binary at `/bin/bash` with `cap_dac_override=ep`.
+- **REQ-SHG-601**: Install shall relocate the real shell: copy the
+  resolved bash path to `/bin/bash.real`, `chown root:root`,
+  `chmod 0700`, verify the copy is a valid ELF, and seal it with
+  `chattr +i`. On reconcile, an already-immutable `.real` proves
+  ownership and mode; the chown/chmod step is skipped (it would
+  fail EPERM). The guard binary is installed at the resolved bash
+  path with `cap_dac_override=ep`.
 
 - **REQ-SHG-602**: Install shall register a `dpkg-divert` for
   `/bin/bash` (and `/bin/sh` when covered) redirecting to
@@ -415,24 +419,29 @@ handled by `make install-shell-guard`.
   and print a clear error. A host shall never be left without a
   working `/bin/bash`.
 
-- **REQ-SHG-605**: Post-install verification shall confirm: correct
-  modes/owners/caps; `bash -c 'echo ok'` succeeds for a non-root
-  user; `bash -c 'pkill x'` is blocked with exit 1 for a non-root
-  user; `bash -c 'ls | tail'` and `bash -c 'ls 2>/dev/null'` are
-  blocked with exit 1 for a non-root user AND for root; a
-  trusted-tier fixture script (root-owned, mode 0755, under a
-  root-owned directory) containing `2>/dev/null` executes with a
-  `would-block` audit line; `bash --version` works; interactive
-  `bash -l` works.
+- **REQ-SHG-605**: Post-install verification is split between the
+  installer and the QEMU guest e2e. The installer shall confirm:
+  correct modes/owners/caps, divert registered, apt hook present,
+  guard hash matches the release build, root `-c` exits 3
+  (fail-closed), and non-root benign `-c` exits 0. The QEMU guest
+  e2e (`scripts/qemu/e2e-shell-guard-guest.sh`) shall additionally
+  confirm: `bash -c 'pkill x'` blocked with exit 1 as non-root;
+  `bash -c 'ls | tail'` and `bash -c 'ls 2>/dev/null'` blocked with
+  exit 1 as non-root and fail-closed exit 3 as root; a trusted-tier
+  fixture script (root-owned, mode 0755, under a root-owned
+  directory) containing `2>/dev/null` executes with a `would-block`
+  audit line; `bash --version` works; interactive/login `bash -l`
+  works.
 
 - **REQ-SHG-606**: Because `/bin/sh` and `/bin/bash` are on the
   critical path of every boot script and cron job, install shall
-  verify the guard passes a sanity set of POSIX invocations (`sh -c`,
-  `bash -c`, `bash script`, here-doc, pipeline, substitution) before
-  committing the divert, and shall refuse to proceed (roll back)
-  otherwise. The sanity set shall include a dpkg-style root-owned
-  script exercising `2>/dev/null` to prove the trusted tier keeps
-  package operations working.
+  sanity-probe the guard as a non-root probe user (benign `-c` exit
+  0, `--version` exit 0, concat-built destructive probe exit 1) and
+  shall confirm root probes exit 3, before and after committing the
+  divert, and shall refuse to proceed (roll back) otherwise. The
+  QEMU guest e2e shall additionally prove a dpkg-style root-owned
+  script exercising `2>/dev/null` keeps working via the trusted
+  tier, so package operations keep functioning.
 
 ---
 
@@ -443,12 +452,14 @@ handled by `make install-shell-guard`.
   size target: under 500KB stripped. Guard logic on the pass-through
   path shall complete in under 5ms.
 
-- **REQ-SHG-701**: Dependencies shall be limited to `std`, `libc`
-  (irreducible FFI only), `nix` (safe wrappers), and the `regex`
+- **REQ-SHG-701**: Dependencies shall be limited to `std`, `libc`,
+  `nix` (safe wrappers), `rustix` (safe `memfd_create` with
+  `MFD_EXEC`, which nix 0.29 does not expose), and the `regex`
   crate (already a workspace dependency; used with
   `regex::bytes::Regex` for byte-exact matching). No `clap`.
-  `unsafe` is limited to documented `// SAFETY:` FFI sites
-  (`getauxval`, `lstat` on `.real`, `memfd_create`, `fcntl`).
+  `shell_guard.rs` shall contain no `unsafe` blocks: `AT_SECURE`
+  from `/proc/self/auxv`, metadata via `std::fs::symlink_metadata`,
+  memfd via `rustix`.
 
 - **REQ-SHG-702**: The guard shall NOT spawn any subprocess for
   parsing or decision logic. The only process transition is the final

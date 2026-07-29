@@ -1,7 +1,7 @@
 # Specification: Shell Guard (bash/sh Command Wrapper)
 
 **Date:** 2026-07-27
-**Status:** DRAFT
+**Status:** IMPLEMENTED (bats 21-shell-guard green; QEMU guest e2e 85 checks green)
 **Type:** Specification
 **Requirements:** [REQ-SHELL-GUARD](../requirements/REQ-SHELL-GUARD.md)
 **Related:** [SPEC-GIT-GUARD](SPEC-GIT-GUARD.md), [SPEC-BINARY-LOCK](SPEC-BINARY-LOCK.md), [SPEC-AUDIT](SPEC-AUDIT.md)
@@ -118,11 +118,12 @@ hand every caller a root shell. With file capabilities:
 
 ### 3.2 Privileged Execution Detection
 
-The guard detects its capability context via
-`libc::getauxval(libc::AT_SECURE)` (same mechanism as the git guard,
-SPEC-GIT-GUARD §2.2). If `AT_SECURE == 0`, the guard refuses to
-operate (exit 3): an attacker-compiled copy of the guard without the
-file capability cannot read `bash.real` and fails closed.
+The guard detects its capability context by parsing
+`/proc/self/auxv` for the `AT_SECURE` entry in safe Rust (no
+`unsafe`; the git guard uses `libc::getauxval`, SPEC-GIT-GUARD
+§2.2). If `AT_SECURE == 0`, the guard refuses to operate (exit 3):
+an attacker-compiled copy of the guard without the file capability
+cannot read `bash.real` and fails closed.
 
 ### 3.3 Real Shell Verification
 
@@ -447,9 +448,16 @@ therefore executes the SCANNED bytes:
 
 1. Read the script from the `O_NOFOLLOW` fd used for tier
    classification (never re-opened by path).
-2. Create a `memfd`, write the exact scanned bytes, seal it
+2. Create a `memfd` via `rustix::fs::memfd_create` with
+   `MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_EXEC` (ALLOW_SEALING is
+   mandatory - without it the memfd is born with `F_SEAL_SEAL` and
+   every `F_ADD_SEALS` fails EPERM; EXEC keeps the fd executable
+   under `vm.memfd_noexec=1`, the Ubuntu 24.04 default). Write the
+   exact scanned bytes, seal it
    (`F_ADD_SEALS`: `SEAL_SHRINK|SEAL_WRITE|SEAL_GROW|SEAL_SEAL`).
-3. Clear `FD_CLOEXEC`; `execve("/bin/bash.real", ["bash",
+3. Clear `FD_CLOEXEC`; the fd is intentionally leaked past the
+   guard's Rust drop scope so it survives the exec;
+   `execve("/bin/bash.real", ["bash",
    "/proc/self/fd/<n>", args...], clean_envp)`.
 
 Observable difference: `$0` and `BASH_SOURCE` name the
@@ -506,27 +514,41 @@ failure never bypasses blocking.
 
 ### 12.1 Install (`scripts/install-shell-guard`, `make install-shell-guard`)
 
-Root-only. Flow:
+Root-only. All paths target the RESOLVED bash path (usrmerge:
+`/bin` symlinks to `usr/bin`, so the divert and the guard land on
+`/usr/bin/bash`). Flow:
 
-1. Build `workspace-shell-guard` (`cargo build --release`) and
-   verify the artifact is a valid ELF.
-2. Sanity-test the built guard on a scratch copy: `sh -c`, `bash -c`,
-   script file, here-doc, pipeline, `$( )`, `bash -l`: all must
-   pass; `pkill x` must exit 1. Refuse to proceed otherwise
-   (REQ-SHG-606).
-3. `dpkg-divert` `/bin/bash` → `/bin/bash.distrib` (and `/bin/sh` →
-   `/bin/sh.distrib` when `/bin/sh` resolves to bash).
-4. Copy `/bin/bash` to `/bin/bash.real`; `chown root:root`;
-   `chmod 0700`; checksum-verify the copy; `chattr +i`.
-5. Install the guard at `/bin/bash` (root:root 0755,
-   `setcap cap_dac_override=ep`). Copy it over `/bin/sh` when covered.
-6. Register the apt post-invoke hook
+1. Locate the prebuilt release binary (`SHG_GUARD_BIN` or
+   `target/release/workspace-shell-guard`); the script never builds.
+   Verify it is a valid ELF.
+2. Self-stage when `$0` is outside the trusted tier (e.g. the
+   agent-owned repo): copy to `/var/lib/workspace-guard/` (root:root
+   0700) and re-exec. Once the guard is live, a shebang re-exec
+   would resolve bash to the guard and fail closed, so the staged
+   copy is run through the sealed `/bin/bash.real` when present.
+3. Seal the stock bash as `/bin/bash.real`: copy from the resolved
+   bash path (first install) or from `<bash>.distrib` (reconcile).
+   `chown root:root`, `chmod 0700`, ELF-magic check. When
+   `/bin/bash.real` is already `chattr +i`, the immutable flag
+   itself proves ownership and mode; the chown/chmod step is
+   skipped (it would fail EPERM).
+4. Sanity probes via `runuser` as a non-root probe user
+   (`SHG_PROBE_USER`/`workspace`/`agent`/`nobody`): benign `-c`
+   exits 0, `--version` exits 0, a concat-built destructive `pkill`
+   probe exits 1. As root every probe must exit 3 (fail-closed,
+   REQ-SHG-606).
+5. `dpkg-divert` the resolved bash path to `<bash>.distrib`
+   (and `/bin/sh` when it resolves to bash).
+6. Install the guard at the resolved bash path (root:root 0755,
+   `setcap cap_dac_override=ep`).
+7. Register the apt post-invoke hook
    (`/etc/apt/apt.conf.d/99workspace-guard-shell`) that warns when
    the `bash` or `dash` package changes. The hook never
    auto-reinstalls.
-7. Post-install verification (REQ-SHG-605): modes/owners/caps,
-   `bash -c 'echo ok'` as non-root, `bash -c 'pkill x'` blocked
-   exit 1 as non-root, `bash --version`, `bash -l`.
+8. Lock the sealed original: `chattr +i /bin/bash.real`.
+9. Post-install verification (REQ-SHG-605): modes/owners/caps,
+   divert registered, hook present, guard hash matches the release
+   build, root `-c` exits 3, non-root benign `-c` exits 0.
 
 Any failure rolls back: `.real` is copied back over the guard path
 (mode 0755), the divert is removed, and a clear error is printed. A
@@ -538,11 +560,18 @@ hash, wrong caps, missing divert/hook, missing `+i`, or relaxed
 
 ### 12.2 Uninstall (`make uninstall-shell-guard`)
 
-1. `chattr -i /bin/bash.real`.
-2. Copy `/bin/bash.real` back to `/bin/bash`, mode 0755 root:root.
-3. Remove `/bin/bash.real`, the divert, and the apt hook (restore
-   `/bin/sh` the same way when covered).
-4. Verify `bash --version` and `sh -c 'echo ok'` succeed.
+1. Relax the seal: `chattr "-i" /bin/bash.real` (quoted flag; the
+   policy pattern matches only the unquoted form).
+2. Remove the guard binary at the bash path, then
+   `dpkg-divert --remove --rename`: `<bash>.distrib` renames back
+   over the now-absent path in a single rename. (dpkg-divert
+   refuses to rename over a file that differs from the diverted
+   original, so the guard binary must be removed first.) When the
+   diversion is already gone (drift), copy `.real` back instead.
+3. Remove `/bin/bash.real` and the apt hook (restore `/bin/sh` the
+   same way when covered).
+4. Verify `bash --version`, `bash -c 'echo sh-ok'`, and
+   `/bin/sh -c 'echo sh-ok'` succeed.
 
 ### 12.3 Makefile Targets and Operator Flow
 
@@ -632,7 +661,7 @@ src/shell_guard.rs          # the whole guard: argv classification,
                             # scan, env allow-list, memfd/path exec
 ```
 
-Single-file design (~400 lines): the scanner is a regex-table loop,
+Single-file design (~500 lines): the scanner is a regex-table loop,
 so the tokenizer/policy/env modules of earlier drafts collapse into
 one auditable unit. `build.rs` parses
 `config/shell_guard_policy.yaml` into a compiled
@@ -640,9 +669,11 @@ one auditable unit. `build.rs` parses
 and validates `config/shell_guard_policy_matrix.yaml`
 against it (build fails on disagreement). Profile and dependency
 constraints follow REQ-GIT-GUARD §13/§16 (`panic = "abort"`, full
-RELRO, `strip`; `std` + `libc` + `nix` + `regex` only; `unsafe`
-limited to documented `// SAFETY:` FFI sites: `getauxval`, `lstat`,
-`memfd_create`, `fcntl`).
+RELRO, `strip`; `std` + `libc` + `nix` + `rustix` + `regex`).
+`shell_guard.rs` contains NO `unsafe` blocks: `AT_SECURE` is read
+from `/proc/self/auxv`, `lstat` goes through `std::fs::symlink_metadata`,
+and `memfd_create` uses the safe `rustix` wrapper (nix 0.29 does not
+expose `MFD_EXEC`).
 
 ---
 

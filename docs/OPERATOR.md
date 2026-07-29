@@ -6,11 +6,45 @@ Run from the **workspace root** (`WORKSPACE-VM`):
 sudo make guard-up       # idempotent bring-up (provision + guard install as needed)
 sudo make guard-refresh  # after pulling guard code (alias: refresh-guard)
 make guard-check         # read-only health
-sudo make guard-down     # remove git guard only (provision state preserved)
+sudo make guard-down     # remove shell guard first, then git guard (provision state preserved)
 sudo GUARD_PURGE_CONFIRM=1 make guard-reset  # factory reset then bring-up
 ```
 
 Policy and implementation detail: `docs/specifications/`.
+
+## Shell guard (`/bin/bash` replacement)
+
+The shell guard installs `workspace-shell-guard` at the resolved bash
+path (usrmerge: `/usr/bin/bash`) via `dpkg-divert`, seals the stock
+bash as `/bin/bash.real` (0700 root:root, `chattr +i`), and drops an
+apt `Post-Invoke` warn hook (`/etc/apt/apt.conf.d/99workspace-guard-shell`).
+
+```bash
+sudo bash scripts/install-shell-guard    # install / reconcile (idempotent)
+bash scripts/shell-guard-check           # read-only health: OK / DRIFTED / NOT INSTALLED
+sudo bash scripts/uninstall-shell-guard  # restore stock bash byte-identical
+```
+
+While the guard is live, root shell invocations fail closed (exit 3,
+`AT_SECURE == 0` by design). Only non-root users get scanning shells.
+
+Drift repair: `shell-guard-check` exits 1 on drift (missing hook,
+stale binary hash, relaxed `.real` mode, missing caps). Re-run
+`install-shell-guard`; it reconciles all of it.
+
+Fail-closed recovery (guard binary lost its caps; every new shell
+exits 3):
+
+```bash
+sudo install -d -m 0700 /var/lib/workspace-guard
+sudo install -m 0700 -o root -g root scripts/install-shell-guard \
+    /var/lib/workspace-guard/shg-repair
+sudo /bin/bash.real /var/lib/workspace-guard/shg-repair
+sudo rm -f /var/lib/workspace-guard/shg-repair
+```
+
+The sealed `/bin/bash.real` (0700, root-only) never scans; the
+root-owned staging copy satisfies the trusted-tier check.
 
 ## Policy YAML edits
 

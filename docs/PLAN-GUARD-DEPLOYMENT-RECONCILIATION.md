@@ -1,6 +1,6 @@
 # Git Guard - Deployment Reconciliation Plan
 
-**Status:** PLAN - not implemented, not a specification  
+**Status:** SUPERSEDED - the deployment-class machinery this plan describes has since shipped (`install-shell-guard`/`shell-guard-check`/`guard-operator.sh` reconcile flow); kept for historical traceability  
 **Date:** 2026-07-14  
 **Location:** `docs/PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md`
 

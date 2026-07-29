@@ -10,7 +10,7 @@ and fleet identity files so agents cannot tamper with enforcement, and keeps
 a continuous record of the result through GTFOBins baselines, drift checks,
 and auditd/AIDE rules.
 
-It is organized into four deployed programs:
+It is organized into five deployed programs:
 
 1. **Program I - Git Guard.** Replaces `/usr/bin/git` and execs the real
    binary (`/usr/bin/git.original`, root-only, mode `0700`) only after
@@ -25,6 +25,15 @@ It is organized into four deployed programs:
    deploys auditd and AIDE rules.
 4. **Program III - Home Lock.** Root-locks `~/.gitconfig`, `~/.ssh/*`, and
    declared config globs inside fleet accounts.
+5. **Shell Guard.** Replaces `/bin/bash` with `workspace-shell-guard`,
+   which scans every `-c` string and untrusted script against a
+   regex pattern table (destructive commands, output suppression,
+   exit swallows), executes untrusted scripts from a sealed memfd,
+   exempts root-owned trusted-tier scripts with a `would-block` audit
+   line, and fails closed (exit 3) whenever its capability context is
+   missing - including every root invocation. Stock bash is sealed as
+   `/bin/bash.real` (0700 root:root, `chattr +i`) behind a
+   `dpkg-divert`.
 
 Program II-B - Sandbox is roadmap: a hardened systemd unit template ships,
 but the launcher binary that would apply Landlock, seccomp, and namespace
@@ -59,6 +68,7 @@ detail is in `docs/specifications/`; operator workflow in
 | Long-running agents under systemd | **II-B - Sandbox** | Roadmap: unit template shipped, launcher not built | `make install-sandbox` (unit only) |
 | Audit and inventory | **II-C + II-D** | Deployed | `make install-auditd`, `make sync-gtfobins` |
 | Home-directory identity files | **III - Home lock** | Deployed | `make install-home-lock` |
+| `/bin/bash` command scanning | **Shell guard** | Deployed | `sudo make install-shell-guard` |
 
 Programs compose on one host. Each has its own install target, spec, and
 operational lifecycle.
@@ -98,6 +108,9 @@ flowchart TB
 
   P2A --> S2["GTFOBins SUID/CAP paths"]
   S2 --> E2["workspace-binary-guard → path.real"]
+
+  SH[Shell guard] --> S5["/bin/bash (dpkg-divert)"]
+  S5 --> E5["workspace-shell-guard → bash.real (sealed +i)"]
 
   P2B --> S3["workspace-agent@.service"]
   S3 --> E3["unit template; launcher roadmap"]
@@ -140,6 +153,21 @@ Invariants enforced by the current code:
   (`src/ci_integrity.rs`).
 - Provisioned SSH key material is kept off agent-readable disk and offered
   through the guard-managed ssh wrapper (`config/git_ssh_allowlist.yaml`).
+
+Shell-guard invariants:
+
+- Every non-root `-c` string and untrusted script is scanned against a
+  compiled-in regex pattern table; blocks exit 1, oversize/null-byte exit 2.
+- Untrusted scripts execute the exact scanned bytes via a sealed memfd
+  (`MFD_ALLOW_SEALING|MFD_EXEC`, `F_ADD_SEALS` full set), closing the
+  scan-then-exec TOCTOU race.
+- Trusted tier (script owned by root, no group/other-writable path
+  component) is exempt with a `would-block` audit line.
+- Root invocations always fail closed (exit 3): the guard only operates in
+  a file-capability context (`AT_SECURE != 0`).
+- Stock bash is sealed as `/bin/bash.real` (0700 root:root, `chattr +i`)
+  behind a `dpkg-divert`; blocks are appended to the invoking user's
+  passwd-home `.workspace-guard.log` with `NAME=value` redaction.
 
 ---
 
