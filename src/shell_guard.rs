@@ -378,11 +378,18 @@ fn exec_real(args: &[OsString], script_fd_path: Option<(usize, String)>) -> ! {
 
 fn memfd_exec_path(content: &[u8]) -> String {
     use nix::fcntl::{fcntl, FcntlArg, FdFlag, SealFlag};
-    use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
-    use std::os::unix::io::AsRawFd;
+    use rustix::fs::{memfd_create, MemfdFlags};
+    use std::os::unix::io::{AsRawFd, IntoRawFd};
 
-    let fd = match memfd_create(c"workspace-shell-guard", MemFdCreateFlag::MFD_CLOEXEC) {
-        Ok(f) => f,
+    // rustix safe wrapper: nix 0.29 does not expose MFD_EXEC. Flags:
+    // ALLOW_SEALING is mandatory (without it the memfd is born with
+    // F_SEAL_SEAL and every F_ADD_SEALS fails EPERM); EXEC keeps the
+    // fd executable under vm.memfd_noexec=1 (Ubuntu 24.04).
+    let fd = match memfd_create(
+        c"workspace-shell-guard",
+        MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING | MemfdFlags::EXEC,
+    ) {
+        Ok(fd) => fd,
         Err(e) => {
             eprintln!("shell guard: memfd_create failed: {}", e);
             process::exit(3);
@@ -396,15 +403,18 @@ fn memfd_exec_path(content: &[u8]) -> String {
         | SealFlag::F_SEAL_WRITE
         | SealFlag::F_SEAL_GROW
         | SealFlag::F_SEAL_SEAL;
-    if fcntl(fd.as_raw_fd(), FcntlArg::F_ADD_SEALS(seals)).is_err() {
-        eprintln!("shell guard: memfd sealing failed");
+    if let Err(e) = fcntl(fd.as_raw_fd(), FcntlArg::F_ADD_SEALS(seals)) {
+        eprintln!("shell guard: memfd sealing failed: {}", e);
         process::exit(3);
     }
-    if fcntl(fd.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).is_err() {
-        eprintln!("shell guard: memfd cloexec clear failed");
+    if let Err(e) = fcntl(fd.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())) {
+        eprintln!("shell guard: memfd cloexec clear failed: {}", e);
         process::exit(3);
     }
-    format!("/proc/self/fd/{}", fd.as_raw_fd())
+    // Leak the fd on purpose: it must survive the execve into the real
+    // shell. Dropping the OwnedFd here would close it before exec.
+    let leaked = fd.into_raw_fd();
+    format!("/proc/self/fd/{}", leaked)
 }
 
 fn at_secure() -> u64 {

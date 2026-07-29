@@ -118,11 +118,17 @@ if [ "$DRY_RUN" -eq 0 ]; then
         exit 2
     fi
     if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && [ "${SHG_STAGED:-0}" != "1" ] && ! is_trusted_tier "$0"; then
-        STAGE_DIR="$SHG_ROOT/run/workspace-guard"
+        STAGE_DIR="$SHG_ROOT/var/lib/workspace-guard"
         install -d -m 0700 "$STAGE_DIR"
         STAGE="$STAGE_DIR/install-shell-guard.$$"
         install -m 0700 -o root -g root "$0" "$STAGE"
         log "re-exec via root-owned staging copy (trusted tier): $STAGE"
+        # Once the guard is live, a shebang re-exec resolves bash to
+        # the guard, which fails closed for root (AT_SECURE == 0).
+        # The sealed bash.real never scans; use it when present.
+        if [ -x /bin/bash.real ]; then
+            SHG_STAGED=1 exec /bin/bash.real "$STAGE" "$@"
+        fi
         SHG_STAGED=1 exec "$STAGE" "$@"
     fi
 fi
@@ -159,19 +165,49 @@ trap rollback EXIT
 # --- sanity probes on a scratch copy (REQ-SHG-606) ---------------------------
 # Runs only against the real root: with SHG_ROOT set the guard's
 # compiled-in /bin/bash.real path does not exist inside the fixture.
+# AT_SECURE is only raised for non-root execs of the fcap binary:
+# root always fails closed (exit 3). Probes that exercise real
+# scanning semantics therefore run through a non-root user when one
+# exists. Sets PROBE_USER (empty when no candidate exists).
+detect_probe_user() {
+    PROBE_USER=""
+    local cand
+    for cand in "${SHG_PROBE_USER:-}" workspace agent nobody; do
+        if [ -n "$cand" ] && id "$cand" >"$DEVNULL" 2>&1; then
+            PROBE_USER="$cand"
+            return 0
+        fi
+    done
+}
+
 sanity_probes() {
     [ -z "$SHG_ROOT" ] || { log "SHG_ROOT set: skipping runtime sanity probes"; return 0; }
-    local scratch rc
+    local scratch rc want_ok want_block
     scratch="$(mktemp /tmp/shg-sanity.XXXXXX)"
     cp "$GUARD_BIN" "$scratch"
+    chmod 0755 "$scratch"
     setcap cap_dac_override=ep "$scratch"
     # Built by concat so the policy pattern never matches this script.
     local probe="pk"; probe="${probe}ill x"
-    "$scratch" -c 'echo shg-sanity' > "$DEVNULL" || { rm -f "$scratch"; die "sanity: guard rejects a benign -c string"; }
-    "$scratch" --version > "$DEVNULL" || { rm -f "$scratch"; die "sanity: --version pass-through failed"; }
+    detect_probe_user
+    local -a run_as=()
+    if [ -n "$PROBE_USER" ] && [ "$(id -u)" = "0" ]; then
+        run_as=(runuser -u "$PROBE_USER" --)
+        want_ok=0
+        want_block=1
+    else
+        want_ok=3
+        want_block=3
+    fi
     rc=0
-    "$scratch" -c "$probe" > "$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 1 ] || { rm -f "$scratch"; die "sanity: guard did not block the destructive probe (rc=$rc)"; }
+    "${run_as[@]}" "$scratch" -c 'echo shg-sanity' >"$DEVNULL" 2>&1 || rc=$?
+    [ "$rc" -eq "$want_ok" ] || { rm -f "$scratch"; die "sanity: benign -c rc=$rc (want $want_ok)"; }
+    rc=0
+    "${run_as[@]}" "$scratch" --version >"$DEVNULL" 2>&1 || rc=$?
+    [ "$rc" -eq "$want_ok" ] || { rm -f "$scratch"; die "sanity: --version pass-through rc=$rc (want $want_ok)"; }
+    rc=0
+    "${run_as[@]}" "$scratch" -c "$probe" >"$DEVNULL" 2>&1 || rc=$?
+    [ "$rc" -eq "$want_block" ] || { rm -f "$scratch"; die "sanity: destructive probe rc=$rc (want $want_block)"; }
     rm -f "$scratch"
     log "sanity probes passed (benign -c, --version, destructive probe blocked)"
 }
@@ -221,9 +257,13 @@ if [ ! -f "$REAL_PATH" ]; then
         die "guard installed but $REAL_PATH and $DISTRIB_PATH are both missing; cannot reconstruct stock bash"
     fi
 fi
-chown root:root "$REAL_PATH"
-chmod 0700 "$REAL_PATH"
-elf_magic "$REAL_PATH" || die "sealed original $REAL_PATH is not a valid ELF"
+# chown/chmod on an already-sealed (+i) bash.real fail with EPERM; the
+# immutable flag itself proves ownership and mode are locked in.
+if ! is_immutable "$REAL_PATH"; then
+    chown root:root "$REAL_PATH"
+    chmod 0700 "$REAL_PATH"
+    elf_magic "$REAL_PATH" || die "sealed original $REAL_PATH is not a valid ELF"
+fi
 
 # 2. Sanity probes now that /bin/bash.real exists (first install) or
 #    against the existing one (reconcile).
@@ -279,11 +319,18 @@ has_guard_cap "$BASH_PATH" || die "post-check: guard capability missing on $BASH
 [ "$(stat -c %a "$BASH_PATH")" = "755" ] || die "post-check: $BASH_PATH mode is not 0755"
 is_immutable "$REAL_PATH" || die "post-check: $REAL_PATH lost +i"
 if [ -z "$SHG_ROOT" ]; then
-    [ "$("$BASH_PATH" -c 'echo shg-ok')" = "shg-ok" ] || die "post-check: bash -c failed"
-    "$BASH_PATH" --version > "$DEVNULL" || die "post-check: bash --version failed"
-    if id nobody > "$DEVNULL" 2>&1; then
-        [ "$(su -s "$BASH_PATH" nobody -c 'echo shg-nonroot' 2>"$DEVNULL")" = "shg-nonroot" ] \
-            || die "post-check: bash -c as non-root failed"
+    # Root fails closed through the guard by design (AT_SECURE stays 0
+    # for root execs of the fcap binary). Verify that, then verify the
+    # real scanning path as a non-root user when one exists.
+    rc=0
+    "$BASH_PATH" -c 'echo shg-ok' >"$DEVNULL" 2>&1 || rc=$?
+    [ "$rc" -eq 3 ] || die "post-check: root bash -c rc=$rc (want 3 fail-closed)"
+    detect_probe_user
+    if [ -n "$PROBE_USER" ]; then
+        [ "$(runuser -u "$PROBE_USER" -- "$BASH_PATH" -c 'echo shg-nonroot' 2>"$DEVNULL")" = "shg-nonroot" ] \
+            || die "post-check: bash -c as $PROBE_USER failed"
+        runuser -u "$PROBE_USER" -- "$BASH_PATH" --version >"$DEVNULL" 2>&1 \
+            || die "post-check: bash --version as $PROBE_USER failed"
     fi
 fi
 

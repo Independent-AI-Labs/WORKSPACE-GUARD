@@ -77,11 +77,17 @@ if [ "$DRY_RUN" -eq 0 ]; then
         exit 2
     fi
     if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && [ "${SHG_STAGED:-0}" != "1" ] && ! is_trusted_tier "$0"; then
-        STAGE_DIR="$SHG_ROOT/run/workspace-guard"
+        STAGE_DIR="$SHG_ROOT/var/lib/workspace-guard"
         install -d -m 0700 "$STAGE_DIR"
         STAGE="$STAGE_DIR/uninstall-shell-guard.$$"
         install -m 0700 -o root -g root "$0" "$STAGE"
         log "re-exec via root-owned staging copy (trusted tier): $STAGE"
+        # Once the guard is live, a shebang re-exec resolves bash to
+        # the guard, which fails closed for root (AT_SECURE == 0).
+        # The sealed bash.real never scans; use it when present.
+        if [ -x /bin/bash.real ]; then
+            SHG_STAGED=1 exec /bin/bash.real "$STAGE" "$@"
+        fi
         SHG_STAGED=1 exec "$STAGE" "$@"
     fi
 fi
@@ -125,6 +131,9 @@ fi
 #    when the diversion is already gone (drift).
 if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
     log "removing diversion (restores $DISTRIB_PATH -> $BASH_PATH)"
+    # dpkg-divert --rename refuses to overwrite a file that differs
+    # from the diverted original; remove the guard binary first.
+    rm -f "$BASH_PATH" || die "cannot remove guard binary at $BASH_PATH"
     dpkg-divert --remove --rename "$BASH_PATH"
 elif [ -f "$REAL_PATH" ]; then
     log "no diversion found; restoring $BASH_PATH from $REAL_PATH"

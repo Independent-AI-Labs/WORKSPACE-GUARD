@@ -533,6 +533,7 @@ dependencies = [
  "libc",
  "nix",
  "regex",
+ "rustix",
  "serde",
  "serde_yaml",
  "tempfile",
