@@ -318,7 +318,7 @@ fn warn_if_unlocked(path: &Path) {
 /// when the flag state cannot be determined (unreadable path,
 /// unsupported filesystem): callers treat None as "unknown", never as
 /// "immutable".
-fn immutable_flag(path: &Path) -> Option<bool> {
+pub(crate) fn immutable_flag(path: &Path) -> Option<bool> {
     let fd = fs::File::open(path).ok()?;
     let mut flags: libc::c_int = 0;
     // SAFETY: ioctl(2) with FS_IOC_GETFLAGS takes an int* as its third

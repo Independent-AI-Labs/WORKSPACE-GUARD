@@ -19,6 +19,8 @@ mod gitdir;
 #[cfg(feature = "capability-mode")]
 mod reconcile;
 mod remote;
+#[cfg(feature = "capability-mode")]
+mod sealed_repo;
 mod vendored;
 mod wsroot;
 
@@ -344,6 +346,9 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
             let gd = gitdir::resolve_git_dir(argv_os);
             if let Some(ref g) = gd {
                 gitdir::lock(g);
+                let t = trace_start("check_sealed_repo");
+                sealed_repo::check_sealed_repo(sub, g)?;
+                trace_end(t, "check_sealed_repo");
             }
             trace_end(t, "resolve_git_dir+lock");
             gd
