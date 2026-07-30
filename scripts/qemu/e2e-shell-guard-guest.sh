@@ -175,8 +175,8 @@ else
     exit 1
 fi
 [ -x "$RELEASE_BIN" ] || { echo "ERROR: release guard binary missing" >&2; exit 1; }
-# Self-staged installer copies recompute paths from their staging dir;
-# pin the binary location for every invocation (env survives re-exec).
+# Direct-script repair loops keep the pinned path; the production make
+# install below is exercised with SHG_GUARD_BIN unset.
 export SHG_GUARD_BIN="$RELEASE_BIN"
 
 # ---------------------------------------------------------------------------
@@ -296,16 +296,40 @@ st=0
 bash "$GUARD_ROOT/scripts/shell-guard-check" >"$DEVNULL" 2>&1 || st=$?
 [ "$st" -eq 2 ] && ok "pre-install: check reports NOT INSTALLED" || bad "pre-install: check status $st"
 
-bash "$GUARD_ROOT/scripts/install-shell-guard" || { echo "ERROR: install failed" >&2; exit 1; }
-ok "install-shell-guard applied"
+while IFS= read -r yfile; do
+    [ "$(stat -c %u "$yfile")" = "0" ] || chown root:root "$yfile" \
+        || { echo "ERROR: relock chown failed: $yfile" >&2; exit 1; }
+done < <(find "$GUARD_ROOT/config" -maxdepth 1 -name '*.yaml' -print)
+ok "policy YAMLs root-owned for build provenance"
+
+if command -v cargo >"$DEVNULL" 2>&1; then
+    (cd "$GUARD_ROOT" && env -u SHG_GUARD_BIN make install-shell-guard) \
+        || { echo "ERROR: make install-shell-guard failed" >&2; exit 1; }
+else
+    E2E_CARGO_DIR="$(mktemp -d /tmp/shg-e2e-cargo.XXXXXX)"
+    cat > "$E2E_CARGO_DIR/cargo" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+out="${CARGO_TARGET_DIR:?}/release/workspace-shell-guard"
+mkdir -p "$(dirname "$out")"
+install -m 0755 "${SHG_PREBUILT:?}" "$out"
+EOF
+    chmod 0755 "$E2E_CARGO_DIR/cargo"
+    (cd "$GUARD_ROOT" && env -u SHG_GUARD_BIN PATH="$E2E_CARGO_DIR:$PATH" make install-shell-guard) \
+        || { echo "ERROR: make install-shell-guard failed" >&2; exit 1; }
+    rm -rf "$E2E_CARGO_DIR"
+fi
+ok "make install-shell-guard applied"
 
 # Relock policy YAMLs (production: operator relock script with sudo;
 # here we are root in the disposable guest).
 for yfile in "$GUARD_ROOT"/config/shell_guard_policy.yaml \
     "$GUARD_ROOT"/config/shell_guard_policy.schema.yaml \
     "$GUARD_ROOT"/config/shell_guard_policy_matrix.yaml; do
-    chown root:root "$yfile" || { echo "ERROR: relock chown failed: $yfile" >&2; exit 1; }
-    chattr +i "$yfile" || { echo "ERROR: relock chattr failed: $yfile" >&2; exit 1; }
+    [ "$(stat -c %u "$yfile")" = "0" ] || chown root:root "$yfile" \
+        || { echo "ERROR: relock chown failed: $yfile" >&2; exit 1; }
+    lsattr -d "$yfile" 2>"$DEVNULL" | awk '{print $1}' | grep -q i \
+        || chattr +i "$yfile" || { echo "ERROR: relock chattr failed: $yfile" >&2; exit 1; }
 done
 ok "policy YAMLs relocked (root:root +i)"
 

@@ -127,9 +127,9 @@ if [ "$DRY_RUN" -eq 0 ]; then
         # the guard, which fails closed for root (AT_SECURE == 0).
         # The sealed bash.real never scans; use it when present.
         if [ -x /bin/bash.real ]; then
-            SHG_STAGED=1 exec /bin/bash.real "$STAGE" "$@"
+            SHG_STAGED=1 SHG_GUARD_BIN="$GUARD_BIN" exec /bin/bash.real "$STAGE" "$@"
         fi
-        SHG_STAGED=1 exec "$STAGE" "$@"
+        SHG_STAGED=1 SHG_GUARD_BIN="$GUARD_BIN" exec "$STAGE" "$@"
     fi
 fi
 

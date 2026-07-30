@@ -299,7 +299,7 @@ check-guard-host-exec: ## Check host-exec git-guard installation status
 	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
 
 .PHONY: install-shell-guard uninstall-shell-guard shell-guard-check
-install-shell-guard: ## Install shell guard at /bin/bash + /bin/sh (ROOT)
+install-shell-guard: build-shell-guard ## Install shell guard at /bin/bash + /bin/sh (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-shell-guard needs root: sudo make install-shell-guard" >&2; exit 1; \
 	fi
@@ -339,8 +339,14 @@ build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins
 	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
 .PHONY: build-shell-guard
-build-shell-guard: ## Build the shell guard binary (release)
+build-shell-guard: ## Build the shell guard binary (release) (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: build-shell-guard needs root (install consumes target/ artifacts): sudo make build-shell-guard" >&2; \
+		exit 1; \
+	fi
 	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --bin workspace-shell-guard
+	chown root:root "$(REPO_ROOT)/target"
+	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
 # =============================================================================
 # Cleanup & Compliance
