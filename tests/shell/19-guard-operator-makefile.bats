@@ -48,6 +48,40 @@ teardown() { guard_teardown; }
     assert_success
 }
 
+@test "guard-up installs shell guard alongside git guard in one bring-up" {
+    run bash -c '
+        REPO_ROOT="'"$GUARD_ROOT"'"
+        MARKER=/nonexistent-guard-up-marker
+        require_root() { :; }
+        _user_mgmt_enabled() { return 1; }
+        _guard_needs_install() { return 0; }
+        _shell_guard_up() { echo "SHELL_GUARD_UP_CALLED"; }
+        make() { echo "MAKE $*"; }
+        source <(sed -n "/^guard_up()/,/^}/p" "'"$GUARD_ROOT"'/scripts/guard-operator.sh")
+        guard_up
+    '
+    assert_success
+    assert_output --partial "MAKE -C $GUARD_ROOT install-guard-host-exec"
+    assert_output --partial "SHELL_GUARD_UP_CALLED"
+}
+
+@test "guard-up runs shell guard step after full host provision" {
+    run bash -c '
+        REPO_ROOT="'"$GUARD_ROOT"'"
+        MARKER=/nonexistent-guard-up-marker
+        require_root() { :; }
+        _user_mgmt_enabled() { return 0; }
+        _guard_needs_install() { return 1; }
+        _shell_guard_up() { echo "SHELL_GUARD_UP_CALLED"; }
+        make() { echo "MAKE $*"; }
+        source <(sed -n "/^guard_up()/,/^}/p" "'"$GUARD_ROOT"'/scripts/guard-operator.sh")
+        guard_up
+    '
+    assert_success
+    assert_output --partial "MAKE -C $GUARD_ROOT provision-host"
+    assert_output --partial "SHELL_GUARD_UP_CALLED"
+}
+
 @test "guard Makefile declares shell guard install/uninstall/check targets" {
     local mk="$GUARD_ROOT/Makefile"
     grep -q '^install-shell-guard:' "$mk"

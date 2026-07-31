@@ -110,7 +110,6 @@ guard_up() {
     if _user_mgmt_enabled && [[ ! -f "$MARKER" ]]; then
         echo "==> guard-up: running full host provision"
         make -C "$REPO_ROOT" provision-host
-        return 0
     fi
     if _guard_needs_install; then
         if _user_mgmt_enabled && [[ -f "$MARKER" ]]; then
@@ -120,9 +119,9 @@ guard_up() {
             echo "==> guard-up: installing git guard"
             make -C "$REPO_ROOT" install-guard-host-exec
         fi
-        return 0
+    else
+        echo "==> guard-up: git guard already healthy"
     fi
-    echo "==> guard-up: git guard already healthy"
     _shell_guard_up
 }
 
