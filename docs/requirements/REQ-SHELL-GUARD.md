@@ -207,6 +207,14 @@ handled by `make install-shell-guard`.
   (SPEC-SHELL-GUARD §9.1). Trusted-tier scripts are exec'd by path
   (their content cannot be swapped by the agent).
 
+- **REQ-SHG-213**: When staging a script per REQ-SHG-212, the guard
+  shall publish the script's canonical original path to the child as
+  `SHG_SCRIPT_PATH`, inserted into the scrubbed environment AFTER the
+  allow-list filter so a caller-supplied value is always dropped and
+  only the guard can set it. Scripts that resolve sibling files
+  (`dirname "$0"`/`BASH_SOURCE`) should prefer it:
+  `_SELF="${BASH_SOURCE[0]:-$0}"; case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}";; esac`.
+
 ---
 
 ## 4. Block Policy (REQ-SHG-300 series)
@@ -318,6 +326,26 @@ handled by `make install-shell-guard`.
   `BLOCKED: bash -c 'make check 2>&1 | tail -5' (output-suppression: pipe to 'tail') (<ts>)`
   `  -> Hint: run without truncation; write long output to a file and read it with offset/limit`
 
+- **REQ-SHG-312**: Every policy pattern shall carry a `scope` field
+  (`command` | `script` | `both`, default `both`) selecting the
+  invocation contexts the pattern applies to: `-c` command text
+  (`command`), script bodies (`script`), or every scanned context
+  (`both`). The scope is validated at build time; every pattern
+  shall have at least one blocked matrix case in a context its
+  scope applies to.
+
+- **REQ-SHG-313**: Invocation of a general-purpose interpreter
+  (`python*`, `perl*`, `ruby`, `irb`, `node`, `nodejs`, `deno`,
+  `bun`, `php*`, `lua*`, `luajit`, `tclsh`, `wish`, `expect`,
+  `Rscript`, `raku`, `julia`, and the `awk` family `awk`/`gawk`/
+  `mawk`/`nawk`) in `-c` command text shall be blocked
+  (exit 1) for ALL users including root: an interpreter hands the
+  caller a full, unscanned command channel and voids every other
+  rule. The rule shall be `scope: command` so operator tooling and
+  shell libraries that legitimately invoke interpreters from script
+  bodies keep working; script-level interpreter confinement is
+  binary-guard (GTFOBins) territory, not command-text policy.
+
 ---
 
 ## 5. Environment Sanitisation (REQ-SHG-400 series)
@@ -329,7 +357,10 @@ handled by `make install-shell-guard`.
   `SSH_AUTH_SOCK`, `GPG_TTY`, `PWD`, `OLDPWD`, `SHLVL`, `SHELL`,
   `TMPDIR` (validated: absolute, user-writable), `XDG_*`, `TZ`,
   `OPENCODE_*` (agent detection markers are inert for the guard but
-  required by the agent), and `WORKSPACE_*`.
+  required by the agent), `WORKSPACE_*`, and `AMI_*` (workspace
+  shell-environment contract vars, e.g. `AMI_QUIET_MODE`; stripping
+  them re-triggers per-command banner/toolchain probes in every
+  guarded shell).
 
 - **REQ-SHG-401**: The following shall be dropped unconditionally:
   `BASH_ENV`, `ENV` (non-interactive rc injection), `SHELLOPTS`,

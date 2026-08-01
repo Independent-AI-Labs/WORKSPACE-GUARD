@@ -20,7 +20,26 @@
 # gnu-sed, and findutils shadow the BSD equivalents.
 _OS := $(shell uname -s)
 _HB_PREFIX := $(if $(wildcard /opt/homebrew),/opt/homebrew,$(if $(wildcard /usr/local),/usr/local))
+# Root detection MUST happen before the SHELL assignment below:
+# make's $(shell) honors the makefile's SHELL variable, so once SHELL
+# points at the guarded bash, every $(shell) probe fails closed for
+# root (AT_SECURE == 0) and returns empty. While SHELL is still the
+# stock /bin/sh, `id -u` answers truthfully for every caller.
+# Root recipes run through the sealed /bin/bash.real instead of the
+# guarded bash (root execs of the fcap guard fail closed by design).
+ifeq ($(shell id -u),0)
+SHELL := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)
+else
 SHELL := $(if $(wildcard $(_HB_PREFIX)/bin/bash),$(_HB_PREFIX)/bin/bash,/bin/bash)
+endif
+# Interpreter for repo scripts invoked explicitly from recipes. Bare `bash`
+# resolves to the guarded /usr/bin/bash, which fails closed for root
+# (AT_SECURE == 0) and broke sudo make guard-refresh -> build-guard.
+ifeq ($(shell id -u),0)
+SCRIPT_BASH := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)
+else
+SCRIPT_BASH := bash
+endif
 export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-sed/libexec/gnubin:$(_HB_PREFIX)/opt/findutils/libexec/gnubin:$(_HB_PREFIX)/opt/grep/libexec/gnubin:$(_HB_PREFIX)/bin:$(PATH)
 
 .DEFAULT_GOAL := help
@@ -52,6 +71,15 @@ WORKSPACE_ROOT := $(shell \
 BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 GITLEAKS_BIN := $(WORKSPACE_ROOT)/$(BOOT_NAME)/bin/gitleaks
 
+# Absolute cargo, single source: WORKSPACE-CI owns the Rust toolchain
+# (scripts/bootstrap-rust installs into $(CI_BOOT_BIN)); this repo
+# consumes it. The shell guard resets PATH on every exec, so recipe
+# shells never see exported bin dirs; prefix the boot bin on PATH for
+# the cargo child (cargo discovers rustc/rustfmt/clippy via PATH).
+# Missing binary is a hard preflight error, never a quiet substitute.
+_CARGO_BOOT := $(CI_BOOT_BIN)
+CARGO := PATH="$(_CARGO_BOOT):$$PATH" $(_CARGO_BOOT)/cargo
+
 SUDO := $(shell if [ "$$(id -u)" -eq 0 ]; then echo ""; else echo "sudo"; fi)
 
 # =============================================================================
@@ -70,31 +98,32 @@ help: ## Show this help
 
 .PHONY: init-check
 init-check: ## Check system dependencies (via CI resolver + config/system-deps.yaml)
-	bash "$(CI_DIR)/scripts/install-system-deps" --check --boot-dir "$(CI_BOOT_BIN)"
+	$(SCRIPT_BASH) "$(CI_DIR)/scripts/install-system-deps" --check --boot-dir "$(CI_BOOT_BIN)"
 
 .PHONY: init
 init: ## Install system-level dependencies (platform-aware via config/system-deps.yaml)
 	echo "==> Installing Homebrew + GNU tools (macOS only)..."
-	bash "$(CI_DIR)/scripts/bootstrap-homebrew"
+	$(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-homebrew"
 	echo "==> Installing system packages (from config/system-deps.yaml)..."
-	bash "$(CI_DIR)/scripts/install-system-deps" --install --boot-dir "$(CI_BOOT_BIN)"
+	$(SCRIPT_BASH) "$(CI_DIR)/scripts/install-system-deps" --install --boot-dir "$(CI_BOOT_BIN)"
 	echo "==> Installing Rust toolchain (if missing)..."
-	if ! command -v cargo; then \
-		bash "$(CI_DIR)/scripts/bootstrap-rust"; \
+	if [ ! -x "$(_CARGO_BOOT)/cargo" ]; then \
+		$(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-rust"; \
 	fi
+	test -x "$(_CARGO_BOOT)/cargo" || { echo "ERROR: cargo still missing at $(_CARGO_BOOT)/cargo after bootstrap"; exit 1; }
 	echo "==> Installing Rust components (clippy, rustfmt)..."
 	rustup component add clippy rustfmt
 	echo "==> Bootstrapping gitleaks (pre-commit secret scanner)..."
 	$(MAKE) install-gitleaks
 	echo "==> Bootstrapping Podman (Linux VM test harness)..."
-	bash "$(CI_DIR)/scripts/bootstrap-podman"
-	bash scripts/podman/ensure-machine.sh
+	$(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-podman"
+	$(SCRIPT_BASH) scripts/podman/ensure-machine.sh
 	echo "==> System dependencies installed."
 
 .PHONY: preflight
 preflight: ## Verify required tooling is present
 	command -v git || { echo "ERROR: git not on PATH"; exit 1; }
-	command -v cargo || { echo "ERROR: cargo not on PATH"; exit 1; }
+	test -x "$(_CARGO_BOOT)/cargo" || { echo "ERROR: cargo missing at $(_CARGO_BOOT)/cargo; run: $(CI_DIR)/scripts/bootstrap-rust"; exit 1; }
 	test -d "$(CI_DIR)" || { echo "ERROR: WORKSPACE-CI not found at $(CI_DIR)"; exit 1; }
 	test -f "$(CI_DIR)/scripts/generate-hooks" || { echo "ERROR: WORKSPACE-CI/scripts/generate-hooks missing"; exit 1; }
 	echo "Preflight OK (WORKSPACE-CI at $(CI_DIR))"
@@ -107,7 +136,7 @@ preflight: ## Verify required tooling is present
 install-gitleaks: ## Bootstrap gitleaks binary to ${WORKSPACE_ROOT}/${BOOT_NAME}/bin
 	mkdir -p "$(dir $(GITLEAKS_BIN))"
 	WORKSPACE_ROOT="$(WORKSPACE_ROOT)" GITLEAKS_BIN="$(GITLEAKS_BIN)" \
-		bash "$(CI_DIR)/scripts/bootstrap-gitleaks"
+		$(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-gitleaks"
 
 .PHONY: install
 install: preflight install-gitleaks install-hooks ## Full install: deps + gitleaks + hooks
@@ -126,13 +155,13 @@ install-hooks: ## Regenerate native git hooks from .pre-commit-config.yaml
 		exit 1; \
 	fi
 	if [ -x "$(CI_DIR)/scripts/cleanup-precommit" ]; then \
-		bash "$(CI_DIR)/scripts/cleanup-precommit"; \
+		$(SCRIPT_BASH) "$(CI_DIR)/scripts/cleanup-precommit"; \
 	fi
-	bash $(CI_DIR)/scripts/generate-hooks
+	$(SCRIPT_BASH) $(CI_DIR)/scripts/generate-hooks
 
 .PHONY: sync
 sync: ## Sync dependencies + reinstall hooks
-	cargo fetch
+	$(CARGO) fetch
 	$(MAKE) install-hooks
 
 # =============================================================================
@@ -146,18 +175,18 @@ _AGENT_TARGET := $(REPO_ROOT)/target/agent
 
 .PHONY: check
 check: ## Run cargo check (all feature combinations)
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo check --workspace
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo check --no-default-features --features root-only
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --workspace
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --no-default-features --features root-only
 
 .PHONY: lint
 lint: ## Run cargo fmt --check + clippy
-	cargo fmt --all -- --check
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo clippy --workspace --all-targets -- -D warnings
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo clippy --no-default-features --features root-only --all-targets -- -D warnings
+	$(CARGO) fmt --all -- --check
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) clippy --workspace --all-targets -- -D warnings
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) clippy --no-default-features --features root-only --all-targets -- -D warnings
 
 .PHONY: type-check
 type-check: ## Rust has no separate type-check; run cargo check
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo check --workspace
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --workspace
 
 .PHONY: test test-unit test-integration-cap test-integration-root
 test: ## Run cargo test (all feature combinations; integration gated by euid)
@@ -180,22 +209,22 @@ test: ## Run cargo test (all feature combinations; integration gated by euid)
 test-unit: ## Unit/binary tests only (both feature combinations)
 	if [ "$(_OS)" != "Darwin" ]; then \
 		if command -v cargo-nextest; then \
-			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo nextest run --workspace --bins; \
-			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo nextest run --no-default-features --features root-only --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --workspace --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --no-default-features --features root-only --bins; \
 		else \
 			echo "NOTE: cargo-nextest not found; using cargo test (per-test timeouts disabled)."; \
-			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --workspace --bins; \
-			CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --workspace --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --no-default-features --features root-only --bins; \
 		fi; \
 	else \
 		echo "SKIP: cargo unit tests on Darwin (Linux-only; use make test-podman)"; \
 	fi
 
 test-integration-cap: ## Capability-mode integration tests (non-root)
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --test integration_test
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --test integration_test
 
 test-integration-root: ## Root-only integration tests (root)
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" cargo test --no-default-features --features root-only --test integration_test
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --no-default-features --features root-only --test integration_test
 
 .PHONY: test-shell
 test-shell: ## Run the bats shell test suite (gated in check-push).
@@ -203,7 +232,15 @@ test-shell: ## Run the bats shell test suite (gated in check-push).
 		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
 		exit 1; \
 	fi
-	BATS_TEST_TIMEOUT=30 bats --timing tests/shell/
+	if [ -x /usr/bin/bash.distrib ]; then \
+		_shim="$$(mktemp -d)"; \
+		printf '#!/usr/bin/bash.distrib\nexec /usr/bin/bash.distrib "$$@"\n' > "$$_shim/bash"; \
+		chmod +x "$$_shim/bash"; \
+		PATH="$$_shim:$$PATH" BATS_TEST_TIMEOUT=30 /usr/bin/bash.distrib "$$(command -v bats)" --timing tests/shell/; \
+		_st=$$?; rm -rf "$$_shim"; exit $$_st; \
+	else \
+		BATS_TEST_TIMEOUT=30 bats --timing tests/shell/; \
+	fi
 
 # =============================================================================
 # Pre-push Quality Gate
@@ -227,16 +264,16 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests
 .PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard purge-guard-state check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
-	bash scripts/test-in-podman.sh
+	$(SCRIPT_BASH) scripts/test-in-podman.sh
 
 test-podman-quick: init-check ## Podman harness Tiers 0-2 only (skip capability E2E)
-	TEST_PODMAN_QUICK=1 bash scripts/test-in-podman.sh
+	TEST_PODMAN_QUICK=1 $(SCRIPT_BASH) scripts/test-in-podman.sh
 
 test-podman-provision: init-check ## Podman host-provision E2E only (phases 0-4, privileged)
-	bash scripts/podman/run-tier3-provision.sh
+	$(SCRIPT_BASH) scripts/podman/run-tier3-provision.sh
 
 test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in guest)
-	bash scripts/qemu/e2e-guest.sh
+	$(SCRIPT_BASH) scripts/qemu/e2e-guest.sh
 
 # =============================================================================
 # Git Guard
@@ -247,7 +284,7 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (RO
 		echo "ERROR: build-guard needs root (install consumes target/ artifacts): sudo make build-guard" >&2; \
 		exit 1; \
 	fi
-	CARGO_TARGET_DIR="$(REPO_ROOT)/target" bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(REPO_ROOT)/target/agent"
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
@@ -280,13 +317,13 @@ install-guard: ## REMOVED - use install-guard-host-exec
 
 _INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
 install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
-	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
+	$(SUDO) $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
 
 uninstall-guard: ## Uninstall git-guard, restore stock git; preserve provision state (requires root)
-	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
+	$(SUDO) $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
 
 purge-guard-state: ## Destroy all /usr/lib/workspace-guard state (requires GUARD_PURGE_CONFIRM=1)
-	$(SUDO) bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" purge-guard-state
+	$(SUDO) $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" purge-guard-state
 
 reconcile-guard-host-exec: build-guard ## Force rebuild + reinstall git guard and aux artifacts (requires root)
 	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
@@ -296,23 +333,27 @@ check-guard: ## REMOVED - use check-guard-host-exec
 	exit 1
 
 check-guard-host-exec: ## Check host-exec git-guard installation status
-	bash "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
+	$(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
 
 .PHONY: install-shell-guard uninstall-shell-guard shell-guard-check
 install-shell-guard: build-shell-guard ## Install shell guard at /bin/bash + /bin/sh (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-shell-guard needs root: sudo make install-shell-guard" >&2; exit 1; \
 	fi
-	bash scripts/install-shell-guard
+	$(SCRIPT_BASH) scripts/install-shell-guard
 
 uninstall-shell-guard: ## Uninstall shell guard, restore stock bash/sh (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-shell-guard needs root: sudo make uninstall-shell-guard" >&2; exit 1; \
 	fi
-	bash scripts/uninstall-shell-guard
+	$(SCRIPT_BASH) scripts/uninstall-shell-guard
 
 shell-guard-check: ## Read-only shell guard health check (modes, caps, divert, +i, hash)
-	bash scripts/shell-guard-check
+	if [ "$$(id -u)" = "0" ] && [ -x /bin/bash.real ]; then \
+		/bin/bash.real scripts/shell-guard-check "$(REPO_ROOT)"; \
+	else \
+		$(SCRIPT_BASH) scripts/shell-guard-check "$(REPO_ROOT)"; \
+	fi
 
 # =============================================================================
 # Build
@@ -324,8 +365,8 @@ build: ## Build release binary (default + root-only) (ROOT)
 		echo "ERROR: build needs root (install consumes target/ artifacts): sudo make build" >&2; \
 		exit 1; \
 	fi
-	cargo build --release
-	cargo build --release --no-default-features --features root-only
+	$(CARGO) build --release
+	$(CARGO) build --release --no-default-features --features root-only
 	chown -R root:root "$(REPO_ROOT)/target"
 
 .PHONY: build-binary-guard
@@ -334,7 +375,7 @@ build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins
 		echo "ERROR: build-binary-guard needs root (install consumes target/ artifacts): sudo make build-binary-guard" >&2; \
 		exit 1; \
 	fi
-	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --features binary-guard --bin workspace-binary-guard
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" $(CARGO) build --release --features binary-guard --bin workspace-binary-guard
 	chown root:root "$(REPO_ROOT)/target"
 	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
@@ -344,7 +385,7 @@ build-shell-guard: ## Build the shell guard binary (release) (ROOT)
 		echo "ERROR: build-shell-guard needs root (install consumes target/ artifacts): sudo make build-shell-guard" >&2; \
 		exit 1; \
 	fi
-	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --bin workspace-shell-guard
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" $(CARGO) build --release --bin workspace-shell-guard
 	chown root:root "$(REPO_ROOT)/target"
 	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
@@ -358,11 +399,11 @@ clean: ## Clean build artifacts
 
 .PHONY: clippy
 clippy: ## Run cargo clippy
-	cargo clippy --workspace --all-targets -- -D warnings
+	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
 .PHONY: compliance
 compliance: ## Run the WORKSPACE-CI compliance audit on this repo
-	bash $(CI_DIR)/scripts/compliance-report .
+	$(SCRIPT_BASH) $(CI_DIR)/scripts/compliance-report .
 
 # Binary lockdown + sandbox + audit program. Extends git-guard to every
 # SUID and capability-bearing binary on the host. See docs/specifications/SPEC-*.md
@@ -388,7 +429,7 @@ DEVNULL := /dev/null
 
 .PHONY: sync-gtfobins sync-gtfobins-linux
 sync-gtfobins: ## Fetch GTFOBins + konstruktoid, scan live SUID/CAP, write res/ baselines + refresh .gitleaksignore
-	bash scripts/sync-gtfobins
+	$(SCRIPT_BASH) scripts/sync-gtfobins
 	$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not sync on Darwin for commit)
@@ -400,7 +441,7 @@ sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not syn
 		-v "$(abspath $(REPO_ROOT)/..):/projects:rw" \
 		-w /projects/WORKSPACE-GUARD \
 		$${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04} \
-		bash scripts/sync-gtfobins
+		$(SCRIPT_BASH) scripts/sync-gtfobins
 	$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 .PHONY: gitleaks-ignore-regen
@@ -414,16 +455,16 @@ gitleaks-ignore-regen: ## Regenerate .gitleaksignore fingerprints for docs/refer
 	if [ -f "$$_stamp" ] && [ "$$(cat "$$_stamp")" = "$$_refs_hash" ] && [ -f .gitleaksignore ]; then \
 		echo "gitleaks-ignore-regen: docs/references unchanged, skipping scan"; \
 	else \
-		bash scripts/regen-gitleaksignore && printf '%s\n' "$$_refs_hash" > "$$_stamp"; \
+		$(SCRIPT_BASH) scripts/regen-gitleaksignore && printf '%s\n' "$$_refs_hash" > "$$_stamp"; \
 	fi
 
 .PHONY: sync-gtfobins-verify
 sync-gtfobins-verify: ## Re-fetch sources and emit SHA-256 manifest of canonical references
-	bash scripts/sync-gtfobins --verify
+	$(SCRIPT_BASH) scripts/sync-gtfobins --verify
 
 .PHONY: drift-check
 drift-check: ## Compare live SUID/CAP surface against res/ baselines; detail dump only on CRITICAL; exit 1 on CRITICAL
-	bash scripts/suid-drift-check
+	$(SCRIPT_BASH) scripts/suid-drift-check
 
 .PHONY: install-lock
 _INSTALL_LOCK_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-binary-guard)
@@ -437,7 +478,7 @@ install-lock: $(_INSTALL_LOCK_DEPS) ## Contain-via-guard every SUID binary per r
 	# Mirrors docs/specifications/SPEC-BINARY-LOCK.md section 4.2
 	# (copy -> chown root:root -> chmod 0700 .real ->
 	# chattr +i -> stage guard -> dpkg-divert --rename -> mv guard -> <path>).
-	test -x scripts/install-lock-runtime && bash scripts/install-lock-runtime \
+	test -x scripts/install-lock-runtime && $(SCRIPT_BASH) scripts/install-lock-runtime \
 		|| { echo "NOTICE: scripts/install-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-lock
@@ -445,12 +486,12 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-lock needs root: sudo make uninstall-lock" >&2; exit 1; \
 	fi
-	test -x scripts/uninstall-lock-runtime && bash scripts/uninstall-lock-runtime \
+	test -x scripts/uninstall-lock-runtime && $(SCRIPT_BASH) scripts/uninstall-lock-runtime \
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: guard-%
 guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
-	bash scripts/guard-operator.sh '$*'
+	"$(SCRIPT_BASH)" scripts/guard-operator.sh '$*'
 
 # =============================================================================
 # YAML Policy Edit (sudo-gated secure YAML editor; SPEC-YAML-EDIT)
@@ -468,7 +509,7 @@ build-yaml-edit: ## Build workspace-yaml-edit release binary (ROOT)
 		echo "ERROR: build-yaml-edit needs root (install consumes target/ artifacts): sudo make build-yaml-edit" >&2; \
 		exit 1; \
 	fi
-	CARGO_TARGET_DIR="$(REPO_ROOT)/target" cargo build --release --bin workspace-yaml-edit
+	CARGO_TARGET_DIR="$(REPO_ROOT)/target" $(CARGO) build --release --bin workspace-yaml-edit
 	chown root:root "$(REPO_ROOT)/target"
 	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
@@ -478,26 +519,31 @@ install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (R
 	fi
 	install -o root -g root -m 0755 "$(REPO_ROOT)/target/release/workspace-yaml-edit" "$(YAML_EDIT)"
 
+# Root-only yaml-edit recipes must not run through the guarded bash:
+# root execs of the fcap guard fail closed (AT_SECURE == 0). Route
+# them through the sealed /bin/bash.real when it is installed.
+YAML_SH := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)
+
 .PHONY: yaml-add yaml-remove yaml-set yaml-get yaml-list yaml-validate
 yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)
-	if [ "$$(id -u)" != "0" ]; then \
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
-	fi
-	IFS=';' read -ra _ye_fields <<< "$(FIELDS)"; \
-	"$(YAML_EDIT)" add "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)
+	fi'
+	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$(FIELDS)"; \
+	"$(YAML_EDIT)" add "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)'
 
 yaml-remove: ## Remove matching entries: make yaml-remove FILE=.. KEY=.. FIELDS="hook=x" (ROOT)
-	if [ "$$(id -u)" != "0" ]; then \
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-remove needs root: sudo make yaml-remove" >&2; exit 1; \
-	fi
-	IFS=';' read -ra _ye_fields <<< "$(FIELDS)"; \
-	"$(YAML_EDIT)" remove "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)
+	fi'
+	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$(FIELDS)"; \
+	"$(YAML_EDIT)" remove "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)'
 
 yaml-set: ## Set a scalar: make yaml-set FILE=.. KEY=.. VALUE=.. (ROOT)
-	if [ "$$(id -u)" != "0" ]; then \
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-set needs root: sudo make yaml-set" >&2; exit 1; \
-	fi
-	"$(YAML_EDIT)" set "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)
+	fi'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" set "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)'
 
 yaml-get: ## Print a scalar: make yaml-get FILE=.. KEY=..
 	"$(YAML_EDIT)" get "$(FILE)" "$(KEY)"
@@ -520,7 +566,7 @@ provision-host: ## Full host bootstrap: admin, fleet sudo audit, identities, gua
 	if [ ! -x scripts/provision-host ]; then \
 		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
 	fi
-	bash scripts/provision-host
+	$(SCRIPT_BASH) scripts/provision-host
 
 install-host-stack: provision-host ## Alias: provision-host (recommended fleet install)
 
@@ -532,21 +578,21 @@ provision-host-preflight: ## Read-only host provision state report (ROOT)
 	if [ ! -x scripts/provision-host ]; then \
 		echo "ERROR: scripts/provision-host missing or not executable" >&2; exit 1; \
 	fi
-	bash scripts/provision-host --preflight
+	$(SCRIPT_BASH) scripts/provision-host --preflight
 
 .PHONY: provision-git-identities
 provision-git-identities: ## Provision per-user gitconfig + SSH keys from config/home-lock-users.yaml (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: provision-git-identities needs root: sudo make provision-git-identities" >&2; exit 1; \
 	fi
-	test -x scripts/provision-user-git-identity && bash scripts/provision-user-git-identity \
+	test -x scripts/provision-user-git-identity && $(SCRIPT_BASH) scripts/provision-user-git-identity \
 		|| { echo "ERROR: scripts/provision-user-git-identity missing" >&2; exit 1; }
 
 .PHONY: install-home-lock
 install-home-lock: ## Lock the absolute_file_paths entries in config/shared_locked_paths.yaml (ROOT)	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-home-lock needs root: sudo make install-home-lock" >&2; exit 1; \
 	fi
-	test -x scripts/install-home-lock && bash scripts/install-home-lock \
+	test -x scripts/install-home-lock && $(SCRIPT_BASH) scripts/install-home-lock \
 		|| { echo "NOTICE: scripts/install-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-home-lock
@@ -554,12 +600,12 @@ uninstall-home-lock: ## Rollback home lock: restore original owner/mode per /usr
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-home-lock needs root: sudo make uninstall-home-lock" >&2; exit 1; \
 	fi
-	test -x scripts/uninstall-home-lock && bash scripts/uninstall-home-lock \
+	test -x scripts/uninstall-home-lock && $(SCRIPT_BASH) scripts/uninstall-home-lock \
 		|| { echo "NOTICE: scripts/uninstall-home-lock not yet implemented; SPEC-HOME-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: home-drift-check
 home-drift-check: ## Compare live home-lock surface against /usr/lib/workspace-guard/home-lock-state.yaml; detail dump only on CRITICAL; exit 1 on CRITICAL
-	bash scripts/home-drift-check
+	$(SCRIPT_BASH) scripts/home-drift-check
 
 .PHONY: install-auditd
 install-auditd: ## Install auditd rules + generated per-binary execve watches (ROOT)

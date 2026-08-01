@@ -235,8 +235,11 @@ scanned byte-exactly (REQ-SHG-205, REQ-SHG-703).
 ## 6. Block Decision
 
 Every pattern in the policy table is tried against the raw text; the
-first match wins. For trusted-tier script bodies (§4.1), a match is
-downgraded to a `would-block` audit warning and execution continues.
+first match wins. Patterns carry a `scope` (REQ-SHG-312): `command`
+rules only apply to `-c` text, `script` rules only to script bodies,
+`both` (the default) to every scanned context. For trusted-tier
+script bodies (§4.1), a match is downgraded to a `would-block`
+audit warning and execution continues.
 
 The pattern groups (exact regexes live in
 `config/shell_guard_policy.yaml`, §7):
@@ -266,8 +269,22 @@ The pattern groups (exact regexes live in
 10. Suppression pipe sinks   \|\s*(tail|head)\b            → BLOCK
 11. Suppression redirects    (&?>|[0-9]+>>?)\s*/dev/null   → BLOCK
 12. Suppression null swallows (\|\||\|&?)\s*(true|:)\b     → BLOCK
-13. ALL CLEAR → sanitise env, execve real shell
+13. Interpreter escape       \b(python[0-9.]*|perl[0-9.]*|ruby|
+                              irb|node|nodejs|deno|bun|php[0-9.]*|
+                              lua[0-9.]*|luajit|tclsh|wish|expect|
+                              Rscript|raku|julia|awk|gawk|mawk|
+                              nawk)\b                      → BLOCK
+                              (scope: command, REQ-SHG-313)
+14. ALL CLEAR → sanitise env, execve real shell
 ```
+
+Group 13 closes the interpreter-escape vector in `-c` text: an
+interpreter is an unscanned command channel that voids groups 1-12.
+Its `command` scope keeps script bodies (operator tooling, shell
+libraries) free to invoke interpreters; a hostile script body is
+already confined by sealed-memfd staging and the `both`-scoped
+rules, and binary-level interpreter confinement belongs to the
+binary guard (SPEC-BINARY-GUARD, GTFOBins policies).
 
 Group 2 closes the shell-escape vector: the guarded pair cannot be
 used as a springboard to an unguarded interpreter. Nested `bash` /
@@ -311,8 +328,10 @@ numeric-PID forms never match.
 
 `config/shell_guard_policy.yaml` (with sibling
 `shell_guard_policy.schema.yaml`), compiled in by `build.rs`. The
-schema is a flat pattern table: every rule is `{id, regex, hint}`;
-the regexes are the group shapes of §6 written out in full. Example
+schema is a flat pattern table: every rule is
+`{id, regex, hint, scope?}` where `scope` is `command` | `script` |
+`both` (default `both`, REQ-SHG-312); the regexes are the group
+shapes of §6 written out in full. Example
 excerpt:
 
 ```yaml
@@ -356,6 +375,10 @@ patterns:
      hint: "capture output and print it on failure instead of discarding it"}
   - {id: suppress-swallow, regex: '(\|\||\|&?)\s*(true|:)\b',
      hint: "handle the exit code explicitly instead of masking it"}
+  # --- interpreter escape (REQ-SHG-313; -c text only) ---
+  - {id: alt-interp,       regex: '\b(python[0-9.]*|perl[0-9.]*|...)\b',
+     hint: "interpreters are an unscanned command channel; run them from a script or the operator shell",
+     scope: command}
 ```
 
 Adding a rule is a YAML edit (via the secure editor) plus rebuild;
@@ -364,10 +387,11 @@ compiles as a bytes-regex, every id is unique, and every matrix case
 references a known id.
 
 `config/shell_guard_policy_matrix.yaml` holds the case matrix
-(`input` → `blocked`|`allowed`, with expected rule) validated at
-build time against the compiled policy, mirroring the git guard's
-`git_guard_policy_matrix.yaml` mechanism (`build.rs`
-`validate_policy_matrix`).
+(`input` → `blocked`|`allowed`, with expected rule and an optional
+`ctx: command|script` selecting the scan context, default
+`command`) validated at build time against the compiled policy,
+mirroring the git guard's `git_guard_policy_matrix.yaml` mechanism
+(`build.rs` `validate_policy_matrix`).
 
 ---
 
@@ -404,6 +428,9 @@ PWD OLDPWD SHLVL SHELL TZ XDG_*
 TMPDIR        → only if absolute and user-writable, else dropped
 OPENCODE_*    → agent detection markers; inert for the guard
 WORKSPACE_*   → workspace tooling contract vars
+AMI_*         → workspace shell-environment contract vars
+                (AMI_QUIET_MODE et al.; stripping them re-triggers
+                per-command banner/toolchain probes)
 ```
 
 ### 8.4 Implementation
@@ -461,12 +488,23 @@ therefore executes the SCANNED bytes:
    "/proc/self/fd/<n>", args...], clean_envp)`.
 
 Observable difference: `$0` and `BASH_SOURCE` name the
-`/proc/self/fd/<n>` path instead of the original script path.
-Scripts that resolve sibling files via `dirname "$0"` must be run
-from the trusted tier (root-owned) or invoked as
-`bash -c 'source ./x.sh'`; this is the documented cost of closing
-the race. Trusted-tier scripts are exec'd by path unchanged: their
-content cannot be swapped by the agent.
+`/proc/self/fd/<n>` path instead of the original script path. To
+keep `$0`-relative scripts workable, the guard inserts
+`SHG_SCRIPT_PATH=<canonical original path>` into the scrubbed
+environment (REQ-SHG-213), after the allow-list filter so a
+caller-supplied value cannot survive. Scripts that resolve sibling
+files via `dirname "$0"`/`BASH_SOURCE` should prefer it:
+
+```bash
+_SELF="${BASH_SOURCE[0]:-$0}"
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}";; esac
+```
+
+The `case` guard (not a blanket `${SHG_SCRIPT_PATH:-...}`) is
+required: the variable is inherited by child processes, so a nested
+TRUSTED-tier script (exec'd by path, no staging) would otherwise
+pick up its parent's path. Trusted-tier scripts are exec'd by path
+unchanged: their content cannot be swapped by the agent.
 
 ---
 
@@ -581,6 +619,27 @@ uninstall-shell-guard:    sudo scripts/uninstall-shell-guard (ROOT)
 shell-guard-check:        read-only health check (modes, caps, divert, +i, hash)
 ```
 
+`shell-guard-check` is caller-agnostic:
+
+- Root fails closed through the guarded `/bin/bash` (AT_SECURE == 0
+  for root execs of the fcap binary), so the Makefile target and
+  `guard-operator.sh` route root through the sealed
+  `/bin/bash.real`; non-root callers use plain `bash`.
+- The repo root resolves explicitly: first argument, else
+  `SHG_REPO_ROOT`, else derivation from the script's own path.
+  An explicitly supplied root must be an existing directory
+  (exit 2 otherwise). Under an active guard the script is staged
+  through a sealed memfd, so the derivation lands in
+  `/proc/self/fd` and is rejected; with no resolvable root the
+  check exits 2 with a remediation message. There is no cwd
+  guessing and no silent skip of the config-owner checks.
+- `getcap` lives in `/usr/sbin`, which the guard's PATH reset
+  removes, so the check resolves it absolutely (`SHG_GETCAP`
+  overrides for tests).
+- `lsattr` on the 0700 root-only `/bin/bash.real` fails with EACCES
+  for non-root callers; that is the installed posture, so the +i
+  probe degrades to an OK-with-note when the file is unreadable.
+
 The canonical operator flow (`scripts/guard-operator.sh`, REQ-SHG-600)
 wires the shell guard in alongside the git guard:
 
@@ -611,15 +670,19 @@ Self-contained bash (the guest has no bats), six phases:
    rustup env.
 2. **standalone battery**: scratch guard copy +
    `cap_dac_override=ep` against a manual `/bin/bash.real`; the
-   AT_SECURE gate (no-cap copy exits 3), the full 15-rule block
-   matrix, argv classification, env hygiene, rlimits, trust tiers,
+   AT_SECURE gate (no-cap copy exits 3), the full 16-rule block
+   matrix (incl. the command-scoped `alt-interp` rule and its
+   invisibility proof in script bodies), argv classification, env
+   hygiene (incl. `AMI_*` preservation), rlimits, trust tiers,
    sealed-memfd exec, audit (format, redaction), oversize bound,
    and fail-closed verify (relaxed `.real` mode exits 3).
 3. **install lifecycle**: check reports NOT INSTALLED, install,
-   check OK, structural assertions (seal, +i, caps, divert, hook,
-   hash), live-fire through the installed `/bin/bash` as root and
-   as the non-root `workspace` user (per-user audit), idempotent
-   reinstall.
+   check OK as root (via `bash.real`) AND as the non-root user
+   through the installed guard (memfd staging, absolute getcap,
+   note-only lsattr), structural assertions (seal, +i, caps, divert,
+   hook, hash), live-fire through the installed `/bin/bash` as root
+   and as the non-root `workspace` user (per-user audit),
+   idempotent reinstall.
 4. **survivability**: hook content, divert listing, login shells
    for the non-root user, the post-transaction repair loop.
 5. **reconcile**: missing-hook and stale-binary drift are reported
@@ -761,8 +824,9 @@ expose `MFD_EXEC`).
   'subprocess.run(..., stdout=subprocess.DEVNULL)'` hides output
   without shell grammar. Not detectable at this layer (REQ-SHG-NG-07).
 - **memfd `$0` divergence**: untrusted scripts observe
-  `/proc/self/fd/<n>` as `$0`/`BASH_SOURCE` (§9.1); scripts that
-  depend on their own path must be trusted-tier or sourced.
+  `/proc/self/fd/<n>` as `$0`/`BASH_SOURCE` (§9.1); the guard
+  publishes the canonical original path as `SHG_SCRIPT_PATH`
+  (REQ-SHG-213) so `$0`-relative scripts can recover it.
 
 ---
 

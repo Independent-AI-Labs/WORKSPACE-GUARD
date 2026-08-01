@@ -31,3 +31,8 @@ fields:
     type: string
     required: true
     description: "Remediation hint printed in the block message and audit log for this rule."
+  - path: patterns[].scope
+    type: string
+    required: false
+    default: both
+    description: Scan context the rule applies to (command = -c text, script = script bodies, both) - REQ-SHG-312

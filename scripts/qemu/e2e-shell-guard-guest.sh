@@ -98,6 +98,7 @@ PB_SWAP='swap''off -a'
 PB_PIPE="somecmd $PIPE tail"
 PB_NULL="somecmd 2>$DEVNULL"
 PB_SWALLOW="somecmd $PIPE$PIPE :"
+PB_INTERP='py''thon3 -c pass'
 
 # run_battery <label> <runner...>
 # Core live-fire matrix against one guard entry point.
@@ -110,6 +111,7 @@ run_battery() {
     expect_blocked "$label: fs destroy"        fs-destroy      "$@" -c "$PB_FSDESTROY"
     expect_blocked "$label: alt shell"         alt-shell       "$@" -c "$PB_ALTSHELL"
     expect_blocked "$label: busybox shell"     busybox-shell   "$@" -c "$PB_BUSYBOX"
+    expect_blocked "$label: interpreter escape" alt-interp     "$@" -c "$PB_INTERP"
     expect_blocked "$label: kill mass"         kill-mass       "$@" -c "$PB_KILLMASS"
     expect_blocked "$label: immutability strip" chattr-strip   "$@" -c "$PB_CHATTR"
     expect_blocked "$label: rootfs delete"     rm-rootfs       "$@" -c "$PB_RMROOT"
@@ -213,8 +215,8 @@ case "$out" in
 esac
 out="$(runuser -u "$AGENT_USER" -- env LD_PRELOAD=/tmp/shg-evil.so "$SCRATCH" -c 'echo "${LD_PRELOAD:-unset}"')"
 [ "$out" = "unset" ] && ok "env: LD_PRELOAD stripped" || bad "env: LD_PRELOAD stripped ($out)"
-out="$(runuser -u "$AGENT_USER" -- env LC_SHG=1 WORKSPACE_TAG=abc SHG_JUNK=no "$SCRATCH" -c 'echo "$LC_SHG:$WORKSPACE_TAG:${SHG_JUNK:-unset}"')"
-[ "$out" = "1:abc:unset" ] && ok "env: allow-list filtering" || bad "env: allow-list filtering ($out)"
+out="$(runuser -u "$AGENT_USER" -- env LC_SHG=1 WORKSPACE_TAG=abc AMI_SHG=keep SHG_JUNK=no "$SCRATCH" -c 'echo "$LC_SHG:$WORKSPACE_TAG:$AMI_SHG:${SHG_JUNK:-unset}"')"
+[ "$out" = "1:abc:keep:unset" ] && ok "env: allow-list filtering" || bad "env: allow-list filtering ($out)"
 
 # Resource limits.
 out="$(runuser -u "$AGENT_USER" -- "$SCRATCH" -c 'ulimit -c')"
@@ -250,6 +252,16 @@ if [ "${out#*trusted-ran}" != "$out" ] && [ "${out#*would-block}" != "$out" ]; t
 else
     bad "tier: trusted script exempt-with-audit ($out)"
 fi
+
+# Command-scoped rules (alt-interp) must be invisible in script
+# bodies: operator tooling legitimately invokes interpreters from
+# scripts; only direct -c text is the agent-escape vector.
+printf '#!/bin/bash\necho script-interp-allowed\n# py''thon3 mention\n' > "$TDIR/i.sh"
+chmod 666 "$TDIR/i.sh"
+out="$(runuser -u "$AGENT_USER" -- "$SCRATCH" "$TDIR/i.sh")"
+[ "$out" = "script-interp-allowed" ] \
+    && ok "scope: command-scoped rule invisible in script ctx" \
+    || bad "scope: command-scoped rule invisible in script ctx ($out)"
 rm -rf "$TDIR" /var/lib/workspace-guard/tier
 
 # Oversize script body exits 2. A -c string can never reach the guard:
@@ -342,6 +354,20 @@ if "$ROOT_SH" "$GUARD_ROOT/scripts/shell-guard-check"; then
     ok "post-install: check reports OK"
 else
     bad "post-install: check reports OK"
+fi
+
+# Non-root check through the installed guard: sealed-memfd staging
+# (BASH_SOURCE in /proc/self/fd, repo root from the argument), PATH
+# reset without /usr/sbin (getcap resolved absolutely), and the 0700
+# root-only bash.real lsattr probe recorded as a note. Verdict must
+# still be OK.
+out="$(cd "$GUARD_ROOT" && runuser -u "$AGENT_USER" -- bash scripts/shell-guard-check "$GUARD_ROOT" 2>&1)"
+st=$?
+if [ "$st" -eq 0 ] && [ "${out#*'shell guard: OK'}" != "$out" ]; then
+    ok "post-install: non-root check reports OK"
+else
+    printf '%s\n' "$out" >&2
+    bad "post-install: non-root check reports OK (status $st)"
 fi
 
 [ "$(stat -c '%a %U:%G' /bin/bash.real)" = "700 root:root" ] \

@@ -27,6 +27,23 @@ sudo bash scripts/uninstall-shell-guard  # restore stock bash byte-identical
 
 While the guard is live, root shell invocations fail closed (exit 3,
 `AT_SECURE == 0` by design). Only non-root users get scanning shells.
+`make shell-guard-check` and `make guard-check` route root through the
+sealed `/bin/bash.real` automatically; when invoking the check script
+by hand as root, use `sudo /bin/bash.real scripts/shell-guard-check`.
+Non-root runs go through the guard (env scrub, sealed-memfd staging):
+the check resolves the repo root explicitly from its first argument,
+`SHG_REPO_ROOT`, or its own script path (under memfd staging `$0` is
+a `/proc/self/fd/<n>` path; the guard publishes the original as
+`SHG_SCRIPT_PATH`, REQ-SHG-213: pass the root as an argument
+regardless; cwd is never consulted),
+resolves `getcap` from `/usr/sbin` by absolute path, and treats an
+unreadable 0700 `/bin/bash.real` as the installed posture
+(OK-with-note), not drift.
+
+Blocked `-c` text now also includes general-purpose interpreters
+(`python*`, `perl`, `ruby`, `node`, `php`, `lua`, `awk`, ...; rule
+`alt-interp`, REQ-SHG-313): run them from script bodies (unchanged)
+or from the operator shell.
 
 Drift repair: `shell-guard-check` exits 1 on drift (missing hook,
 stale binary hash, relaxed `.real` mode, missing caps). Re-run

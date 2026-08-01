@@ -9,8 +9,14 @@ teardown() { guard_teardown; }
 @test "guard Makefile uses guard-% pattern with script mode arg" {
     local mk="$GUARD_ROOT/Makefile"
     grep -q '^guard-%:' "$mk"
-    grep -q "bash scripts/guard-operator.sh '\$\\*'" "$mk"
+    grep -q 'SCRIPT_BASH)" scripts/guard-operator.sh' "$mk"
     ! grep -q "guard-operator.sh \$@" "$mk"
+}
+
+@test "root recipes never invoke the guarded bash directly" {
+    local mk="$GUARD_ROOT/Makefile"
+    grep -q '^SCRIPT_BASH := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)$' "$mk"
+    ! grep -qE '^\s+([A-Z_]+=[^ ]* +)?(\$\(SUDO\) +)?bash ' "$mk"
 }
 
 @test "guard Makefile does not declare empty phony guard-refresh" {
@@ -87,8 +93,41 @@ teardown() { guard_teardown; }
     grep -q '^install-shell-guard:' "$mk"
     grep -q '^uninstall-shell-guard:' "$mk"
     grep -q '^shell-guard-check:' "$mk"
-    grep -q 'bash scripts/install-shell-guard' "$mk"
-    grep -q 'bash scripts/uninstall-shell-guard' "$mk"
-    grep -q 'bash scripts/shell-guard-check' "$mk"
+    grep -q 'SCRIPT_BASH) scripts/install-shell-guard' "$mk"
+    grep -q 'SCRIPT_BASH) scripts/uninstall-shell-guard' "$mk"
+    grep -q 'SCRIPT_BASH) scripts/shell-guard-check' "$mk"
     grep -q '^build-shell-guard:' "$mk"
+}
+
+@test "guard Makefile shell-guard-check routes root through bash.real" {
+    run make -n shell-guard-check
+    assert_success
+    assert_output --partial 'id -u'
+    assert_output --partial "/bin/bash.real scripts/shell-guard-check"
+}
+
+@test "guard Makefile detects root before assigning the guarded SHELL" {
+    local mk="$GUARD_ROOT/Makefile"
+    local id_line shell_line
+    id_line="$(grep -n -m1 '^ifeq ($(shell id -u),0)' "$mk" | cut -d: -f1)"
+    shell_line="$(grep -n -m1 '^SHELL := ' "$mk" | cut -d: -f1)"
+    [ -n "$id_line" ]
+    [ -n "$shell_line" ]
+    # make's $(shell) honors the makefile's SHELL variable; if the
+    # euid probe ran after SHELL pointed at the guarded bash, root
+    # runs would fail closed during the probe itself.
+    [ "$id_line" -lt "$shell_line" ]
+}
+
+@test "guard-operator shell check uses bash.real as root and passes repo root" {
+    local op="$GUARD_ROOT/scripts/guard-operator.sh"
+    grep -q '/bin/bash.real "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT"' "$op"
+    grep -q 'bash "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT"' "$op"
+}
+
+@test "guard test-shell target runs bats via the diverted stock bash when present" {
+    local mk="$GUARD_ROOT/Makefile"
+    grep -q '/usr/bin/bash.distrib "$$(command -v bats)"' "$mk"
+    grep -q '_shim/bash' "$mk"
+    grep -q 'PATH="\$\$_shim:\$\$PATH"' "$mk"
 }

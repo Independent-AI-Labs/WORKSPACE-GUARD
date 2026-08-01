@@ -244,7 +244,27 @@ export STUBS_DIR
 # sibling's fixture state.
 _clear_stub_env() {
     unset GUARD_FIND_FIXTURE GUARD_GETCAP_FIXTURE GUARD_STUB_LOG \
-          GUARD_CHATTR_FAIL GUARD_LSATTR_IMMUTABLE GUARD_DIVERT_DB
+          GUARD_CHATTR_FAIL GUARD_LSATTR_IMMUTABLE GUARD_LSATTR_FAIL \
+          GUARD_DIVERT_DB
+}
+
+# When the shell guard is installed on the host, every `bash <script>`
+# a test spawns crosses the guard: the environment is scrubbed (stub
+# control vars lost), PATH is reset (stubs unreachable), and untrusted
+# script bodies are scanned. That breaks fixture hermeticity, which
+# targets the repo scripts, not the host guard (host-guard runtime is
+# covered by the QEMU e2e). The diverted stock bash at
+# /usr/bin/bash.distrib bypasses the guard binary at the execve level,
+# so a `bash` stub with that shebang restores pre-install semantics.
+_stock_bash_override() {
+    local stock=/usr/bin/bash.distrib
+    [ -x "$stock" ] || return 0
+    local dir="$TEST_TMPDIR/shell-override"
+    mkdir -p "$dir"
+    printf '#!%s\nexec %s "$@"\n' "$stock" "$stock" > "$dir/bash"
+    chmod +x "$dir/bash"
+    PATH="$dir:$PATH"
+    export PATH
 }
 
 guard_setup() {
@@ -276,6 +296,7 @@ guard_setup() {
     : > "$GUARD_DIVERT_DB"
     PATH="$STUBS_DIR:$PATH"
     export PATH
+    _stock_bash_override
 }
 
 guard_teardown() {

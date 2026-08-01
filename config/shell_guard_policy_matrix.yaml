@@ -102,3 +102,37 @@ cases:
   - {id: echo-ok,           input: "echo hello",               expect: allowed}
   - {id: pipeline-ok,       input: "grep foo bar.txt | wc -l", expect: allowed}
   - {id: make-ok,           input: "make lint && make check",  expect: allowed}
+  - id: py3-inline
+    input: python3 -c pass
+    expect: blocked
+    rule: alt-interp
+  - id: py-script-file
+    input: python3 /tmp/x.py
+    expect: blocked
+    rule: alt-interp
+  - id: env-python
+    input: env python3 -c pass
+    expect: blocked
+    rule: alt-interp
+  - id: perl-eval
+    input: perl -e 1
+    expect: blocked
+    rule: alt-interp
+  - id: node-eval
+    input: node -e 1
+    expect: blocked
+    rule: alt-interp
+  - id: awk-bare
+    input: awk -f prog.awk
+    expect: blocked
+    rule: alt-interp
+  - id: pytest-wrapper-ok
+    input: pytest tests/unit
+    expect: allowed
+  - id: pyproject-ok
+    input: grep name pyproject.toml
+    expect: allowed
+  - id: script-interp-ok
+    ctx: script
+    input: python3 helper.py --mode doctor
+    expect: allowed

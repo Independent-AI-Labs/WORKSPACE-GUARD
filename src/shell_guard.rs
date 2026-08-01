@@ -36,29 +36,37 @@ const PRESERVE_EXACT: &[&str] = &[
     "SHELL",
     "TZ",
 ];
-const PRESERVE_PREFIX: &[&str] = &["LC_", "XDG_", "OPENCODE_", "WORKSPACE_"];
+const PRESERVE_PREFIX: &[&str] = &["LC_", "XDG_", "OPENCODE_", "WORKSPACE_", "AMI_", "_CI_"];
 
 struct Rule {
     id: &'static str,
     re: Regex,
     hint: &'static str,
+    scope: &'static str,
 }
 
 fn compile_rules() -> Vec<Rule> {
     shell_config::SHELL_PATTERNS
         .iter()
-        .map(|(id, pat, hint)| Rule {
+        .map(|(id, pat, hint, scope)| Rule {
             id,
             re: Regex::new(pat).unwrap_or_else(|e| {
                 panic!("shell guard: pattern {:?} does not compile: {}", id, e)
             }),
             hint,
+            scope,
         })
         .collect()
 }
 
-fn scan<'r>(text: &[u8], rules: &'r [Rule]) -> Option<&'r Rule> {
-    rules.iter().find(|r| r.re.is_match(text))
+fn scope_applies(scope: &str, is_script: bool) -> bool {
+    scope == "both" || (is_script && scope == "script") || (!is_script && scope == "command")
+}
+
+fn scan<'r>(text: &[u8], rules: &'r [Rule], is_script: bool) -> Option<&'r Rule> {
+    rules
+        .iter()
+        .find(|r| scope_applies(r.scope, is_script) && r.re.is_match(text))
 }
 
 enum Invocation {
@@ -286,7 +294,7 @@ fn would_block(rule: &Rule, display: &str) {
     audit(&format!("would-block rule: {}", rule.id), display);
 }
 
-fn build_envp() -> Vec<CString> {
+fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
     let mut out: Vec<CString> = Vec::new();
     for (k, v) in std::env::vars_os() {
         let key = k.to_string_lossy();
@@ -303,20 +311,28 @@ fn build_envp() -> Vec<CString> {
         }
     }
     out.push(CString::new(format!("PATH={}", RESET_PATH)).unwrap());
+    // Memfd staging rewrites the script argument to /proc/self/fd/N, so
+    // $0/BASH_SOURCE no longer name the real file and $0-relative
+    // sourcing (dirname "$0"/../lib/...) breaks. Publish the canonical
+    // original path so scripts can resolve their true location:
+    //   _SELF="${SHG_SCRIPT_PATH:-${BASH_SOURCE[0]}}"
+    // Inserted post-scrub (SHG_ is not a preserved prefix), so only the
+    // guard can set it; a caller-supplied value is dropped above.
+    if let Some(orig) = staged_script {
+        let mut s = b"SHG_SCRIPT_PATH=".to_vec();
+        s.extend_from_slice(orig.as_os_str().as_bytes());
+        out.extend(CString::new(s).ok());
+    }
     out
 }
 
 fn tmpdir_ok(v: &OsString) -> bool {
+    use std::os::unix::fs::MetadataExt;
     let p = Path::new(v);
-    if !p.is_absolute() {
-        return false;
-    }
-    fs::metadata(p)
-        .map(|m| {
-            use std::os::unix::fs::MetadataExt;
-            m.is_dir() && m.uid() == getuid().as_raw()
-        })
-        .unwrap_or(false)
+    p.is_absolute()
+        && fs::metadata(p)
+            .map(|m| m.is_dir() && m.uid() == getuid().as_raw())
+            .unwrap_or(false)
 }
 
 fn set_rlimits() {
@@ -345,14 +361,14 @@ fn verify_real_shell() {
     }
 }
 
-fn exec_real(args: &[OsString], script_fd_path: Option<(usize, String)>) -> ! {
+fn exec_real(args: &[OsString], staged: Option<(usize, String, PathBuf)>) -> ! {
     verify_real_shell();
-    let envp = build_envp();
+    let envp = build_envp(staged.as_ref().map(|(_, _, orig)| orig.as_path()));
     set_rlimits();
     let mut argv: Vec<CString> = Vec::with_capacity(args.len());
     for (idx, a) in args.iter().enumerate() {
-        let bytes = match &script_fd_path {
-            Some((at, fdpath)) if *at == idx => fdpath.clone().into_bytes(),
+        let bytes = match &staged {
+            Some((at, fdpath, _)) if *at == idx => fdpath.clone().into_bytes(),
             _ => a.as_bytes().to_vec(),
         };
         match CString::new(bytes) {
@@ -457,7 +473,7 @@ fn main() {
                 eprintln!("shell guard: command string exceeds 1 MiB limit");
                 process::exit(2);
             }
-            if let Some(rule) = scan(&text, &rules) {
+            if let Some(rule) = scan(&text, &rules, false) {
                 let display = format!("bash -c '{}'", sanitize_cmd(&text));
                 block(rule, &display);
             }
@@ -472,18 +488,20 @@ fn main() {
                 exec_real(&args, None);
             }
             ScriptClass::Trusted(content) => {
-                if let Some(rule) = scan(&content, &rules) {
+                if let Some(rule) = scan(&content, &rules, true) {
                     would_block(rule, &path.to_string_lossy());
                 }
                 exec_real(&args, None);
             }
             ScriptClass::Untrusted(content) => {
-                if let Some(rule) = scan(&content, &rules) {
+                if let Some(rule) = scan(&content, &rules, true) {
                     let display = format!("bash {} (script body)", path.to_string_lossy());
                     block(rule, &display);
                 }
                 let fdpath = memfd_exec_path(&content);
-                exec_real(&args, Some((idx, fdpath)));
+                let orig =
+                    fs::canonicalize(Path::new(&path)).unwrap_or_else(|_| PathBuf::from(&path));
+                exec_real(&args, Some((idx, fdpath, orig)));
             }
         },
     }

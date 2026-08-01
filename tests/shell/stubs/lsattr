@@ -5,10 +5,21 @@
 #      stub (stateful install/uninstall fixtures).
 #   2. $GUARD_LSATTR_IMMUTABLE: newline-separated path globs that
 #      should report the immutable 'i' flag (original behavior).
+#   3. $GUARD_LSATTR_FAIL: newline-separated path globs that fail with
+#      a read-permission error (simulates a non-root caller hitting a
+#      0700 root-only file like /bin/bash.real).
 # All other paths report clear flags. Output: "<flags> <path>".
 # Usage: lsattr -d <path>
 path="${2:-}"
 if [ -z "$path" ]; then echo "lsattr stub: missing path" >&2; exit 1; fi
+while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    case "$path" in
+        $pat) echo "lsattr: Permission denied While reading flags on $path" >&2; exit 1 ;;
+    esac
+done <<EOF
+${GUARD_LSATTR_FAIL:-}
+EOF
 db="${GUARD_LSATTR_DB:-}"
 if [ -n "$db" ] && [ -f "$db" ]; then
     hit="$(awk -F'|' -v p="$path" '$1 == p {print $2}' "$db")"

@@ -16,6 +16,12 @@ struct MatrixCase {
     input: String,
     expect: String,
     rule: Option<String>,
+    #[serde(default = "default_matrix_ctx")]
+    ctx: String,
+}
+
+fn default_matrix_ctx() -> String {
+    "command".to_string()
 }
 
 #[derive(serde::Deserialize)]
@@ -35,7 +41,13 @@ fn policy_matrix_agrees() {
     assert!(!matrix.cases.is_empty());
     let rules = rules();
     for case in &matrix.cases {
-        let hit = scan(case.input.as_bytes(), &rules);
+        assert!(
+            case.ctx == "command" || case.ctx == "script",
+            "case {}: bad ctx {:?}",
+            case.id,
+            case.ctx
+        );
+        let hit = scan(case.input.as_bytes(), &rules, case.ctx == "script");
         match case.expect.as_str() {
             "blocked" => {
                 let rule =
@@ -66,14 +78,16 @@ fn every_pattern_has_a_blocked_case() {
     ))
     .expect("matrix yaml readable");
     let matrix: Matrix = serde_yaml::from_str(&text).expect("matrix yaml parses");
-    for (id, _, _) in shell_config::SHELL_PATTERNS {
+    for (id, _, _, scope) in shell_config::SHELL_PATTERNS {
         assert!(
-            matrix
-                .cases
-                .iter()
-                .any(|c| c.expect == "blocked" && c.rule.as_deref() == Some(*id)),
-            "pattern {} has no blocked matrix case",
-            id
+            matrix.cases.iter().any(|c| {
+                c.expect == "blocked"
+                    && c.rule.as_deref() == Some(*id)
+                    && (*scope == "both" || *scope == c.ctx)
+            }),
+            "pattern {} has no blocked matrix case in a context its scope {:?} applies to",
+            id,
+            scope
         );
     }
 }
@@ -81,9 +95,118 @@ fn every_pattern_has_a_blocked_case() {
 #[test]
 fn ids_are_unique() {
     let mut seen = std::collections::HashSet::new();
-    for (id, _, _) in shell_config::SHELL_PATTERNS {
+    for (id, _, _, _) in shell_config::SHELL_PATTERNS {
         assert!(seen.insert(id), "duplicate pattern id {}", id);
     }
+}
+
+#[test]
+fn scopes_are_valid() {
+    for (id, _, _, scope) in shell_config::SHELL_PATTERNS {
+        assert!(
+            *scope == "command" || *scope == "script" || *scope == "both",
+            "pattern {} has invalid scope {:?}",
+            id,
+            scope
+        );
+    }
+}
+
+#[test]
+fn command_scoped_rule_is_invisible_in_script_context() {
+    let rule = Rule {
+        id: "t-cmd-only",
+        re: Regex::new(r"\bzz-probe\b").unwrap(),
+        hint: "h",
+        scope: "command",
+    };
+    let rules = vec![rule];
+    assert!(scan(b"zz-probe x", &rules, false).is_some());
+    assert!(scan(b"zz-probe x", &rules, true).is_none());
+}
+
+#[test]
+fn script_scoped_rule_is_invisible_in_command_context() {
+    let rule = Rule {
+        id: "t-script-only",
+        re: Regex::new(r"\bzz-probe\b").unwrap(),
+        hint: "h",
+        scope: "script",
+    };
+    let rules = vec![rule];
+    assert!(scan(b"zz-probe x", &rules, true).is_some());
+    assert!(scan(b"zz-probe x", &rules, false).is_none());
+}
+
+#[test]
+fn both_scoped_rule_matches_everywhere() {
+    let rule = Rule {
+        id: "t-both",
+        re: Regex::new(r"\bzz-probe\b").unwrap(),
+        hint: "h",
+        scope: "both",
+    };
+    let rules = vec![rule];
+    assert!(scan(b"zz-probe x", &rules, false).is_some());
+    assert!(scan(b"zz-probe x", &rules, true).is_some());
+}
+
+static ENVP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn envp_preserves_ami_prefix_and_resets_path() {
+    let _g = ENVP_LOCK.lock().unwrap();
+    std::env::set_var("AMI_QUIET_MODE", "1");
+    std::env::set_var("_CI_CAPS_SCRUBBED", "1");
+    std::env::set_var("SHG_TEST_STRIP_ME", "x");
+    std::env::set_var("SHG_SCRIPT_PATH", "/tmp/spoofed");
+    let envp = build_envp(None);
+    std::env::remove_var("AMI_QUIET_MODE");
+    std::env::remove_var("_CI_CAPS_SCRUBBED");
+    std::env::remove_var("SHG_TEST_STRIP_ME");
+    std::env::remove_var("SHG_SCRIPT_PATH");
+    let flat: Vec<String> = envp
+        .iter()
+        .map(|c| c.to_string_lossy().to_string())
+        .collect();
+    assert!(
+        flat.iter().any(|e| e == "AMI_QUIET_MODE=1"),
+        "AMI_* must survive the guard env allow-list (banner quiet mode): {:?}",
+        flat
+    );
+    assert!(
+        flat.iter().any(|e| e == "_CI_CAPS_SCRUBBED=1"),
+        "_CI_* must survive the guard env allow-list (hook cap-scrub sentinel, \
+         else the pre-commit re-exec loops): {:?}",
+        flat
+    );
+    assert!(
+        !flat.iter().any(|e| e.starts_with("SHG_TEST_STRIP_ME=")),
+        "unlisted vars must be stripped"
+    );
+    assert!(
+        flat.iter().any(|e| e == &format!("PATH={}", RESET_PATH)),
+        "PATH must be reset"
+    );
+    assert!(
+        !flat.iter().any(|e| e.starts_with("SHG_SCRIPT_PATH=")),
+        "caller-supplied SHG_SCRIPT_PATH must be dropped (only the guard sets it)"
+    );
+}
+
+#[test]
+fn envp_injects_staged_script_path() {
+    let envp = build_envp(Some(Path::new("/repo/scripts/tool.sh")));
+    let flat: Vec<String> = envp
+        .iter()
+        .map(|c| c.to_string_lossy().to_string())
+        .collect();
+    assert!(
+        flat.iter()
+            .any(|e| e == "SHG_SCRIPT_PATH=/repo/scripts/tool.sh"),
+        "staged scripts must learn their original path: {:?}",
+        flat
+    );
 }
 
 #[test]

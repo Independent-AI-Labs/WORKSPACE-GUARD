@@ -77,7 +77,15 @@ _shell_guard_available() {
 }
 
 _shell_guard_check_status() {
-    bash "$REPO_ROOT/scripts/shell-guard-check" 2>&1
+    # Root fails closed through the guarded /bin/bash (AT_SECURE == 0),
+    # so root runs the check through the sealed operator shell. The
+    # repo-root argument survives the guard's env scrub and sealed
+    # memfd staging for the non-root path.
+    if [[ "$(id -u)" -eq 0 && -x /bin/bash.real ]]; then
+        /bin/bash.real "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT" 2>&1
+    else
+        bash "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT" 2>&1
+    fi
 }
 
 _shell_guard_needs_install() {

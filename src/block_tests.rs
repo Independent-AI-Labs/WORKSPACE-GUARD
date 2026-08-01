@@ -83,6 +83,10 @@ fn plumbing_subcommands_blocked_for_root() {
 
 #[test]
 fn sudo_gated_submodule_allowed_for_root() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let state = empty_state("submodule");
     let argv_os = argv(&["git", "submodule", "update", "--init"]);
     let root = crate::is_config_privileged();
@@ -119,6 +123,10 @@ fn push_force_blocked() {
 
 #[test]
 fn commit_amend_blocked() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let mut state = empty_state("commit");
     state.has_amend = true;
     let argv_os = argv(&["git", "commit", "--amend"]);
@@ -140,6 +148,10 @@ fn rm_without_cached_blocked() {
 
 #[test]
 fn rm_cached_allowed() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let mut state = empty_state("rm");
     state.has_cached = true;
     let argv_os = argv(&["git", "rm", "--cached", "file.txt"]);
@@ -161,6 +173,9 @@ fn rebase_without_safe_flag_blocked() {
 
 #[test]
 fn rebase_continue_allowed() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     clear_blocked_bypass_env_vars();
     let mut state = empty_state("rebase");
     state.has_rebase_safe_flag = true;

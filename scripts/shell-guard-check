@@ -19,16 +19,84 @@
 # policy-pattern text so it executes cleanly under an active guard
 # from any trust tier.
 #
-# Test hook: SHG_ROOT prefixes absolute paths; SHG_GUARD_BIN
-# overrides the reference guard binary.
+# Repo-root resolution is explicit and ordered:
+#   1. first argument, if given
+#   2. SHG_REPO_ROOT, if set
+#   3. derivation from the script's own path
+# An explicitly supplied root (1 or 2) must be an existing directory
+# or the script exits 2. Derivation (3) lands in /proc/self/fd when
+# the guard stages this script through a sealed memfd (untrusted
+# tier); in that case the script exits 2 with a remediation message
+# telling the caller to pass the repo root explicitly. There is no
+# cwd guessing and no skipped config-owner checks.
+#
+# Test hooks: SHG_ROOT prefixes absolute paths; SHG_GUARD_BIN
+# overrides the reference guard binary; SHG_GETCAP overrides the
+# getcap binary.
 
 set -uo pipefail
 
 DEVNULL=/dev/null
 SHG_ROOT="${SHG_ROOT:-}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_SRC="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SRC")" 2>"$DEVNULL" && pwd)"
+case "$SCRIPT_DIR" in
+    /proc|/proc/*|/dev/fd|/dev/fd/*|"") SCRIPT_DIR="" ;;
+esac
+REPO_ROOT=""
+EXPLICIT_ROOT=""
+if [ $# -ge 1 ]; then
+    REPO_ROOT="$1"
+    EXPLICIT_ROOT=1
+elif [ -n "${SHG_REPO_ROOT:-}" ]; then
+    REPO_ROOT="$SHG_REPO_ROOT"
+    EXPLICIT_ROOT=1
+elif [ -n "$SCRIPT_DIR" ]; then
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." 2>"$DEVNULL" && pwd)"
+fi
+if [ -n "$EXPLICIT_ROOT" ] && [ ! -d "$REPO_ROOT" ]; then
+    echo "shell guard: ERROR: repo root '$REPO_ROOT' is not a directory" >&2
+    exit 2
+fi
+if [ -z "$REPO_ROOT" ]; then
+    echo "shell guard: ERROR: repo root not determinable from script path" >&2
+    echo "  (script was staged through a sealed fd by the guard)" >&2
+    echo "  pass it explicitly: shell-guard-check <repo-root>" >&2
+    exit 2
+fi
 GUARD_BIN="${SHG_GUARD_BIN:-$REPO_ROOT/target/release/workspace-shell-guard}"
+
+# getcap lives in /usr/sbin on Debian/Ubuntu; the guard resets PATH to
+# /usr/local/bin:/usr/bin:/bin, so resolve it absolutely.
+GETCAP="${SHG_GETCAP:-}"
+if [ -z "$GETCAP" ]; then
+    GETCAP="$(command -v getcap 2>"$DEVNULL")"
+fi
+if [ -z "$GETCAP" ] && [ -x /usr/sbin/getcap ]; then
+    GETCAP=/usr/sbin/getcap
+fi
+have_override_cap() {
+    [ -n "$GETCAP" ] && "$GETCAP" "$1" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'
+}
+
+# lsattr needs read permission on the target; /bin/bash.real is 0700
+# root:root, so a non-root caller gets EACCES. That is the installed
+# posture, not drift: report OK-with-note when the file is unreadable,
+# drift only when lsattr runs and shows no +i.
+check_immutable() {
+    local path="$1" out
+    if out="$(lsattr -d "$path" 2>&1)"; then
+        if awk '{print $1}' <<<"$out" | grep -q 'i'; then
+            ok "$path immutable"
+        else
+            bad "$path missing +i"
+        fi
+    elif [ ! -r "$path" ]; then
+        ok "$path immutable (not verifiable as non-root; read-protected file is the installed posture)"
+    else
+        bad "$path lsattr failed: $out"
+    fi
+}
 
 BASH_LINK="$SHG_ROOT/bin/bash"
 BASH_PATH="$(readlink -f "$BASH_LINK" 2>"$DEVNULL")"
@@ -50,7 +118,7 @@ hash_of() { sha256sum "$1" 2>"$DEVNULL" | awk '{print $1}'; }
 installed=0
 [ -f "$REAL_PATH" ] && installed=1
 [ -f "$DISTRIB_PATH" ] && installed=1
-if getcap "$BASH_PATH" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'; then
+if have_override_cap "$BASH_PATH"; then
     installed=1
 fi
 if [ "$installed" -eq 0 ]; then
@@ -68,8 +136,10 @@ else
     # owned by the test user, not root).
     [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$BASH_PATH")" = "root:root" ] || bad "$BASH_PATH not root:root"
     [ "$(stat -c %a "$BASH_PATH")" = "755" ] || bad "$BASH_PATH mode != 0755"
-    if getcap "$BASH_PATH" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'; then
+    if have_override_cap "$BASH_PATH"; then
         ok "$BASH_PATH caps"
+    elif [ -z "$GETCAP" ]; then
+        bad "getcap not found (looked in PATH and /usr/sbin); cannot verify caps"
     else
         bad "$BASH_PATH missing cap_dac_override=ep"
     fi
@@ -88,11 +158,7 @@ if [ ! -f "$REAL_PATH" ]; then
 else
     [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$REAL_PATH")" = "root:root" ] || bad "$REAL_PATH not root:root"
     [ "$(stat -c %a "$REAL_PATH")" = "700" ] || bad "$REAL_PATH mode != 0700"
-    if lsattr -d "$REAL_PATH" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
-        ok "$REAL_PATH immutable"
-    else
-        bad "$REAL_PATH missing +i"
-    fi
+    check_immutable "$REAL_PATH"
     if [ -f "$DISTRIB_PATH" ] && [ -r "$REAL_PATH" ]; then
         if [ "$(hash_of "$REAL_PATH")" = "$(hash_of "$DISTRIB_PATH")" ]; then
             ok "$REAL_PATH matches diverted original"
@@ -124,19 +190,19 @@ else
 fi
 
 # --- policy configs ---------------------------------------------------------------
-for f in shell_guard_policy.yaml shell_guard_policy.schema.yaml shell_guard_policy_matrix.yaml; do
-    p="$CONFIG_DIR/$f"
-    if [ ! -f "$p" ]; then
-        bad "policy config missing: $p"
-        continue
-    fi
-    [ -n "$SHG_ROOT" ] || [ "$(stat -c %u "$p")" = "0" ] || bad "$p not root-owned"
-    if lsattr -d "$p" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
-        ok "$f immutable"
-    else
-        bad "$p missing +i"
-    fi
-done
+if [ ! -d "$CONFIG_DIR" ]; then
+    bad "policy config directory missing: $CONFIG_DIR"
+else
+    for f in shell_guard_policy.yaml shell_guard_policy.schema.yaml shell_guard_policy_matrix.yaml; do
+        p="$CONFIG_DIR/$f"
+        if [ ! -f "$p" ]; then
+            bad "policy config missing: $p"
+            continue
+        fi
+        [ -n "$SHG_ROOT" ] || [ "$(stat -c %u "$p")" = "0" ] || bad "$p not root-owned"
+        check_immutable "$p"
+    done
+fi
 
 # --- verdict -----------------------------------------------------------------------
 if [ "$PROBLEMS" -eq 0 ]; then

@@ -498,6 +498,29 @@ line2" ]
     [[ "$output" == argv0=/proc/self/fd/* ]]
 }
 
+@test "shell-guard: staged script learns its original path via SHG_SCRIPT_PATH" {
+    require_root_guard
+    printf '#!/bin/bash\necho "orig=$SHG_SCRIPT_PATH"\necho "argv0=$0"\n' \
+        > "$TEST_TMPDIR/orig.sh"
+    chmod +x "$TEST_TMPDIR/orig.sh"
+    run shg "$TEST_TMPDIR/orig.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"orig=$TEST_TMPDIR/orig.sh"* ]]
+    [[ "$output" == *"argv0=/proc/self/fd/"* ]]
+}
+
+@test "shell-guard: caller-supplied SHG_SCRIPT_PATH is scrubbed" {
+    require_root_guard
+    mkdir -p "$TEST_TMPDIR/trusted-env"
+    printf '#!/bin/bash\necho "val=${SHG_SCRIPT_PATH:-empty}"\n' \
+        > "$TEST_TMPDIR/trusted-env/t.sh"
+    chown -R root:root "$TEST_TMPDIR/trusted-env"
+    chmod 755 "$TEST_TMPDIR/trusted-env" "$TEST_TMPDIR/trusted-env/t.sh"
+    SHG_SCRIPT_PATH=/tmp/spoof run shg "$TEST_TMPDIR/trusted-env/t.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"val=empty"* ]]
+}
+
 @test "shell-guard: sealed memfd script cannot rewrite its own body" {
     require_root_guard
     printf '#!/bin/bash\nif echo x >> "$0"; then echo writable; else echo sealed; fi\n' \

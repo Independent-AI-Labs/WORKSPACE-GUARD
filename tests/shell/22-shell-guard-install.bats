@@ -141,7 +141,62 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     printf 'x' >> "$FAKE/bin/bash"
     run bash "$CHECK"
     [ "$status" -eq 1 ]
+    assert_output --partial "DRIFTED"
     assert_output --partial "hash differs"
+}
+
+@test "shell-guard-check: repo root argument survives memfd-style staging" {
+    run bash "$INSTALL"
+    assert_success
+    # Process substitution gives BASH_SOURCE=/dev/fd/N, mirroring the
+    # guard's sealed-memfd staging (/proc/self/fd/N); the derivation
+    # must be rejected and the explicit argument used instead.
+    run bash -c 'bash <(cat "$1") "$2"' _ "$CHECK" "$GUARD_ROOT"
+    assert_success
+    assert_output --partial "shell guard: OK"
+    refute_output --partial "policy config checks skipped"
+}
+
+@test "shell-guard-check: staged script without explicit root exits 2 with remediation" {
+    run bash "$INSTALL"
+    assert_success
+    # No argument, no SHG_REPO_ROOT, BASH_SOURCE=/dev/fd/N: there is
+    # no fallback, the script must refuse explicitly.
+    run bash -c 'env -u SHG_REPO_ROOT bash <(cat "$1")' _ "$CHECK"
+    [ "$status" -eq 2 ]
+    assert_output --partial "repo root not determinable from script path"
+    assert_output --partial "shell-guard-check <repo-root>"
+}
+
+@test "shell-guard-check: explicit root that is not a directory exits 2" {
+    run bash "$INSTALL"
+    assert_success
+    run bash "$CHECK" /nonexistent-repo-root
+    [ "$status" -eq 2 ]
+    assert_output --partial "is not a directory"
+    run bash -c 'SHG_REPO_ROOT=/nonexistent-repo-root bash "$1"' _ "$CHECK"
+    [ "$status" -eq 2 ]
+    assert_output --partial "is not a directory"
+}
+
+@test "shell-guard-check: unreadable bash.real degrades the +i probe to a note" {
+    run bash "$INSTALL"
+    assert_success
+    chmod 0000 "$FAKE/bin/bash.real"
+    export GUARD_LSATTR_FAIL="$FAKE/bin/bash.real"
+    run bash "$CHECK"
+    [ "$status" -eq 1 ]
+    assert_output --partial "mode != 0700"
+    assert_output --partial "not verifiable as non-root"
+    refute_output --partial "missing +i"
+}
+
+@test "shell-guard-check: SHG_GETCAP override is honored" {
+    run bash "$INSTALL"
+    assert_success
+    run env SHG_GETCAP=/bin/false bash "$CHECK"
+    [ "$status" -eq 1 ]
+    assert_output --partial "missing cap_dac_override=ep"
 }
 
 @test "shell-guard-uninstall: restores stock bash and cleans up" {
