@@ -7,7 +7,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]:-$0}"
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+_SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 # shellcheck source=scripts/podman/lib/host-provision-e2e.sh
 source "$_SCRIPT_DIR/lib/host-provision-e2e.sh" || exit 1
 

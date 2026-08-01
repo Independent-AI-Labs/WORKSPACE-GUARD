@@ -3,7 +3,9 @@
 # Darwin: start Podman Machine if needed.
 set -euo pipefail
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]:-$0}"
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+_SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 
 resolve_podman() {

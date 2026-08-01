@@ -2,7 +2,9 @@
 # Orchestrate WORKSPACE-GUARD Podman test tiers (see SPEC-PODMAN-TESTING.md).
 set -euo pipefail
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]:-$0}"
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+_SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 _REPO_ROOT="$(cd "$_SCRIPT_DIR/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
