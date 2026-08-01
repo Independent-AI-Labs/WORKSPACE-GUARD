@@ -180,6 +180,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
 }
 
 @test "shell-guard-check: unreadable bash.real reports OK-with-note for the +i probe" {
+    [ "$(id -u)" -ne 0 ] || skip "unreadable-file premise needs a non-root caller (root reads through chmod 0000)"
     run bash "$INSTALL"
     assert_success
     chmod 0000 "$FAKE/bin/bash.real"

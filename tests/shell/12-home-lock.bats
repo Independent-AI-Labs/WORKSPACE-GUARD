@@ -483,6 +483,7 @@ EOF
 }
 
 @test "home-drift-check: owner not root:root -> CRITICAL" {
+    [ "$(id -u)" -ne 0 ] || skip "owner-drift premise needs a non-root caller (root owns the fixture files)"
     _setup_home
     local p="$FAKE_HOME/.gitconfig"
     _make_home_files "~/.gitconfig" "g"
