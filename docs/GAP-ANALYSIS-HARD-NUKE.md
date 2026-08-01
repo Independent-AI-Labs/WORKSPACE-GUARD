@@ -238,9 +238,9 @@ Gaps are numbered for traceability. Severity: **C** = critical (OS destruction o
 | **GAP-M01** | `workspace-sandbox-launcher` not implemented | [SPEC-SANDBOX.md](specifications/SPEC-SANDBOX.md); glob finds 0 files |
 | **GAP-M02** | `install-lock` / `install-home-lock` optional, not in default vm-ws stack | [PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md](PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md) |
 | **GAP-M03** | auditd has no block-device write rules | [config/auditd/99-workspace-guard.rules](../config/auditd/99-workspace-guard.rules) |
-| **GAP-M04** | `chattr +i` best-effort at install | [SPEC-GIT-GUARD-HARDENING.md](specifications/SPEC-GIT-GUARD-HARDENING.md) |
+| **GAP-M04** | `chattr +i` lock failure does not abort install | [SPEC-GIT-GUARD-HARDENING.md](specifications/SPEC-GIT-GUARD-HARDENING.md) |
 | **GAP-M05** | Network exfil / remote destructive pulls out of scope | [REQUIREMENTS.md](../REQUIREMENTS.md) |
-| **GAP-M06** | Contract check fail-open on timeout | [src/exec.rs](../src/exec.rs) |
+| **GAP-M06** (closed) | Contract check now fails closed on timeout and on missing script | [src/exec.rs](../src/exec.rs) |
 
 ---
 

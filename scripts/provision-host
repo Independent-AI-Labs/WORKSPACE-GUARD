@@ -39,10 +39,6 @@ while [[ $# -gt 0 ]]; do
             echo "ERROR: --demote-fleet-sudo removed (fleet sudo is never modified)" >&2
             exit 2
             ;;
-        --best-effort-phase5)
-            echo "ERROR: --best-effort-phase5 removed (phase 5 fails closed on any error)" >&2
-            exit 2
-            ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; exit 2 ;;
     esac

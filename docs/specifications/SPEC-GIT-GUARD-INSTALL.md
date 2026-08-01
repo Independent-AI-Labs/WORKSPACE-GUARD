@@ -83,16 +83,15 @@ In `--install` mode (non-interactive), the script installs rustup automatically.
 ```bash
 cd projects/WORKSPACE-GUARD
 
-# Try musl (static) first, fall back to gnu (dynamic)
-if rustup target list --installed | grep -q musl; then
-    echo "[INFO] Building statically linked binary (musl)..."
-    cargo build --release --target x86_64-unknown-linux-musl
-    GUARD_BIN="target/x86_64-unknown-linux-musl/release/workspace-guard"
-else
-    echo "[INFO] musl target not available: building dynamically linked (gnu)..."
-    cargo build --release --target x86_64-unknown-linux-gnu
-    GUARD_BIN="target/x86_64-unknown-linux-gnu/release/workspace-guard"
+# musl (static) is the only build target; a missing toolchain is a
+# hard provisioning error, never an unreported dynamic gnu build.
+if ! rustup target list --installed | grep -q musl; then
+    echo "[ERROR] musl target not installed: run the host bootstrap (rustup target add x86_64-unknown-linux-musl)" >&2
+    exit 1
 fi
+echo "[INFO] Building statically linked binary (musl)..."
+cargo build --release --target x86_64-unknown-linux-musl
+GUARD_BIN="target/x86_64-unknown-linux-musl/release/workspace-guard"
 ```
 
 ### 4.3 Build Verification
@@ -347,7 +346,7 @@ rollback_git() {
 }
 ```
 
-The rollback is best-effort. If it also fails, a clear error message is displayed with manual recovery instructions.
+If rollback also fails, the script aborts with a clear error message and manual recovery instructions; rollback failure is always reported.
 
 ---
 

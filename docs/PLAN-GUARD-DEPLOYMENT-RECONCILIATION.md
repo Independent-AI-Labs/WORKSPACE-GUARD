@@ -4,7 +4,7 @@
 **Date:** 2026-07-14  
 **Location:** `docs/PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md`
 
-This document is the single authoritative plan. Active specifications (`SPEC-GIT-GUARD-INSTALL.md`, etc.) remain wrong until Phase 5 completes. No partial workarounds, no runtime probing, no alternate install paths.
+This document is the single authoritative plan. Active specifications (`SPEC-GIT-GUARD-INSTALL.md`, etc.) remain wrong until Phase 5 completes. No partial fixes, no runtime probing, no alternate install paths.
 
 ---
 

@@ -1,5 +1,5 @@
 [build]
-# Bare cargo calls (pre-commit hook clippy/fmt/coverage) default to the
+# Bare cargo calls (pre-commit hook clippy/fmt/coverage) build into the
 # agent-owned dev dir; target/release stays root-owned and is only used
 # via explicit CARGO_TARGET_DIR in root-gated make targets.
 target-dir = "target/agent"

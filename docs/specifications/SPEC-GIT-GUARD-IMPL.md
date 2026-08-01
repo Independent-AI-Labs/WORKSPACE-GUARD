@@ -118,7 +118,7 @@ Primary target: `x86_64-unknown-linux-musl` (statically linked).
 
 Static linking eliminates shared library injection vectors: there are no `.so` files to preload or replace. The binary is fully self-contained.
 
-If musl toolchain is unavailable, fall back to `x86_64-unknown-linux-gnu` (dynamically linked). In that case, only `libc`, `nix`'s transitive deps (`bitflags`, `cfg-if`), and the musl-compatible minimal set of libraries are linked.
+The musl toolchain is a hard prerequisite, provisioned by the host bootstrap. If the musl target is not installed, the build aborts with a provisioning error directing the operator to install the toolchain; a dynamically-linked gnu build is never produced.
 
 ### 8.6 Resource Limits
 

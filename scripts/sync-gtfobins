@@ -194,8 +194,8 @@ load_bin_set() {
 }
 
 # Batch stat: one spawn for the whole path list. Fills the named assoc
-# arrays keyed by path; missing entries fall back to '?' (the old per-file
-# `qc '?' stat` semantics).
+# arrays keyed by path; paths absent from the stat output render as '?'
+# (the old per-file `qc '?' stat` semantics).
 batch_stat() {
     local -n _owner="$1" _group="$2" _mode="$3"
     shift 3

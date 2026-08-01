@@ -638,7 +638,8 @@ shell-guard-check:        read-only health check (modes, caps, divert, +i, hash)
   overrides for tests).
 - `lsattr` on the 0700 root-only `/bin/bash.real` fails with EACCES
   for non-root callers; that is the installed posture, so the +i
-  probe degrades to an OK-with-note when the file is unreadable.
+  probe reports OK-with-note when the file is unreadable (drift is
+  reported only when `lsattr` runs and shows no `+i`).
 
 The canonical operator flow (`scripts/guard-operator.sh`, REQ-SHG-600)
 wires the shell guard in alongside the git guard:

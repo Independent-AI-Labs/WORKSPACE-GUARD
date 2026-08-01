@@ -588,6 +588,46 @@ line2" ]
     [ "$status" -ne 0 ]
 }
 
+@test "shell-guard: process-substitution script source is blocked" {
+    require_root_guard
+    run shg <(printf 'echo shg-procsub-ran\n')
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"BLOCKED"* ]]
+    [[ "$output" == *"fd-script-source"* ]]
+    [[ "$output" == *"Origin:"* ]]
+    [[ "$output" != *"shg-procsub-ran"* ]]
+}
+
+@test "shell-guard: re-exec of the guard's own staged memfd is rescanned silently" {
+    require_root_guard
+    printf '#!/bin/bash\nif [ ! -f "%s/mark" ]; then touch "%s/mark"; exec bash "$0"; fi\necho reexec-ok\n' \
+        "$TEST_TMPDIR" "$TEST_TMPDIR" > "$TEST_TMPDIR/reexec.sh"
+    run shg "$TEST_TMPDIR/reexec.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"reexec-ok"* ]]
+    [[ "$output" != *"cannot read script"* ]]
+}
+
+@test "shell-guard: block report quotes the offending excerpt and origin trace" {
+    require_root_guard
+    run shg -c 'pkill whatever'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"process-by-name"* ]]
+    [[ "$output" == *"Offending excerpt:"* ]]
+    [[ "$output" == *"pkill whatever"* ]]
+    [[ "$output" == *"Origin:"* ]]
+}
+
+@test "shell-guard: script block report shows the offending line number" {
+    require_root_guard
+    printf '#!/bin/bash\necho before\npkill whatever\necho after\n' > "$TEST_TMPDIR/bad-body.sh"
+    run shg "$TEST_TMPDIR/bad-body.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"script body"* ]]
+    [[ "$output" == *">     3 | pkill whatever"* ]]
+    [[ "$output" == *"    2 | echo before"* ]]
+}
+
 # ---------- environment hygiene ----------
 
 @test "shell-guard: PATH is reset to the system default" {

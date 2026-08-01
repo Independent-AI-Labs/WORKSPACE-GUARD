@@ -152,18 +152,20 @@ pub fn check_blocked(
     }
 
     if subcommand == "push" {
-        if let Ok(stat) = fs::read_to_string("/proc/self/stat") {
-            if let Some(pos) = stat.rfind(')') {
-                let fields: Vec<&str> = stat[pos + 1..].split_whitespace().collect();
-                if fields.len() > 4 {
-                    let pgrp: i32 = fields[1].parse().unwrap_or(0);
-                    let tpgid: i32 = fields[4].parse().unwrap_or(0);
-                    if tpgid > 0 && pgrp != tpgid {
-                        return Err(GuardError::Blocked {
-                            reason: "git push from background process".into(),
-                            hint: "Run 'git push' in the foreground so hooks can interact".into(),
-                        });
-                    }
+        let stat = fs::read_to_string("/proc/self/stat").map_err(|e| GuardError::Blocked {
+            reason: format!("cannot read /proc/self/stat: {}", e),
+            hint: "The background-push check cannot be verified; refusing to push".into(),
+        })?;
+        if let Some(pos) = stat.rfind(')') {
+            let fields: Vec<&str> = stat[pos + 1..].split_whitespace().collect();
+            if fields.len() > 4 {
+                let pgrp: i32 = fields[1].parse().unwrap_or(0);
+                let tpgid: i32 = fields[4].parse().unwrap_or(0);
+                if tpgid > 0 && pgrp != tpgid {
+                    return Err(GuardError::Blocked {
+                        reason: "git push from background process".into(),
+                        hint: "Run 'git push' in the foreground so hooks can interact".into(),
+                    });
                 }
             }
         }

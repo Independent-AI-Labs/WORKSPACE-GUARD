@@ -411,7 +411,7 @@ handled by `make install-shell-guard`.
 
 - **REQ-SHG-505**: The binary shall produce NO output for allowed
   invocations: all output comes from the real shell. Warnings
-  (degraded script-scan, REQ-SHG-202) go to stderr only.
+  (unreadable script source, REQ-SHG-202) go to stderr only.
 
 ---
 

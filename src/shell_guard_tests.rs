@@ -1,5 +1,37 @@
 use super::*;
 
+#[test]
+fn excerpt_marks_matching_line_with_context() {
+    let body = b"line one\npkill x\nline three\n";
+    let start = 9;
+    let out = report::excerpt(body, start, start + 7, true);
+    assert!(out.contains(">     2 | pkill x"), "got: {}", out);
+    assert!(out.contains("    1 | line one"), "got: {}", out);
+    assert!(out.contains("    3 | line three"), "got: {}", out);
+}
+
+#[test]
+fn fd_path_classification() {
+    assert!(shg_fd::is_fd_path("/proc/self/fd/3"));
+    assert!(shg_fd::is_fd_path("/dev/fd/63"));
+    assert!(shg_fd::is_fd_path("/dev/stdin"));
+    assert!(!shg_fd::is_fd_path("/tmp/script.sh"));
+    assert!(!shg_fd::is_fd_path("relative.sh"));
+}
+
+#[test]
+fn staged_memfd_roundtrip_verifies_seals_and_rewinds() {
+    let path = shg_fd::memfd_exec_path(b"echo hello\n");
+    let body = shg_fd::read_staged_fd(&path).expect("staged memfd must verify");
+    assert_eq!(body, b"echo hello\n");
+}
+
+#[test]
+fn read_staged_fd_rejects_regular_paths_and_pipes() {
+    assert!(shg_fd::read_staged_fd("/tmp").is_none());
+    assert!(shg_fd::read_staged_fd("/proc/self/fd/0").is_none());
+}
+
 fn rules() -> Vec<Rule> {
     compile_rules()
 }
@@ -47,13 +79,13 @@ fn policy_matrix_agrees() {
             case.id,
             case.ctx
         );
-        let hit = scan(case.input.as_bytes(), &rules, case.ctx == "script");
+        let hit = report::find_hit(case.input.as_bytes(), &rules, case.ctx == "script");
         match case.expect.as_str() {
             "blocked" => {
                 let rule =
                     hit.unwrap_or_else(|| panic!("case {}: expected block, got allow", case.id));
                 if let Some(want) = &case.rule {
-                    assert_eq!(&rule.id, want, "case {}: wrong rule matched", case.id);
+                    assert_eq!(&rule.rule.id, want, "case {}: wrong rule matched", case.id);
                 }
             }
             "allowed" => {
@@ -61,7 +93,7 @@ fn policy_matrix_agrees() {
                     hit.is_none(),
                     "case {}: expected allow, got block by {}",
                     case.id,
-                    hit.unwrap().id
+                    hit.unwrap().rule.id
                 );
             }
             other => panic!("case {}: bad expect {:?}", case.id, other),
@@ -121,8 +153,8 @@ fn command_scoped_rule_is_invisible_in_script_context() {
         scope: "command",
     };
     let rules = vec![rule];
-    assert!(scan(b"zz-probe x", &rules, false).is_some());
-    assert!(scan(b"zz-probe x", &rules, true).is_none());
+    assert!(report::find_hit(b"zz-probe x", &rules, false).is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, true).is_none());
 }
 
 #[test]
@@ -134,8 +166,8 @@ fn script_scoped_rule_is_invisible_in_command_context() {
         scope: "script",
     };
     let rules = vec![rule];
-    assert!(scan(b"zz-probe x", &rules, true).is_some());
-    assert!(scan(b"zz-probe x", &rules, false).is_none());
+    assert!(report::find_hit(b"zz-probe x", &rules, true).is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, false).is_none());
 }
 
 #[test]
@@ -147,8 +179,8 @@ fn both_scoped_rule_matches_everywhere() {
         scope: "both",
     };
     let rules = vec![rule];
-    assert!(scan(b"zz-probe x", &rules, false).is_some());
-    assert!(scan(b"zz-probe x", &rules, true).is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, false).is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, true).is_some());
 }
 
 static ENVP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -211,15 +243,18 @@ fn envp_injects_staged_script_path() {
 
 #[test]
 fn sanitize_redacts_assignments() {
-    assert_eq!(sanitize_cmd(b"FOO=secret make test"), "FOO=... make test");
-    assert_eq!(sanitize_cmd(b"echo A=1"), "echo A=...");
+    assert_eq!(
+        report::sanitize_cmd(b"FOO=secret make test"),
+        "FOO=... make test"
+    );
+    assert_eq!(report::sanitize_cmd(b"echo A=1"), "echo A=...");
 }
 
 #[test]
 fn sanitize_truncates_and_replaces_quotes() {
     let long = vec![b'x'; 500];
-    assert_eq!(sanitize_cmd(&long).chars().count(), 200);
-    assert_eq!(sanitize_cmd(b"it's"), "it\u{2019}s");
+    assert_eq!(report::sanitize_cmd(&long).chars().count(), 200);
+    assert_eq!(report::sanitize_cmd(b"it's"), "it\u{2019}s");
 }
 
 #[test]

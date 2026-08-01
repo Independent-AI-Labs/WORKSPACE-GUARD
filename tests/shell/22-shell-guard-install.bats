@@ -179,7 +179,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     assert_output --partial "is not a directory"
 }
 
-@test "shell-guard-check: unreadable bash.real degrades the +i probe to a note" {
+@test "shell-guard-check: unreadable bash.real reports OK-with-note for the +i probe" {
     run bash "$INSTALL"
     assert_success
     chmod 0000 "$FAKE/bin/bash.real"

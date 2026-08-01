@@ -19,7 +19,9 @@
 # Homebrew gnubin directories are prepended to PATH so GNU coreutils,
 # gnu-sed, and findutils shadow the BSD equivalents.
 _OS := $(shell uname -s)
-_HB_PREFIX := $(if $(wildcard /opt/homebrew),/opt/homebrew,$(if $(wildcard /usr/local),/usr/local))
+# Homebrew prefix is architecture-derived: Apple Silicon installs to
+# /opt/homebrew, Intel to /usr/local. No filesystem probing.
+_HB_PREFIX := $(if $(filter arm64,$(shell uname -m)),/opt/homebrew,/usr/local)
 # Root detection MUST happen before the SHELL assignment below:
 # make's $(shell) honors the makefile's SHELL variable, so once SHELL
 # points at the guarded bash, every $(shell) probe fails closed for
@@ -27,16 +29,25 @@ _HB_PREFIX := $(if $(wildcard /opt/homebrew),/opt/homebrew,$(if $(wildcard /usr/
 # stock /bin/sh, `id -u` answers truthfully for every caller.
 # Root recipes run through the sealed /bin/bash.real instead of the
 # guarded bash (root execs of the fcap guard fail closed by design).
+# A missing /bin/bash.real is a hard provisioning error; the build
+# never re-routes through the guarded bash.
 ifeq ($(shell id -u),0)
-SHELL := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)
+ifeq ($(wildcard /bin/bash.real),)
+$(error /bin/bash.real is missing: run sudo make -C ../CI bootstrap-workspace-guard to seal the real bash)
+endif
+SHELL := /bin/bash.real
 else
-SHELL := $(if $(wildcard $(_HB_PREFIX)/bin/bash),$(_HB_PREFIX)/bin/bash,/bin/bash)
+ifneq ($(wildcard $(_HB_PREFIX)/bin/bash),)
+SHELL := $(_HB_PREFIX)/bin/bash
+else
+SHELL := /bin/bash
+endif
 endif
 # Interpreter for repo scripts invoked explicitly from recipes. Bare `bash`
 # resolves to the guarded /usr/bin/bash, which fails closed for root
 # (AT_SECURE == 0) and broke sudo make guard-refresh -> build-guard.
 ifeq ($(shell id -u),0)
-SCRIPT_BASH := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)
+SCRIPT_BASH := /bin/bash.real
 else
 SCRIPT_BASH := bash
 endif
@@ -520,9 +531,10 @@ install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (R
 	install -o root -g root -m 0755 "$(REPO_ROOT)/target/release/workspace-yaml-edit" "$(YAML_EDIT)"
 
 # Root-only yaml-edit recipes must not run through the guarded bash:
-# root execs of the fcap guard fail closed (AT_SECURE == 0). Route
-# them through the sealed /bin/bash.real when it is installed.
-YAML_SH := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)
+# root execs of the fcap guard fail closed (AT_SECURE == 0). They share
+# SCRIPT_BASH, which is the sealed /bin/bash.real for root (hard error
+# when missing) and plain bash otherwise.
+YAML_SH := $(SCRIPT_BASH)
 
 .PHONY: yaml-add yaml-remove yaml-set yaml-get yaml-list yaml-validate
 yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)

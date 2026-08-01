@@ -19,7 +19,7 @@ _setup_drift() {
 }
 
 # Write a minimal suid-baseline.yaml with the given paths. Each entry
-# defaults to contained=false, gtfobins=false unless overridden.
+# sets contained=false, gtfobins=false unless overridden.
 _write_suid_baseline() {
     local dir="$1"; shift
     local p extra

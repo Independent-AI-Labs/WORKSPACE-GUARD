@@ -85,7 +85,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-050**: `stash` subcommand: unconditionally blocked for ALL users (including root), for every stash operation (push, pop, apply, list, show, drop, clear). Supersedes the prior drop/clear-only policy. Rationale: stash is unlink+recreate on the worktree, indistinguishable from exemption-file tampering at the syscall level, and it deadlocks on root-owned `chattr +i` policy files mid-merge leaving the tree half-applied. Sanctioned alternatives (AGENTS.md): `git worktree add /tmp/...` for baselines, `git diff > /tmp/patch` for snapshots.
 - **REQ-GGUARD-051**: `branch` subcommand: block when any argument is `-D` (force delete). The `-d` (safe delete) shall be allowed.
 - **REQ-GGUARD-052**: `push` subcommand: block when `--force`, `-f`, or `--force-with-lease` is present.
-- **REQ-GGUARD-053**: `push` subcommand: block when the process is **not in the foreground process group** of its controlling terminal. Detection: read `/proc/self/stat`, compare field 5 (pgrp) with field 8 (tpgid). If `tpgid > 0` and `pgrp != tpggid`, block. If `/proc/self/stat` is unreadable, emit a warning to stderr but allow the push (degraded operation).
+- **REQ-GGUARD-053**: `push` subcommand: block when the process is **not in the foreground process group** of its controlling terminal. Detection: read `/proc/self/stat`, compare field 5 (pgrp) with field 8 (tpgid). If `tpgid > 0` and `pgrp != tpggid`, block. If `/proc/self/stat` is unreadable, fail closed: block the push and report the read error.
 - **REQ-GGUARD-054**: `commit` subcommand: block `--amend` when the current HEAD is already present on `origin/<current-branch>`. Determination: call real git with `merge-base --is-ancestor HEAD origin/<branch>`. If `--amend` is combined with a block on HEAD, exit code 1.
 - **REQ-GGUARD-055**: `revert` subcommand: block when the target commit (default HEAD) is NOT present on `origin/<current-branch>`. Only block if the commit is verified to exist locally via `rev-parse --verify`. This prevents creating noisy revert commits for un-pushed work.
 
@@ -131,7 +131,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   - `WORKSPACE_GGUARD_REPO_ROOT`: the repo's top-level directory
   - `WORKSPACE_GGUARD_WORKSPACE_ROOT`: the WORKSPACE workspace root
 - **REQ-GGUARD-085**: If the contract check script exits non-zero, the binary shall exit with code 4, showing the script's stderr output.
-- **REQ-GGUARD-086**: If the contract check script is not found at the expected path, contract enforcement shall be skipped with a warning to stderr (graceful skip).
+- **REQ-GGUARD-086**: If the contract check script is not found at the expected path, the binary shall fail closed with exit code 4, reporting that the contract cannot be verified. A missing contract script is a provisioning error, never a skip.
 
 ### 10. Audit Logging
 
@@ -218,7 +218,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-155**: When built with `--features root-only`, the guard shall skip the `CAP_DAC_OVERRIDE` capability check and instead verify `geteuid() == 0`.
 - **REQ-GGUARD-156**: Root-only mode shall print a notice to stderr on every invocation, documenting that it is a soft barrier. The notice shall NOT reveal the bypass mechanism.
 - **REQ-GGUARD-157**: Root-only mode shall apply the same 17-rule policy engine, environment sanitization, and audit logging as capability mode.
-- **REQ-GGUARD-158**: Root-only mode shall NOT attempt `setcap`, `chattr +i`, or `dpkg-divert` during installation. The bootstrap script shall detect the absence of `setcap` and fall back to a simple copy + symlink installation.
+- **REQ-GGUARD-158**: Root-only mode shall NOT attempt `setcap`, `chattr +i`, or `dpkg-divert` during installation. Root-only installation is explicitly copy + symlink; the bootstrap script does not probe for capability tooling in this mode.
 
 ### 16. Rust Project Structure
 

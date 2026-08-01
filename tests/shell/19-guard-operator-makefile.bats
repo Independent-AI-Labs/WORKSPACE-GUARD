@@ -15,7 +15,8 @@ teardown() { guard_teardown; }
 
 @test "root recipes never invoke the guarded bash directly" {
     local mk="$GUARD_ROOT/Makefile"
-    grep -q '^SCRIPT_BASH := $(if $(wildcard /bin/bash.real),/bin/bash.real,/bin/bash)$' "$mk"
+    grep -q '^SCRIPT_BASH := /bin/bash.real$' "$mk"
+    ! grep -q 'if \$(wildcard' "$mk"
     ! grep -qE '^\s+([A-Z_]+=[^ ]* +)?(\$\(SUDO\) +)?bash ' "$mk"
 }
 

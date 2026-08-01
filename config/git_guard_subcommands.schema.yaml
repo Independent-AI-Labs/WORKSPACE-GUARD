@@ -10,7 +10,7 @@
 #   fields:        ordered list of field descriptors
 #     path:          dot-notation path; [] suffix denotes a list
 #     type:          yaml | string | integer | boolean | list | list<T> | map
-#     required:      true | false (defaults to false)
+#     required:      true | false (absent means false)
 #     default:       default value when omitted (omit if none)
 #     description:   human-readable description of the field
 config: git_guard_subcommands

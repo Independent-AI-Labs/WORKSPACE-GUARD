@@ -163,7 +163,7 @@ fn blob_hash_of(path: &Path) -> Option<String> {
 /// (`hash-object --stdin-paths`). Replaces the previous per-file
 /// subprocess loop, which spawned one git process per tracked file on
 /// every commit/push. Files whose paths contain a newline (cannot be
-/// passed via --stdin-paths) fall back to the single-file path.
+/// passed via --stdin-paths) take the single-file path.
 /// Returns paths whose on-disk content differs from the index hash.
 fn modified_tracked_files(ci_path: &Path, entries: &[(String, String)]) -> Vec<String> {
     let mut modified = Vec::new();

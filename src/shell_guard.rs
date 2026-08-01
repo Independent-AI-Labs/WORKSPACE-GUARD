@@ -13,6 +13,11 @@ use regex::bytes::Regex;
 mod shell_config {
     include!(concat!(env!("OUT_DIR"), "/shell_guard_config.rs"));
 }
+mod shell_guard_fd;
+mod shell_guard_report;
+
+use shell_guard_fd as shg_fd;
+use shell_guard_report as report;
 
 const REAL_SHELL: &str = "/bin/bash.real";
 const MAX_TEXT: usize = 1 << 20;
@@ -57,16 +62,6 @@ fn compile_rules() -> Vec<Rule> {
             scope,
         })
         .collect()
-}
-
-fn scope_applies(scope: &str, is_script: bool) -> bool {
-    scope == "both" || (is_script && scope == "script") || (!is_script && scope == "command")
-}
-
-fn scan<'r>(text: &[u8], rules: &'r [Rule], is_script: bool) -> Option<&'r Rule> {
-    rules
-        .iter()
-        .find(|r| scope_applies(r.scope, is_script) && r.re.is_match(text))
 }
 
 enum Invocation {
@@ -123,6 +118,9 @@ enum ScriptClass {
     Trusted(Vec<u8>),
     Untrusted(Vec<u8>),
     Unreadable,
+    /// fd/pipe/device-backed source that is not our sealed staging
+    /// memfd: real content the scanner cannot see. Hard block.
+    ForeignFd,
 }
 
 fn dir_is_root_locked(path: &Path) -> bool {
@@ -158,6 +156,30 @@ fn parents_root_locked(path: &Path) -> bool {
 }
 
 fn classify_script(path: &OsString) -> ScriptClass {
+    let spath = path.to_string_lossy();
+    // fd-delivered sources are real content the regular open path
+    // cannot see (O_NOFOLLOW rejects /proc/self/fd symlinks). Accept
+    // only our own sealed staging memfd; block everything else.
+    if shg_fd::is_fd_path(&spath) {
+        return match shg_fd::read_staged_fd(&spath) {
+            Some(buf) => ScriptClass::Untrusted(buf),
+            None => ScriptClass::ForeignFd,
+        };
+    }
+    // Metadata first: opening a fifo for read would block forever.
+    // Directories pass through so the real bash prints its own error;
+    // every other non-file (fifo, socket, device) is a content channel
+    // the scanner cannot read and is therefore blocked.
+    let meta = match fs::metadata(Path::new(path)) {
+        Ok(m) => m,
+        Err(_) => return ScriptClass::Unreadable,
+    };
+    if !meta.is_file() {
+        if meta.is_dir() {
+            return ScriptClass::Unreadable;
+        }
+        return ScriptClass::ForeignFd;
+    }
     let file = match fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -166,13 +188,6 @@ fn classify_script(path: &OsString) -> ScriptClass {
         Ok(f) => f,
         Err(_) => return ScriptClass::Unreadable,
     };
-    let meta = match file.metadata() {
-        Ok(m) => m,
-        Err(_) => return ScriptClass::Unreadable,
-    };
-    if !meta.is_file() {
-        return ScriptClass::Unreadable;
-    }
     let mut buf = Vec::new();
     let mut limited = file.take((MAX_TEXT + 1) as u64);
     if limited.read_to_end(&mut buf).is_err() {
@@ -220,34 +235,6 @@ fn timestamp() -> String {
     )
 }
 
-fn sanitize_cmd(text: &[u8]) -> String {
-    let lossy = String::from_utf8_lossy(text);
-    let mut out = String::new();
-    for word in lossy.split_whitespace() {
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        if let Some(eq) = word.find('=') {
-            let (k, _) = word.split_at(eq);
-            if !k.is_empty()
-                && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                && k.bytes().next().is_some_and(|b| !b.is_ascii_digit())
-            {
-                out.push_str(k);
-                out.push_str("=...");
-                continue;
-            }
-        }
-        out.push_str(word);
-    }
-    let out = out.replace('\'', "\u{2019}");
-    if out.len() > 200 {
-        out.chars().take(200).collect()
-    } else {
-        out
-    }
-}
-
 fn audit(reason: &str, cmd: &str) {
     let uid = getuid().as_raw();
     let home = User::from_uid(Uid::from_raw(uid))
@@ -269,29 +256,26 @@ fn audit(reason: &str, cmd: &str) {
     }
 }
 
-fn block(rule: &Rule, display: &str) -> ! {
-    let msg = format!(
-        "BLOCKED: {} ({}) ({})\n  -> Hint: {}",
-        display,
-        rule.id,
-        timestamp(),
-        rule.hint
-    );
+fn block(rule: &Rule, display: &str, excerpt: &str) -> ! {
+    let msg = report::block_report(rule, display, excerpt, &timestamp());
     eprintln!("{}", msg);
     if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
         let _ = writeln!(&tty, "{}", msg);
     }
-    audit(&format!("blocked rule: {}", rule.id), display);
+    audit(
+        &format!("blocked rule: {}", rule.id),
+        &format!("{} excerpt={}", display, report::flatten(excerpt)),
+    );
     process::exit(1);
 }
 
-fn would_block(rule: &Rule, display: &str) {
-    let msg = format!(
-        "shell guard: would-block ({}) in trusted-tier script: {}",
-        rule.id, display
-    );
+fn would_block(rule: &Rule, display: &str, excerpt: &str) {
+    let msg = report::would_block_report(rule, display, excerpt);
     eprintln!("{}", msg);
-    audit(&format!("would-block rule: {}", rule.id), display);
+    audit(
+        &format!("would-block rule: {}", rule.id),
+        &format!("{} excerpt={}", display, report::flatten(excerpt)),
+    );
 }
 
 fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
@@ -392,47 +376,6 @@ fn exec_real(args: &[OsString], staged: Option<(usize, String, PathBuf)>) -> ! {
     }
 }
 
-fn memfd_exec_path(content: &[u8]) -> String {
-    use nix::fcntl::{fcntl, FcntlArg, FdFlag, SealFlag};
-    use rustix::fs::{memfd_create, MemfdFlags};
-    use std::os::unix::io::{AsRawFd, IntoRawFd};
-
-    // rustix safe wrapper: nix 0.29 does not expose MFD_EXEC. Flags:
-    // ALLOW_SEALING is mandatory (without it the memfd is born with
-    // F_SEAL_SEAL and every F_ADD_SEALS fails EPERM); EXEC keeps the
-    // fd executable under vm.memfd_noexec=1 (Ubuntu 24.04).
-    let fd = match memfd_create(
-        c"workspace-shell-guard",
-        MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING | MemfdFlags::EXEC,
-    ) {
-        Ok(fd) => fd,
-        Err(e) => {
-            eprintln!("shell guard: memfd_create failed: {}", e);
-            process::exit(3);
-        }
-    };
-    if nix::unistd::write(&fd, content).is_err() {
-        eprintln!("shell guard: memfd write failed");
-        process::exit(3);
-    }
-    let seals = SealFlag::F_SEAL_SHRINK
-        | SealFlag::F_SEAL_WRITE
-        | SealFlag::F_SEAL_GROW
-        | SealFlag::F_SEAL_SEAL;
-    if let Err(e) = fcntl(fd.as_raw_fd(), FcntlArg::F_ADD_SEALS(seals)) {
-        eprintln!("shell guard: memfd sealing failed: {}", e);
-        process::exit(3);
-    }
-    if let Err(e) = fcntl(fd.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())) {
-        eprintln!("shell guard: memfd cloexec clear failed: {}", e);
-        process::exit(3);
-    }
-    // Leak the fd on purpose: it must survive the execve into the real
-    // shell. Dropping the OwnedFd here would close it before exec.
-    let leaked = fd.into_raw_fd();
-    format!("/proc/self/fd/{}", leaked)
-}
-
 fn at_secure() -> u64 {
     const AT_SECURE_KEY: u64 = 23;
     let raw = match fs::read("/proc/self/auxv") {
@@ -473,13 +416,23 @@ fn main() {
                 eprintln!("shell guard: command string exceeds 1 MiB limit");
                 process::exit(2);
             }
-            if let Some(rule) = scan(&text, &rules, false) {
-                let display = format!("bash -c '{}'", sanitize_cmd(&text));
-                block(rule, &display);
+            if let Some(hit) = report::find_hit(&text, &rules, false) {
+                let display = format!("bash -c '{}'", report::sanitize_cmd(&text));
+                let excerpt = report::excerpt(&text, hit.start, hit.end, false);
+                block(hit.rule, &display, &excerpt);
             }
             exec_real(&args, None);
         }
         Invocation::Script(path, idx) => match classify_script(&path) {
+            ScriptClass::ForeignFd => {
+                let msg = report::fd_block_report(&path.to_string_lossy(), &timestamp());
+                eprintln!("{}", msg);
+                if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
+                    let _ = writeln!(&tty, "{}", msg);
+                }
+                audit("blocked fd-script-source", &path.to_string_lossy());
+                process::exit(1);
+            }
             ScriptClass::Unreadable => {
                 eprintln!(
                     "shell guard: warning: cannot read script {:?}; passing through",
@@ -488,17 +441,19 @@ fn main() {
                 exec_real(&args, None);
             }
             ScriptClass::Trusted(content) => {
-                if let Some(rule) = scan(&content, &rules, true) {
-                    would_block(rule, &path.to_string_lossy());
+                if let Some(hit) = report::find_hit(&content, &rules, true) {
+                    let excerpt = report::excerpt(&content, hit.start, hit.end, true);
+                    would_block(hit.rule, &path.to_string_lossy(), &excerpt);
                 }
                 exec_real(&args, None);
             }
             ScriptClass::Untrusted(content) => {
-                if let Some(rule) = scan(&content, &rules, true) {
+                if let Some(hit) = report::find_hit(&content, &rules, true) {
                     let display = format!("bash {} (script body)", path.to_string_lossy());
-                    block(rule, &display);
+                    let excerpt = report::excerpt(&content, hit.start, hit.end, true);
+                    block(hit.rule, &display, &excerpt);
                 }
-                let fdpath = memfd_exec_path(&content);
+                let fdpath = shg_fd::memfd_exec_path(&content);
                 let orig =
                     fs::canonicalize(Path::new(&path)).unwrap_or_else(|_| PathBuf::from(&path));
                 exec_real(&args, Some((idx, fdpath, orig)));
