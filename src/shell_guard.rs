@@ -133,7 +133,30 @@ fn dir_is_root_locked(path: &Path) -> bool {
     }
 }
 
-fn parents_root_locked(path: &Path) -> bool {
+// _IOR('f', 1, long) on 64-bit Linux; libc::FS_IOC_GETFLAGS is not
+// exported by all pinned libc versions, and FS_IMMUTABLE_FL is not in
+// the libc crate at all.
+const FS_IOC_GETFLAGS: libc::c_ulong = 0x8008_6601;
+const FS_IMMUTABLE_FL: libc::c_long = 0x0000_0010;
+
+fn dir_is_immutable(path: &Path) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let f = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut flags: libc::c_long = 0;
+    let rc = unsafe { libc::ioctl(f.as_raw_fd(), FS_IOC_GETFLAGS, &mut flags) };
+    rc == 0 && (flags & FS_IMMUTABLE_FL) != 0
+}
+
+// Anchored trust: every ancestor from the script's parent upward must be
+// root-locked, and the chain must either reach / or terminate at a
+// directory carrying FS_IMMUTABLE_FL. The immutable anchor cannot be
+// renamed or replaced by the agent-owned parent above it, which closes
+// the unlink+recreate attack that plain root-ownership under an
+// agent-owned ancestor leaves open.
+fn parents_root_locked_or_anchored(path: &Path) -> bool {
     let abs: PathBuf = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -143,16 +166,21 @@ fn parents_root_locked(path: &Path) -> bool {
         }
     };
     let mut cur = abs.parent().map(|p| p.to_path_buf());
+    let mut top_locked: Option<PathBuf> = None;
     while let Some(p) = cur {
         if !dir_is_root_locked(&p) {
-            return false;
+            break;
         }
         if p == Path::new("/") {
             return true;
         }
+        top_locked = Some(p.clone());
         cur = p.parent().map(|x| x.to_path_buf());
     }
-    true
+    match top_locked {
+        Some(p) => dir_is_immutable(&p),
+        None => false,
+    }
 }
 
 fn classify_script(path: &OsString) -> ScriptClass {
@@ -198,8 +226,9 @@ fn classify_script(path: &OsString) -> ScriptClass {
         process::exit(2);
     }
     use std::os::unix::fs::MetadataExt;
-    let trusted =
-        meta.uid() == 0 && (meta.mode() & 0o022) == 0 && parents_root_locked(Path::new(path));
+    let trusted = meta.uid() == 0
+        && (meta.mode() & 0o022) == 0
+        && parents_root_locked_or_anchored(Path::new(path));
     if trusted {
         ScriptClass::Trusted(buf)
     } else {

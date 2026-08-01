@@ -104,3 +104,6 @@ exceptions:
   - pattern: \bsilent
     paths:
       - config/policies.index.yaml
+  - pattern: unsafe\s*\{
+    paths:
+      - src/shell_guard.rs

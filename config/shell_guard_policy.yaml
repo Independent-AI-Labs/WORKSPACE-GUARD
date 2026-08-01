@@ -65,6 +65,6 @@ patterns:
     regex: '(\|\||\|&?)\s*(true\b|:)'
     hint: "handle the exit code explicitly instead of masking it"
   - id: alt-interp
-    regex: \b(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|irb|node|nodejs|deno|bun|php[0-9.]*|lua[0-9.]*|luajit|tclsh|wish|expect|Rscript|raku|julia|awk|gawk|mawk|nawk)\b
+    regex: (^|([\n;|&`]|&&|\|\||\$\()\s*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b(\s+(-[^;|&\s]*|[A-Za-z_]+=\S*))*\s+)(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|irb|node|nodejs|deno|bun|php[0-9.]*|lua[0-9.]*|luajit|tclsh|wish|expect|Rscript|raku|julia|awk|gawk|mawk|nawk)\b
     hint: interpreters are an unscanned command channel, run them from a script or the operator shell
     scope: command

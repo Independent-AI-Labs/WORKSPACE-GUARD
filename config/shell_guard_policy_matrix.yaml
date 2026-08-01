@@ -136,3 +136,39 @@ cases:
     ctx: script
     input: python3 helper.py --mode doctor
     expect: allowed
+  - id: uv-run-module-ok
+    input: uv run python -m ci.check_markdown_docs --check-remote
+    expect: allowed
+  - id: uv-run-inline-ok
+    input: uv run python -c print(1)
+    expect: allowed
+  - id: venv-path-ok
+    input: .venv/lib/python3.11/site-packages/tool run
+    expect: allowed
+  - id: command-v-python-ok
+    input: command -v python3
+    expect: allowed
+  - id: sudo-python
+    input: sudo python3 -c x
+    expect: blocked
+    rule: alt-interp
+  - id: seq-python
+    input: true; python3 x
+    expect: blocked
+    rule: alt-interp
+  - id: subst-python
+    input: echo $(python3 x)
+    expect: blocked
+    rule: alt-interp
+  - id: xargs-python
+    input: printf f | xargs python3
+    expect: blocked
+    rule: alt-interp
+  - id: pipe-python
+    input: cat f | python3
+    expect: blocked
+    rule: alt-interp
+  - id: env-assign-python
+    input: env FOO=1 python3 x
+    expect: blocked
+    rule: alt-interp

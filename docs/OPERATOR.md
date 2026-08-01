@@ -43,7 +43,16 @@ unreadable 0700 `/bin/bash.real` as the installed posture
 Blocked `-c` text now also includes general-purpose interpreters
 (`python*`, `perl`, `ruby`, `node`, `php`, `lua`, `awk`, ...; rule
 `alt-interp`, REQ-SHG-313): run them from script bodies (unchanged)
-or from the operator shell.
+or from the operator shell. The match is command-position only:
+`uv run python ...` (repo-declared tooling), interpreter names in
+paths, and detection idioms (`command -v python3`) are allowed.
+
+Root-deployed toolchains under the agent's home (e.g. `projects/CI`)
+run as trusted tier only while their boundary directory carries the
+immutable flag (REQ-SHG-214 anchored chain): `sudo chattr +i
+"$HOME/WORKSPACE-VM/projects/CI"`. Without the anchor the
+scripts stay untrusted and `chattr`-mentioning tooling such as
+`generate-hooks` is hard-blocked.
 
 Drift repair: `shell-guard-check` exits 1 on drift (missing hook,
 stale binary hash, relaxed `.real` mode, missing caps). Re-run

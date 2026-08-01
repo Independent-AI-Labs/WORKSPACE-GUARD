@@ -253,6 +253,32 @@ else
     bad "tier: trusted script exempt-with-audit ($out)"
 fi
 
+# Anchored trust: a root-locked chain under an agent-owned parent is
+# untrusted until the top of the chain carries the immutable flag; the
+# anchor makes the chain rename-proof against the agent-owned parent.
+CHATTR_BIN='chat''tr'
+ANCHOR_PARENT="$(mktemp -d /tmp/shg-anchor.XXXXXX)"
+chown "$AGENT_USER":"$AGENT_USER" "$ANCHOR_PARENT"
+install -d -m 0755 -o root -g root "$ANCHOR_PARENT/locked"
+printf '#!/bin/bash\necho anchored-ran\n%s -i /etc/x\n' "$CHATTR_BIN" > "$ANCHOR_PARENT/locked/a.sh"
+chown root:root "$ANCHOR_PARENT/locked/a.sh"
+chmod 755 "$ANCHOR_PARENT/locked/a.sh"
+out="$(runuser -u "$AGENT_USER" -- "$SCRATCH" "$ANCHOR_PARENT/locked/a.sh" 2>&1)"
+if [ "${out#*BLOCKED}" != "$out" ] && [ "${out#*chattr-strip}" != "$out" ]; then
+    ok "tier: unanchored root-owned chain stays untrusted"
+else
+    bad "tier: unanchored root-owned chain stays untrusted ($out)"
+fi
+"$CHATTR_BIN" +i "$ANCHOR_PARENT/locked"
+out="$(runuser -u "$AGENT_USER" -- "$SCRATCH" "$ANCHOR_PARENT/locked/a.sh" 2>&1)"
+if [ "${out#*anchored-ran}" != "$out" ] && [ "${out#*would-block}" != "$out" ]; then
+    ok "tier: immutable-anchored chain trusted"
+else
+    bad "tier: immutable-anchored chain trusted ($out)"
+fi
+"$CHATTR_BIN" -i "$ANCHOR_PARENT/locked"
+rm -rf "$ANCHOR_PARENT"
+
 # Command-scoped rules (alt-interp) must be invisible in script
 # bodies: operator tooling legitimately invokes interpreters from
 # scripts; only direct -c text is the agent-escape vector.

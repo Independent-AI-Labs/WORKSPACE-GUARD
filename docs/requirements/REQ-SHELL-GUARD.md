@@ -183,8 +183,16 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-211**: Script files shall be classified into two trust
   tiers before scanning, via `open(O_NOFOLLOW)` + `fstat()`:
   - **Trusted tier**: regular file, owned by UID 0, not group- or
-    other-writable, and every parent directory component up to the
-    filesystem root likewise root-owned and not group/other-writable.
+    other-writable, and one of:
+    (a) every parent directory component up to the filesystem root
+    likewise root-owned and not group/other-writable; or
+    (b) **anchored chain** (REQ-SHG-214): every parent component from
+    the script up to a boundary directory is root-owned and not
+    group/other-writable, and that boundary directory carries
+    `FS_IMMUTABLE_FL` (`chattr +i`). The immutable anchor cannot be
+    renamed or replaced by an agent-owned ancestor above it, which
+    closes the unlink+recreate attack that plain root ownership under
+    an agent-owned parent leaves open.
     Policy violations in trusted scripts are NOT blocked; they are
     audit-logged as `would-block` warnings (stderr + log file).
     Rationale: root-owned content (dpkg maintainer scripts, cron,
@@ -196,6 +204,14 @@ handled by `make install-shell-guard`.
   NOT be used as a trust signal: the constrained party chooses the
   invocation form, so context-based discrimination is exploitable by
   construction. Ownership provenance is the only trust boundary.
+
+- **REQ-SHG-214**: The anchored-chain trust decision shall read the
+  boundary directory's inode flags via the `FS_IOC_GETFLAGS` ioctl,
+  not by spawning `lsattr`. A chain whose topmost root-locked
+  directory lacks `FS_IMMUTABLE_FL` shall be Untrusted. The QEMU E2E
+  shall cover both directions: unanchored root-owned chain under an
+  agent-owned parent (blocked) and immutable-anchored chain
+  (exempt-with-audit).
 
 - **REQ-SHG-212**: For untrusted-tier scripts, the guard shall close
   the scan-then-exec TOCTOU race by executing the SCANNED bytes, not
@@ -345,6 +361,18 @@ handled by `make install-shell-guard`.
   shell libraries that legitimately invoke interpreters from script
   bodies keep working; script-level interpreter confinement is
   binary-guard (GTFOBins) territory, not command-text policy.
+  The match shall be **command-position only**: an interpreter name
+  blocks at the start of the command text or directly after a command
+  separator (`\n`, `;`, `|`, `&`, `&&`, `||`, `$(`, backtick) or a
+  launcher word (`sudo`, `doas`, `env`, `exec`, `nice`, `nohup`,
+  `setsid`, `stdbuf`, `timeout`, `xargs`, each with optional flags
+  and `VAR=value` assignments). Names appearing as path components
+  (`.venv/lib/python3.11/...`) or as arguments to other commands
+  (`grep name pyproject.toml`, `command -v python3`) shall NOT match.
+  `uv run python ...` shall NOT match: uv executes repo-declared
+  environments and committed project code, the same trust class as
+  the `.py` files it runs, which command-text policy never scanned;
+  the scanned channel is the shell text itself.
 
 ---
 

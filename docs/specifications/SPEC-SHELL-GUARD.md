@@ -163,8 +163,22 @@ A script file is **trusted tier** iff, at `open(O_NOFOLLOW)` +
 
 1. it is a regular file owned by UID 0,
 2. it is not group- or other-writable, and
-3. every parent directory component up to `/` is root-owned and not
-   group/other-writable.
+3. either every parent directory component up to `/` is root-owned
+   and not group/other-writable, or the parent chain is
+   **immutable-anchored** (REQ-SHG-214): every component from the
+   script up to a boundary directory is root-owned and not
+   group/other-writable, and that boundary directory carries
+   `FS_IMMUTABLE_FL`, read via the `FS_IOC_GETFLAGS` ioctl (no
+   `lsattr` subprocess). Root ownership of a file under an
+   agent-owned ancestor is not sufficient on its own: the agent can
+   rename the ancestor and recreate the whole subtree
+   (unlink+recreate). An immutable boundary directory cannot be
+   renamed or replaced by the agent-owned parent above it, so the
+   anchored chain is exactly as tamper-proof as the full-root chain.
+   The anchor is how root-deployed toolchains that live under the
+   agent's home (e.g. `projects/CI` with `chattr +i`) stay usable:
+   `scripts/generate-hooks` legitimately contains `chattr -i` in a
+   diagnostic string and runs exempt-with-audit.
 
 Trusted tier: policy violations are audit-logged as `would-block`
 warnings (stderr + log file) but NOT blocked. Rationale: dpkg
@@ -375,11 +389,20 @@ patterns:
      hint: "capture output and print it on failure instead of discarding it"}
   - {id: suppress-swallow, regex: '(\|\||\|&?)\s*(true|:)\b',
      hint: "handle the exit code explicitly instead of masking it"}
-  # --- interpreter escape (REQ-SHG-313; -c text only) ---
-  - {id: alt-interp,       regex: '\b(python[0-9.]*|perl[0-9.]*|...)\b',
+  # --- interpreter escape (REQ-SHG-313; -c text, command position) ---
+  - {id: alt-interp,       regex: '(^|([\n;|&`]|&&|\|\||\$\()\s*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b(\s+(-[^;|&\s]*|[A-Za-z_]+=\S*))*\s+)(python[0-9.]*|perl[0-9.]*|...|awk|gawk|mawk|nawk)\b',
      hint: "interpreters are an unscanned command channel; run them from a script or the operator shell",
      scope: command}
 ```
+
+The alt-interp match is command-position only: an interpreter name
+blocks at the start of the `-c` text or directly after a command
+separator or launcher word (`sudo`, `env`, `exec`, `timeout`,
+`xargs`, ...). Path components (`.venv/lib/python3.11/...`),
+arguments of other commands (`command -v python3`), and
+`uv run python ...` do not match; uv runs repo-declared environments
+and committed project code, the same trust class as the `.py` files
+themselves, which command-text policy never scanned.
 
 Adding a rule is a YAML edit (via the secure editor) plus rebuild;
 the Rust code never changes. `build.rs` validates that every pattern

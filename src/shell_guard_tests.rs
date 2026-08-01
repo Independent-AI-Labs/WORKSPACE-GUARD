@@ -269,13 +269,21 @@ fn parents_of_tmp_are_not_root_locked() {
     fs::create_dir_all(&dir).unwrap();
     let f = dir.join("x.sh");
     fs::write(&f, b"echo hi\n").unwrap();
-    assert!(!parents_root_locked(&f));
+    assert!(!parents_root_locked_or_anchored(&f));
     fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
-fn system_paths_are_root_locked() {
+fn tmpdir_is_not_immutable() {
+    let dir = std::env::temp_dir().join(format!("shg-test-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    assert!(!dir_is_immutable(&dir));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn system_paths_pass_anchored_check() {
     if Path::new("/etc/hostname").exists() {
-        assert!(parents_root_locked(Path::new("/etc/hostname")));
+        assert!(parents_root_locked_or_anchored(Path::new("/etc/hostname")));
     }
 }
