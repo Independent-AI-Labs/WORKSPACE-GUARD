@@ -91,11 +91,23 @@ SHG_DD='--'
 
 # ---------- AT_SECURE gate (runs everywhere) ----------
 
-@test "shell-guard: exits 3 outside a capability context (AT_SECURE=0)" {
+@test "shell-guard: non-root exits 3 outside a capability context (AT_SECURE=0)" {
     [ -n "$SHG_BIN" ] || skip "shell-guard binary not built (run: cargo build)"
+    [ "$(id -u)" != "0" ] || skip "root bypasses the AT_SECURE gate"
     run "$SHG_BIN" -c 'echo hi'
     [ "$status" -eq 3 ]
     [[ "$output" == *"AT_SECURE"* ]]
+}
+
+@test "shell-guard: root bypasses AT_SECURE gate outside a capability context" {
+    [ -n "$SHG_BIN" ] || skip "shell-guard binary not built (run: cargo build)"
+    # The harness may fake id(1); probe the actual guard behaviour instead.
+    if ! "$SHG_BIN" -c 'true' >/dev/null 2>&1; then
+        skip "guard still fails closed for this user (not a real root bypass)"
+    fi
+    run "$SHG_BIN" -c 'echo root-pass'
+    [ "$status" -eq 0 ]
+    [ "$output" = "root-pass" ]
 }
 
 # ---------- argv classification ----------

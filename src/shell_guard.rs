@@ -426,7 +426,12 @@ fn at_secure() -> u64 {
 }
 
 fn main() {
-    if at_secure() == 0 {
+    // Root already has an unconditional escape hatch (/bin/bash.real),
+    // so failing closed for euid 0 only breaks every root make target
+    // and package-manager lifecycle script without adding any security.
+    // Keep the AT_SECURE gate for everyone else.
+    let euid = unsafe { libc::geteuid() };
+    if at_secure() == 0 && euid != 0 {
         eprintln!("shell guard: not running in a capability context (AT_SECURE == 0)");
         process::exit(3);
     }
