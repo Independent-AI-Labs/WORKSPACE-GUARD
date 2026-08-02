@@ -124,8 +124,8 @@ if [ "$DRY_RUN" -eq 0 ]; then
         install -m 0700 -o root -g root "$0" "$STAGE"
         log "re-exec via root-owned staging copy (trusted tier): $STAGE"
         # Once the guard is live, a shebang re-exec resolves bash to
-        # the guard, which fails closed for root (AT_SECURE == 0).
-        # The sealed bash.real never scans; use it when present.
+        # the guard. Root bypasses AT_SECURE but its script body is still
+        # scanned; the sealed bash.real never scans, so use it when present.
         if [ -x /bin/bash.real ]; then
             SHG_STAGED=1 SHG_GUARD_BIN="$GUARD_BIN" exec /bin/bash.real "$STAGE" "$@"
         fi
@@ -165,10 +165,10 @@ trap rollback EXIT
 # --- sanity probes on a scratch copy (REQ-SHG-606) ---------------------------
 # Runs only against the real root: with SHG_ROOT set the guard's
 # compiled-in /bin/bash.real path does not exist inside the fixture.
-# AT_SECURE is only raised for non-root execs of the fcap binary:
-# root always fails closed (exit 3). Probes that exercise real
-# scanning semantics therefore run through a non-root user when one
-# exists. Sets PROBE_USER (empty when no candidate exists).
+# Root bypasses the AT_SECURE gate, but only non-root execs exercise
+# real scanning semantics. Probes therefore run through a non-root
+# user when one exists; when no probe user is available, verify the
+# AT_SECURE gate itself. Sets PROBE_USER (empty when no candidate exists).
 detect_probe_user() {
     PROBE_USER=""
     local cand
@@ -193,6 +193,10 @@ sanity_probes() {
     local -a run_as=()
     if [ -n "$PROBE_USER" ] && [ "$(id -u)" = "0" ]; then
         run_as=(runuser -u "$PROBE_USER" --)
+        want_ok=0
+        want_block=1
+    elif [ "$(id -u)" = "0" ]; then
+        # Root bypasses AT_SECURE: benign commands pass, destructive ones block.
         want_ok=0
         want_block=1
     else
@@ -319,12 +323,16 @@ has_guard_cap "$BASH_PATH" || die "post-check: guard capability missing on $BASH
 [ "$(stat -c %a "$BASH_PATH")" = "755" ] || die "post-check: $BASH_PATH mode is not 0755"
 is_immutable "$REAL_PATH" || die "post-check: $REAL_PATH lost +i"
 if [ -z "$SHG_ROOT" ]; then
-    # Root fails closed through the guard by design (AT_SECURE stays 0
-    # for root execs of the fcap binary). Verify that, then verify the
-    # real scanning path as a non-root user when one exists.
+    # Root bypasses the AT_SECURE gate: benign commands pass through and
+    # destructive commands are still blocked. Then verify the real
+    # scanning path as a non-root user when one exists.
     rc=0
     "$BASH_PATH" -c 'echo shg-ok' >"$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 3 ] || die "post-check: root bash -c rc=$rc (want 3 fail-closed)"
+    [ "$rc" -eq 0 ] || die "post-check: root bash -c rc=$rc (want 0 pass-through)"
+    rc=0
+    probe="pk"; probe="${probe}ill x"
+    "$BASH_PATH" -c "$probe" >"$DEVNULL" 2>&1 || rc=$?
+    [ "$rc" -eq 1 ] || die "post-check: root destructive probe rc=$rc (want 1 blocked)"
     detect_probe_user
     if [ -n "$PROBE_USER" ]; then
         [ "$(runuser -u "$PROBE_USER" -- "$BASH_PATH" -c 'echo shg-nonroot' 2>"$DEVNULL")" = "shg-nonroot" ] \
