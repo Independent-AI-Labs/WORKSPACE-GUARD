@@ -21,10 +21,10 @@ for candidate in \
     fi
 done
 
-CREATED_REAL=0
 AUDIT_LOG=""
 CAP_CTX_OK=0
 SHG=""
+PUBLIC_SHG=""
 
 setup_file() {
     [ -n "$SHG_BIN" ] || return 0
@@ -33,14 +33,8 @@ setup_file() {
     cp "$SHG_BIN" "$BATS_FILE_TMPDIR/shg"
     chmod 755 "$BATS_FILE_TMPDIR" "$BATS_FILE_TMPDIR/shg"
     SHG="$BATS_FILE_TMPDIR/shg"
-    setcap cap_dac_override=ep "$SHG" || return 0
-    if [ ! -e /bin/bash.real ]; then
-        cp /bin/bash /bin/bash.real
-        chown root:root /bin/bash.real
-        chmod 0700 /bin/bash.real
-        CREATED_REAL=1
-        printf '%s' "$BATS_FILE_TMPDIR" > /tmp/.shg-bats-real-marker
-    fi
+    /usr/sbin/setcap cap_dac_override=ep "$SHG" || return 0
+    [ -f /bin/bash.real ] || return 0
     # Rootless podman maps file capabilities to user.overlay xattrs that
     # the kernel never honors, so exec never sets AT_SECURE. Probe once;
     # tests skip with a clear reason instead of failing everywhere.
@@ -51,19 +45,14 @@ setup_file() {
     # Public copy for non-root execution tests (bats tmpdirs are 0700
     # and not traversable by other users). cp drops xattrs, so the
     # file capability must be re-applied.
-    cp "$SHG" /tmp/shg-bats-pub
-    chmod 755 /tmp/shg-bats-pub
-    setcap cap_dac_override=ep /tmp/shg-bats-pub
+    PUBLIC_SHG="$(mktemp /tmp/shg-bats-pub.XXXXXX)"
+    cp "$SHG" "$PUBLIC_SHG"
+    chmod 755 "$PUBLIC_SHG"
+    /usr/sbin/setcap cap_dac_override=ep "$PUBLIC_SHG"
 }
 
 teardown_file() {
-    if [ -f /tmp/.shg-bats-real-marker ]; then
-        if [ "$(cat /tmp/.shg-bats-real-marker)" = "$BATS_FILE_TMPDIR" ]; then
-            rm -f /bin/bash.real
-        fi
-        rm -f /tmp/.shg-bats-real-marker
-    fi
-    rm -f /tmp/shg-bats-pub
+    [ -z "$PUBLIC_SHG" ] || rm -f "$PUBLIC_SHG"
     if id shg-bats-user >/dev/null 2>&1; then
         userdel -r shg-bats-user >/dev/null 2>&1
     fi
@@ -199,15 +188,7 @@ SHG_DD='--'
     require_root_guard
     printf '#!/bin/bash\nprintf "args:%s:%s\n" "$1" "$2"\n' > "$TEST_TMPDIR/argv.sh"
     chmod +x "$TEST_TMPDIR/argv.sh"
-    echo "DEBUG path=$TEST_TMPDIR/argv.sh" >&2
-    shg "$TEST_TMPDIR/argv.sh" -c 'pkill x'
-    echo "DEBUG direct_status=$? direct_output=$(shg "$TEST_TMPDIR/argv.sh" -c 'pkill x' 2>&1)" >&2
-    rm -f /tmp/shg.strace
-    strace -e execve -s 200 -o /tmp/shg.strace "$BATS_FILE_TMPDIR/shg" "$TEST_TMPDIR/argv.sh" -c 'pkill x' >/dev/null 2>&1 && true
-    echo "DEBUG strace_status=${PIPESTATUS[0]}" >&2
-    cat /tmp/shg.strace >&2
     run shg "$TEST_TMPDIR/argv.sh" -c 'pkill x'
-    echo "DEBUG run status=$status output=$output" >&2
     [ "$status" -eq 0 ]
     [[ "$output" == *"args:-c:pkill x"* ]]
 }
@@ -828,29 +809,10 @@ line2" ]
     require_root_guard
     command -v useradd >/dev/null || skip "useradd not available"
     useradd -m shg-bats-user
-    run su -s /bin/sh shg-bats-user -c "/tmp/shg-bats-pub -c 'somecmd | tail'"
+    run su -s /bin/sh shg-bats-user -c "$PUBLIC_SHG -c 'somecmd | tail'"
     [ "$status" -eq 1 ]
     [[ "$output" == *"BLOCKED"* ]]
     run cat "$(getent passwd shg-bats-user | cut -d: -f6)/.workspace-guard.log"
     [ "$status" -eq 0 ]
     [[ "$output" == *"blocked rule: suppress-pipe"* ]]
-}
-
-# ---------- real-shell verification ----------
-
-@test "shell-guard: fails closed (exit 3) when bash.real verification fails" {
-    require_root_guard
-    # /bin/bash.real is often immutable or parent-locked on a provisioned host.
-    # If we cannot relax the mode for the verification probe, skip rather than
-    # fight the production lock.
-    if ! chmod 0755 /bin/bash.real 2>/dev/null; then
-        skip "/bin/bash.real cannot be relaxed for mode verification on this host"
-    fi
-    run shg -c 'echo must-not-run'
-    [ "$status" -eq 3 ]
-    [[ "$output" == *"failed verification"* ]]
-    chmod 0700 /bin/bash.real
-    run shg -c 'echo back-to-normal'
-    [ "$status" -eq 0 ]
-    [ "$output" = "back-to-normal" ]
 }

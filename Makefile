@@ -268,7 +268,7 @@ test-shell: ## Run the bats shell test suite (gated in check-push).
 		PATH="$$_shim:$$PATH" BATS_TEST_TIMEOUT=30 /bin/bash.real "$$(command -v bats)" --timing tests/shell/; \
 		_st=$$?; rm -rf "$$_shim"; exit $$_st; \
 	else \
-		BATS_TEST_TIMEOUT=30 bats --timing tests/shell/; \
+		"$(SCRIPT_BASH)" scripts/podman/run-shell-tests.sh; \
 	fi
 
 # =============================================================================
@@ -276,12 +276,12 @@ test-shell: ## Run the bats shell test suite (gated in check-push).
 # =============================================================================
 
 .PHONY: check-push
-check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests + host-provision Podman E2E (Linux).
+check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests + full Podman tiers (Linux).
 	$(MAKE) lint
 	$(MAKE) check
 	$(MAKE) test
 	$(MAKE) test-shell
-	$(MAKE) test-podman-provision
+	$(MAKE) test-podman
 
 # Podman test harness: macOS + Linux hosts without native Linux kernel.
 # See docs/specifications/SPEC-PODMAN-TESTING.md
