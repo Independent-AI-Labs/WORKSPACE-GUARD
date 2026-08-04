@@ -306,15 +306,15 @@ test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in g
 	$(SCRIPT_BASH) scripts/qemu/e2e-guest.sh
 
 test-qemu-authoritative: init-check ## Run the authoritative QEMU guest through WORKSPACE-VM
-	if [ ! -d "$(REPO_ROOT)/../WORKSPACE-VM" ]; then \
+	if [ ! -d "$(REPO_ROOT)/../../" ]; then \
 		echo "ERROR: WORKSPACE-VM is required for the authoritative QEMU E2E" >&2; \
 		exit 1; \
 	fi
-	if [ ! -f "$(REPO_ROOT)/../WORKSPACE-VM/tests/e2e/test_vm_qemu_guard.py" ]; then \
+	if [ ! -f "$(REPO_ROOT)/../../tests/e2e/test_vm_qemu_guard.py" ]; then \
 		echo "ERROR: WORKSPACE-VM QEMU test sources are missing" >&2; \
 		exit 1; \
 	fi
-	$(MAKE) -C "$(REPO_ROOT)/../WORKSPACE-VM" test-e2e-qemu
+	$(MAKE) -C "$(REPO_ROOT)/../../" test-e2e-qemu
 
 # =============================================================================
 # Git Guard
