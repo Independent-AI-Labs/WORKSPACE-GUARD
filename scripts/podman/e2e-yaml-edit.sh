@@ -13,7 +13,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-_GUARD_ROOT="/projects/WORKSPACE-GUARD"
+_GUARD_ROOT="$(pwd)"
 cd "$_GUARD_ROOT"
 
 export PATH="/root/.cargo/bin:$PATH"
@@ -21,7 +21,7 @@ export PATH="/root/.cargo/bin:$PATH"
 YE="$_GUARD_ROOT/target/debug/workspace-yaml-edit"
 if [[ ! -x "$YE" ]]; then
     echo "==> Tier 2b: building workspace-yaml-edit (debug)"
-    cargo build --bin workspace-yaml-edit
+    CARGO_TARGET_DIR="$_GUARD_ROOT/target" cargo build --bin workspace-yaml-edit
 fi
 if [[ ! -x "$YE" ]]; then
     echo "ERROR: workspace-yaml-edit binary not found at $YE" >&2
