@@ -7,8 +7,13 @@ _SELF="${BASH_SOURCE[0]:-$0}"
 case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
 _SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
+_PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 
 resolve_podman() {
+    if [[ -x "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]]; then
+        echo "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman"
+        return 0
+    fi
     if _podman_probe="$(command -v real-podman 2>&1)"; then
         echo "real-podman"
         return 0

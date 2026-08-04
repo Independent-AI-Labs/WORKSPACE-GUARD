@@ -10,6 +10,10 @@ _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
 resolve_podman() {
+    if [[ -x "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]]; then
+        echo "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman"
+        return 0
+    fi
     if _podman_probe="$(command -v real-podman 2>&1)"; then
         echo "real-podman"
         return 0
