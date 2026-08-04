@@ -9,6 +9,8 @@ IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
 if [ -x "$PROJECTS_ROOT/CI/.boot-linux/bin/real-podman" ]; then
     PODMAN="$PROJECTS_ROOT/CI/.boot-linux/bin/real-podman"
+elif [ -x "$PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]; then
+    PODMAN="$PROJECTS_ROOT/CI/.boot-linux/bin/podman"
 elif command -v real-podman; then
     PODMAN=real-podman
 elif command -v podman; then
@@ -24,4 +26,4 @@ fi
     -v "$PROJECTS_ROOT:/projects:ro" \
     -e BATS_TEST_FILTER="${BATS_TEST_FILTER:-}" \
     "$IMAGE" \
-    bash -c 'set -euo pipefail; rm -rf /tmp/WORKSPACE-GUARD /tmp/CI /tmp/workspace-guard.tar /tmp/ci.tar; mkdir /tmp/WORKSPACE-GUARD /tmp/CI; cp /bin/bash /bin/bash.real; chmod 700 /bin/bash.real; tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .; tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD; tar --exclude=.git --exclude=.venv --exclude=node_modules --exclude=.boot-linux -cf /tmp/ci.tar -C /projects/WORKSPACE-CI .; tar --no-same-owner -xf /tmp/ci.tar -C /tmp/CI; cd /tmp/WORKSPACE-GUARD; CARGO_TARGET_DIR=target/agent cargo build --workspace --bins; if [ -n "$BATS_TEST_FILTER" ]; then bats --filter "$BATS_TEST_FILTER" --timing tests/shell/; else bats --timing tests/shell/; fi'
+    bash -c 'set -euo pipefail; rm -rf /tmp/WORKSPACE-GUARD /tmp/CI /tmp/workspace-guard.tar /tmp/ci.tar; mkdir /tmp/WORKSPACE-GUARD /tmp/CI; cp /bin/bash /bin/bash.real; chmod 700 /bin/bash.real; tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .; tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD; tar --exclude=.git --exclude=.venv --exclude=node_modules --exclude=.boot-linux -cf /tmp/ci.tar -C /projects/CI .; tar --no-same-owner -xf /tmp/ci.tar -C /tmp/CI; cd /tmp/WORKSPACE-GUARD; CARGO_TARGET_DIR=target/agent cargo build --workspace --bins; if [ -n "$BATS_TEST_FILTER" ]; then bats --filter "$BATS_TEST_FILTER" --timing tests/shell/; else bats --timing tests/shell/; fi'
