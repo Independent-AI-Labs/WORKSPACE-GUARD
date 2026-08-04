@@ -45,6 +45,7 @@ make check
 
 ensure_testagent
 test "$(runuser -u "$_TESTAGENT_USER" -- id -u)" = "$_TESTAGENT_UID"
+_chown_target_for_testagent
 
 echo "==> Tier 1: unit tests (capability-mode)"
 runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup RUSTUP_TOOLCHAIN=stable; cd \"$_REPO_ROOT\" && cargo test --workspace --bins"
