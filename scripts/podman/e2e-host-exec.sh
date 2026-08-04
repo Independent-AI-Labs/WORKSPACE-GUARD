@@ -42,8 +42,6 @@ fi
 
 hp_e2e_prepare_git_safe_directory
 hp_e2e_prepare_cargo_env
-echo "==> Tier 3: installing shell guard prerequisite..."
-(cd "$_GUARD_ROOT" && make install-shell-guard)
 echo "==> Tier 3: provision-host phase 5 (guard stack)..."
 bash "$_GUARD_ROOT/scripts/provision-host" --phase 5
 
@@ -168,9 +166,6 @@ bash scripts/podman/e2e-policy-matrix.sh
 
 echo "==> Tier 3: uninstalling guard..."
 bash "$_CI_ROOT/scripts/bootstrap-workspace-guard" uninstall
-
-echo "==> Tier 3: uninstalling shell guard..."
-(cd "$_GUARD_ROOT" && make uninstall-shell-guard)
 
 hp_e2e_cleanup
 echo "==> Tier 3 complete"
