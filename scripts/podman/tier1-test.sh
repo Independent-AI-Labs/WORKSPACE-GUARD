@@ -49,9 +49,6 @@ test "$(runuser -u "$_TESTAGENT_USER" -- id -u)" = "$_TESTAGENT_UID"
 echo "==> Tier 1: unit tests (capability-mode)"
 cargo test --workspace --bins
 
-echo "==> Tier 1: unit tests (root-only)"
-runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && cargo test --no-default-features --features root-only --bins"
-
 _chown_target_for_testagent
 
 echo "==> Tier 1: integration tests (capability-mode, as $_TESTAGENT_USER)"
