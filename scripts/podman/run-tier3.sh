@@ -36,9 +36,12 @@ PODMAN="$(resolve_podman)"
 echo "==> Tier 3: running privileged E2E in $_IMAGE"
 
 "$PODMAN" run --rm --privileged \
-    -v "${_PROJECTS_ROOT}:/projects:rw" \
-    -w /projects/WORKSPACE-GUARD \
+    -v "${_PROJECTS_ROOT}:/projects:ro" \
     "$_IMAGE" \
-    bash scripts/podman/e2e-host-exec.sh
+    bash -c 'set -euo pipefail
+bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
+export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
+cd "$GUARD_ROOT"
+bash scripts/podman/e2e-host-exec.sh'
 
 echo "==> Tier 3 complete"

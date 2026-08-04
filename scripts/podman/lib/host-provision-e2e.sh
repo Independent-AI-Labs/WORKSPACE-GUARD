@@ -27,7 +27,7 @@ hp_e2e_prepare_git_safe_directory() {
 }
 
 hp_e2e_prepare_cargo_env() {
-    local ws_boot="/projects/.boot-linux"
+    local ws_boot="${CI_ROOT:-/projects}/.boot-linux"
     if [[ ! -x /root/.cargo/bin/cargo ]]; then
         return 0
     fi

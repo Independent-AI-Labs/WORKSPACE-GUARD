@@ -282,6 +282,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests
 	$(MAKE) test
 	$(MAKE) test-shell
 	$(MAKE) test-podman
+	$(MAKE) test-qemu-authoritative
 
 # Podman test harness: macOS + Linux hosts without native Linux kernel.
 # See docs/specifications/SPEC-PODMAN-TESTING.md
@@ -289,7 +290,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests
 # Podman Test Harness
 # =============================================================================
 
-.PHONY: test-podman test-podman-quick test-podman-provision test-qemu-guest
+.PHONY: test-podman test-podman-quick test-podman-provision test-qemu-guest test-qemu-authoritative
 .PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard purge-guard-state check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
@@ -303,6 +304,17 @@ test-podman-provision: init-check ## Podman host-provision E2E only (phases 0-4,
 
 test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in guest)
 	$(SCRIPT_BASH) scripts/qemu/e2e-guest.sh
+
+test-qemu-authoritative: init-check ## Run the authoritative QEMU guest through WORKSPACE-VM
+	if [ ! -d "$(REPO_ROOT)/../WORKSPACE-VM" ]; then \
+		echo "ERROR: WORKSPACE-VM is required for the authoritative QEMU E2E" >&2; \
+		exit 1; \
+	fi
+	if [ ! -f "$(REPO_ROOT)/../WORKSPACE-VM/tests/e2e/test_vm_qemu_guard.py" ]; then \
+		echo "ERROR: WORKSPACE-VM QEMU test sources are missing" >&2; \
+		exit 1; \
+	fi
+	$(MAKE) -C "$(REPO_ROOT)/../WORKSPACE-VM" test-e2e-qemu
 
 # =============================================================================
 # Git Guard
