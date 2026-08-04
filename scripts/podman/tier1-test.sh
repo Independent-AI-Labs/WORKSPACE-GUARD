@@ -47,7 +47,7 @@ ensure_testagent
 test "$(runuser -u "$_TESTAGENT_USER" -- id -u)" = "$_TESTAGENT_UID"
 
 echo "==> Tier 1: unit tests (capability-mode)"
-cargo test --workspace --bins
+runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && cargo test --workspace --bins"
 
 _chown_target_for_testagent
 
