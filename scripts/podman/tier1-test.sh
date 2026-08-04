@@ -7,6 +7,7 @@ set -euo pipefail
 _TESTAGENT_USER="${WORKSPACE_GUARD_TESTAGENT:-testagent}"
 _TESTAGENT_UID="${WORKSPACE_GUARD_TESTAGENT_UID:-1002}"
 _CARGO_BIN="/root/.cargo/bin"
+_REPO_ROOT="$(pwd)"
 
 ensure_testagent() {
     if id "$_TESTAGENT_USER"; then
@@ -52,14 +53,14 @@ ensure_testagent
 _chown_target_for_testagent
 
 echo "==> Tier 1: integration tests (capability-mode, as $_TESTAGENT_USER)"
-su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup; cd /projects/WORKSPACE-GUARD && cargo test --test integration_test"
+su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup; cd \"$_REPO_ROOT\" && cargo test --test integration_test"
 
 echo "==> Tier 1: integration tests (root-only, as root)"
 cargo test --no-default-features --features root-only --test integration_test
 
 echo "==> Tier 1: test-shell (as $_TESTAGENT_USER)"
 _chown_target_for_testagent
-su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd /projects/WORKSPACE-GUARD && make test-shell"
+su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && make test-shell"
 
 echo "==> Tier 1: build-binary-guard"
 make build-binary-guard
