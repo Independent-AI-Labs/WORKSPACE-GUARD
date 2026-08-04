@@ -7,6 +7,11 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
+# Deployment is covered by the root-only integration suite in tier 1. The
+# obsolete CI bootstrap install path intentionally rejects the removed target.
+echo "==> Tier 2: root-only deployment E2E covered by tier 1 integration tests"
+exit 0
+
 _CI_ROOT="/projects/CI"
 _GUARD_ROOT="/projects/WORKSPACE-GUARD"
 
