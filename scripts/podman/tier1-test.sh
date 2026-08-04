@@ -44,24 +44,25 @@ echo "==> Tier 1: check"
 make check
 
 ensure_testagent
+test "$(runuser -u "$_TESTAGENT_USER" -- id -u)" = "$_TESTAGENT_UID"
 
 echo "==> Tier 1: unit tests (capability-mode)"
 cargo test --workspace --bins
 
 echo "==> Tier 1: unit tests (root-only)"
-su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && cargo test --no-default-features --features root-only --bins"
+runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && cargo test --no-default-features --features root-only --bins"
 
 _chown_target_for_testagent
 
 echo "==> Tier 1: integration tests (capability-mode, as $_TESTAGENT_USER)"
-su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup; cd \"$_REPO_ROOT\" && cargo test --test integration_test"
+runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup; cd \"$_REPO_ROOT\" && cargo test --test integration_test"
 
 echo "==> Tier 1: integration tests (root-only, as root)"
 cargo test --no-default-features --features root-only --test integration_test
 
 echo "==> Tier 1: test-shell (as $_TESTAGENT_USER)"
 _chown_target_for_testagent
-su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && make test-shell"
+runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && make test-shell"
 
 echo "==> Tier 1: build-binary-guard"
 make build-binary-guard
