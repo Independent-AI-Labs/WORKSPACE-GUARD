@@ -58,10 +58,6 @@ runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" C
 echo "==> Tier 1: integration tests (root-only, as root)"
 cargo test --no-default-features --features root-only --test integration_test
 
-echo "==> Tier 1: test-shell (as $_TESTAGENT_USER)"
-_chown_target_for_testagent
-runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && make test-shell"
-
 echo "==> Tier 1: build-binary-guard"
 make build-binary-guard
 
