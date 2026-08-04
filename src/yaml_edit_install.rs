@@ -14,8 +14,11 @@ use std::process;
 
 use crate::yaml_edit_ops::fail;
 
+const LSATTR: &str = "/usr/bin/lsattr";
+const CHATTR: &str = "/usr/bin/chattr";
+
 pub fn is_immutable(path: &Path) -> bool {
-    let out = process::Command::new("lsattr")
+    let out = process::Command::new(LSATTR)
         .arg("-d")
         .arg("--")
         .arg(path)
@@ -25,19 +28,16 @@ pub fn is_immutable(path: &Path) -> bool {
             .split_whitespace()
             .next()
             .is_some_and(|flags| flags.contains('i')),
-        _ => {
-            eprintln!(
-                "yaml-edit: NOTICE: cannot read attributes of {}; treating as non-immutable",
-                path.display()
-            );
-            false
-        }
+        _ => fail(
+            1,
+            &format!("cannot establish immutable state for {}", path.display()),
+        ),
     }
 }
 
 pub fn set_immutable(path: &Path, on: bool) -> Result<(), String> {
     let flag = if on { "+i" } else { "-i" };
-    let st = process::Command::new("chattr")
+    let st = process::Command::new(CHATTR)
         .arg(flag)
         .arg("--")
         .arg(path)

@@ -33,9 +33,17 @@ _HB_PREFIX := $(if $(filter arm64,$(shell uname -m)),/opt/homebrew,/usr/local)
 # never re-routes through the guarded bash.
 ifeq ($(shell id -u),0)
 ifeq ($(wildcard /bin/bash.real),)
-$(error /bin/bash.real is missing: run sudo make -C ../CI bootstrap-workspace-guard to seal the real bash)
+# These are the only targets allowed to run before the shell guard exists.
+# They build and install /bin/bash.real; every other root target remains
+# fail-closed until that sealed interpreter is available.
+ifneq ($(filter build-shell-guard install-shell-guard,$(MAKECMDGOALS)),)
+SHELL := /bin/bash
+else
+$(error /bin/bash.real is missing: run sudo make install-shell-guard first)
 endif
+else
 SHELL := /bin/bash.real
+endif
 else
 ifneq ($(wildcard $(_HB_PREFIX)/bin/bash),)
 SHELL := $(_HB_PREFIX)/bin/bash
@@ -47,7 +55,15 @@ endif
 # resolves to the guarded /usr/bin/bash, which fails closed for root
 # (AT_SECURE == 0) and broke sudo make guard-refresh -> build-guard.
 ifeq ($(shell id -u),0)
+ifeq ($(wildcard /bin/bash.real),)
+ifneq ($(filter build-shell-guard install-shell-guard,$(MAKECMDGOALS)),)
+SCRIPT_BASH := /bin/bash
+else
+$(error /bin/bash.real is missing: run sudo make install-shell-guard first)
+endif
+else
 SCRIPT_BASH := /bin/bash.real
+endif
 else
 SCRIPT_BASH := bash
 endif
@@ -58,7 +74,9 @@ export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-
 # Repo root from this Makefile (not git: root/sudo often hits safe.directory).
 _WORKSPACE_GUARD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
 REPO_ROOT := $(patsubst %/,%,$(dir $(_WORKSPACE_GUARD_MK)))
-CI_DIR := $(abspath $(REPO_ROOT)/../CI)
+# Guard builds use the agent-owned CI checkout because it owns the bootstrapped
+# Rust toolchain. The locked deployment mirror is runtime-only.
+CI_DIR := $(abspath $(REPO_ROOT)/../WORKSPACE-CI)
 CI_BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 CI_BOOT_BIN := $(CI_DIR)/$(CI_BOOT_NAME)/bin
 export PATH := $(CI_BOOT_BIN):$(PATH)
@@ -243,11 +261,11 @@ test-shell: ## Run the bats shell test suite (gated in check-push).
 		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
 		exit 1; \
 	fi
-	if [ -x /usr/bin/bash.distrib ]; then \
+	if [ "$(shell id -u)" -eq 0 ] && [ -x /bin/bash.real ]; then \
 		_shim="$$(mktemp -d)"; \
-		printf '#!/usr/bin/bash.distrib\nexec /usr/bin/bash.distrib "$$@"\n' > "$$_shim/bash"; \
+		printf '#!/bin/bash.real\nexec /bin/bash.real "$$@"\n' > "$$_shim/bash"; \
 		chmod +x "$$_shim/bash"; \
-		PATH="$$_shim:$$PATH" BATS_TEST_TIMEOUT=30 /usr/bin/bash.distrib "$$(command -v bats)" --timing tests/shell/; \
+		PATH="$$_shim:$$PATH" BATS_TEST_TIMEOUT=30 /bin/bash.real "$$(command -v bats)" --timing tests/shell/; \
 		_st=$$?; rm -rf "$$_shim"; exit $$_st; \
 	else \
 		BATS_TEST_TIMEOUT=30 bats --timing tests/shell/; \

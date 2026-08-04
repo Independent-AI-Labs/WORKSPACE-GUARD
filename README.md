@@ -26,14 +26,14 @@ It is organized into five deployed programs:
 4. **Program III - Home Lock.** Root-locks `~/.gitconfig`, `~/.ssh/*`, and
    declared config globs inside fleet accounts.
 5. **Shell Guard.** Replaces `/bin/bash` with `workspace-shell-guard`,
-   which scans every `-c` string and untrusted script against a
+   which scans every `-c` string and every script body against a
    regex pattern table (destructive commands, output suppression,
    exit swallows), executes untrusted scripts from a sealed memfd,
-   exempts root-owned trusted-tier scripts with a `would-block` audit
-   line, and fails closed (exit 3) whenever its capability context is
-   missing - including every root invocation. Stock bash is sealed as
-   `/bin/bash.real` (0700 root:root, `chattr +i`) behind a
-   `dpkg-divert`.
+   applies the same block policy to root-owned trusted-tier scripts,
+   and fails closed (exit 3) whenever its capability context is
+   missing - including every root invocation. Root maintenance that
+   legitimately needs a forbidden idiom uses `/bin/bash.real`
+   (0700 root:root, `chattr +i`) behind a `dpkg-divert`.
 
 Program II-B - Sandbox is roadmap: a hardened systemd unit template ships,
 but the launcher binary that would apply Landlock, seccomp, and namespace
@@ -156,13 +156,14 @@ Invariants enforced by the current code:
 
 Shell-guard invariants:
 
-- Every non-root `-c` string and untrusted script is scanned against a
+- Every non-root `-c` string and every script body is scanned against a
   compiled-in regex pattern table; blocks exit 1, oversize/null-byte exit 2.
 - Untrusted scripts execute the exact scanned bytes via a sealed memfd
   (`MFD_ALLOW_SEALING|MFD_EXEC`, `F_ADD_SEALS` full set), closing the
   scan-then-exec TOCTOU race.
-- Trusted tier (script owned by root, no group/other-writable path
-  component) is exempt with a `would-block` audit line.
+- Trusted tier (script owned by root under an immutable-anchored path) is
+  blocked with the same policy; root maintenance that needs a forbidden
+  idiom must use `/bin/bash.real` directly.
 - Root invocations always fail closed (exit 3): the guard only operates in
   a file-capability context (`AT_SECURE != 0`).
 - Stock bash is sealed as `/bin/bash.real` (0700 root:root, `chattr +i`)

@@ -193,11 +193,11 @@ handled by `make install-shell-guard`.
     renamed or replaced by an agent-owned ancestor above it, which
     closes the unlink+recreate attack that plain root ownership under
     an agent-owned parent leaves open.
-    Policy violations in trusted scripts are NOT blocked; they are
-    audit-logged as `would-block` warnings (stderr + log file).
-    Rationale: root-owned content (dpkg maintainer scripts, cron,
-    init) is trusted system code; the agent cannot author it, and
-    blocking it risks bricking boot/package operations.
+    Policy violations in trusted scripts are blocked with the same
+    policy as untrusted scripts. The trusted tier only certifies that
+    the agent cannot author or modify the file; it is not an
+    execution exemption. Root maintenance that legitimately needs a
+    forbidden idiom must invoke `/bin/bash.real` directly.
   - **Untrusted tier**: anything else. The full block policy applies
     to all users including root.
   Invocation context (`-c` vs script vs TTY vs parent process) shall
@@ -211,7 +211,7 @@ handled by `make install-shell-guard`.
   directory lacks `FS_IMMUTABLE_FL` shall be Untrusted. The QEMU E2E
   shall cover both directions: unanchored root-owned chain under an
   agent-owned parent (blocked) and immutable-anchored chain
-  (exempt-with-audit).
+  (blocked for policy violations).
 
 - **REQ-SHG-212**: For untrusted-tier scripts, the guard shall close
   the scan-then-exec TOCTOU race by executing the SCANNED bytes, not
@@ -235,12 +235,12 @@ handled by `make install-shell-guard`.
 
 ## 4. Block Policy (REQ-SHG-300 series)
 
-- **REQ-SHG-300**: The following commands shall be unconditionally
+  - **REQ-SHG-300**: The following commands shall be unconditionally
   blocked anywhere in the command text (word-boundary pattern match),
   for ALL users including root
   (exit 1). Root's operator channel is invoking `<path>.real`
-  directly, which only root can do. (Trusted-tier script bodies per
-  REQ-SHG-211 are exempt-with-audit for ALL REQ-SHG-3xx rules;
+  directly, which only root can do. Trusted-tier script bodies per
+  REQ-SHG-211 are scanned with the same rules; they are NOT exempt.
   `-c` strings and untrusted script bodies are never exempt.
   Interactive shells are pass-through per REQ-SHG-200: typed REPL
   input is unscanned.)
@@ -324,9 +324,10 @@ handled by `make install-shell-guard`.
   `&> /dev/null`, and combined forms such as `>/dev/null 2>&1`.
   Rationale: discarding stdout/stderr is the same audit-trail
   destruction as REQ-SHG-308 by a different spelling. Trusted-tier
-  scripts (REQ-SHG-211) are exempt-with-audit because system scripts
-  legitimately probe with suppressed stderr. The set shall be
-  data-driven from the `suppression_redirect_targets` block.
+  scripts (REQ-SHG-211) are subject to the same block policy; root
+  maintenance that legitimately needs suppressed output must invoke
+  `/bin/bash.real` directly. The set shall be data-driven from the
+  `suppression_redirect_targets` block.
 
 - **REQ-SHG-310**: Command text containing `||`, `|`, or `|&`
   followed by a member of `suppression_null_commands` (`true`, `:`)
@@ -488,9 +489,8 @@ handled by `make install-shell-guard`.
   `bash -c 'ls | tail'` and `bash -c 'ls 2>/dev/null'` blocked with
   exit 1 as non-root and fail-closed exit 3 as root; a trusted-tier
   fixture script (root-owned, mode 0755, under a root-owned
-  directory) containing `2>/dev/null` executes with a `would-block`
-  audit line; `bash --version` works; interactive/login `bash -l`
-  works.
+  directory) containing `2>/dev/null` is blocked; `bash --version`
+  works; interactive/login `bash -l` works.
 
 - **REQ-SHG-606**: Because `/bin/sh` and `/bin/bash` are on the
   critical path of every boot script and cron job, install shall
@@ -597,6 +597,11 @@ handled by `make install-shell-guard`.
   root-owned execution of the installer under the sealed
   `/bin/bash.real` (0700, root-only), after which
   `shell-guard-check` reports OK.
+
+- **REQ-SHG-807**: The diverted package copy at `<resolved-bash>.distrib`
+  shall be root-owned with mode `0700`. It is recovery state only and shall
+  never be used by tests, hooks, or user-facing tooling as an executable shell.
+  `shell-guard-check` shall report drift when this mode or ownership is wrong.
 
 ---
 

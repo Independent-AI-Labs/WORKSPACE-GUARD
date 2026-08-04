@@ -247,10 +247,10 @@ chmod 755 "$TDIR/t.sh"
 install -d -m 0755 /var/lib/workspace-guard/tier
 install -m 0755 -o root -g root "$TDIR/t.sh" /var/lib/workspace-guard/tier/t.sh
 out="$(runuser -u "$AGENT_USER" -- "$SCRATCH" /var/lib/workspace-guard/tier/t.sh 2>&1)"
-if [ "${out#*trusted-ran}" != "$out" ] && [ "${out#*would-block}" != "$out" ]; then
-    ok "tier: trusted script exempt-with-audit"
+if [ "${out#*BLOCKED}" != "$out" ] && [ "${out#*trusted-ran}" = "$out" ] && [ "${out#*suppress-pipe}" != "$out" ]; then
+    ok "tier: trusted script is blocked"
 else
-    bad "tier: trusted script exempt-with-audit ($out)"
+    bad "tier: trusted script is blocked ($out)"
 fi
 
 # Anchored trust: a root-locked chain under an agent-owned parent is
@@ -271,10 +271,10 @@ else
 fi
 "$CHATTR_BIN" +i "$ANCHOR_PARENT/locked"
 out="$(runuser -u "$AGENT_USER" -- "$SCRATCH" "$ANCHOR_PARENT/locked/a.sh" 2>&1)"
-if [ "${out#*anchored-ran}" != "$out" ] && [ "${out#*would-block}" != "$out" ]; then
-    ok "tier: immutable-anchored chain trusted"
+if [ "${out#*BLOCKED}" != "$out" ] && [ "${out#*anchored-ran}" = "$out" ] && [ "${out#*chattr-strip}" != "$out" ]; then
+    ok "tier: immutable-anchored chain is still blocked"
 else
-    bad "tier: immutable-anchored chain trusted ($out)"
+    bad "tier: immutable-anchored chain is still blocked ($out)"
 fi
 "$CHATTR_BIN" -i "$ANCHOR_PARENT/locked"
 rm -rf "$ANCHOR_PARENT"

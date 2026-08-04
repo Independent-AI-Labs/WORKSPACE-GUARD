@@ -135,6 +135,7 @@ if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PA
     # from the diverted original; remove the guard binary first.
     rm -f "$BASH_PATH" || die "cannot remove guard binary at $BASH_PATH"
     dpkg-divert --remove --rename "$BASH_PATH"
+    chmod 0755 "$BASH_PATH" || die "cannot restore mode on $BASH_PATH"
 elif [ -f "$REAL_PATH" ]; then
     log "no diversion found; restoring $BASH_PATH from $REAL_PATH"
     rb="$BASH_PATH.restore.$$"

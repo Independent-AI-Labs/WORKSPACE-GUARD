@@ -168,6 +168,12 @@ else
     fi
 fi
 
+# The diverted package copy is recovery state, never an agent shell.
+if [ -f "$DISTRIB_PATH" ]; then
+    [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$DISTRIB_PATH")" = "root:root" ] || bad "$DISTRIB_PATH not root:root"
+    [ "$(stat -c %a "$DISTRIB_PATH")" = "700" ] || bad "$DISTRIB_PATH mode != 0700"
+fi
+
 # --- diversion -----------------------------------------------------------------
 if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
     ok "diversion for $BASH_PATH"

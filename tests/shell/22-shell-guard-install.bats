@@ -68,6 +68,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     # diverted original preserved
     [ -f "$FAKE/bin/bash.distrib" ]
     [ "$(hash_of "$FAKE/bin/bash.distrib")" = "$(hash_of /bin/true)" ]
+    [ "$(stat -c %a "$FAKE/bin/bash.distrib")" = "700" ]
     # capabilities recorded against the installed inode
     run getcap "$FAKE/bin/bash"
     assert_output --partial "cap_dac_override=ep"

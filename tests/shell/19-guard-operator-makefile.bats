@@ -126,9 +126,9 @@ teardown() { guard_teardown; }
     grep -q 'bash "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT"' "$op"
 }
 
-@test "guard test-shell target runs bats via the diverted stock bash when present" {
+@test "guard test-shell target uses only the sealed real bash for root orchestration" {
     local mk="$GUARD_ROOT/Makefile"
-    grep -q '/usr/bin/bash.distrib "$$(command -v bats)"' "$mk"
+    grep -q '/bin/bash.real "$$(command -v bats)"' "$mk"
     grep -q '_shim/bash' "$mk"
     grep -q 'PATH="\$\$_shim:\$\$PATH"' "$mk"
 }

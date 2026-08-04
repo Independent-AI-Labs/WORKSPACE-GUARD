@@ -198,7 +198,15 @@ fn classify_script(path: &OsString) -> ScriptClass {
     // Directories pass through so the real bash prints its own error;
     // every other non-file (fifo, socket, device) is a content channel
     // the scanner cannot read and is therefore blocked.
-    let meta = match fs::metadata(Path::new(path)) {
+    // Resolve launcher symlinks before scanning. The resolved target is the
+    // content that will execute; opening that canonical path with O_NOFOLLOW
+    // prevents a later link traversal while still supporting root-owned
+    // launchers such as the opencode wrapper.
+    let resolved = match fs::canonicalize(Path::new(path)) {
+        Ok(p) => p,
+        Err(_) => return ScriptClass::Unreadable,
+    };
+    let meta = match fs::symlink_metadata(&resolved) {
         Ok(m) => m,
         Err(_) => return ScriptClass::Unreadable,
     };
@@ -211,7 +219,7 @@ fn classify_script(path: &OsString) -> ScriptClass {
     let file = match fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(Path::new(path))
+        .open(&resolved)
     {
         Ok(f) => f,
         Err(_) => return ScriptClass::Unreadable,
@@ -226,9 +234,8 @@ fn classify_script(path: &OsString) -> ScriptClass {
         process::exit(2);
     }
     use std::os::unix::fs::MetadataExt;
-    let trusted = meta.uid() == 0
-        && (meta.mode() & 0o022) == 0
-        && parents_root_locked_or_anchored(Path::new(path));
+    let trusted =
+        meta.uid() == 0 && (meta.mode() & 0o022) == 0 && parents_root_locked_or_anchored(&resolved);
     if trusted {
         ScriptClass::Trusted(buf)
     } else {
@@ -298,13 +305,14 @@ fn block(rule: &Rule, display: &str, excerpt: &str) -> ! {
     process::exit(1);
 }
 
-fn would_block(rule: &Rule, display: &str, excerpt: &str) {
-    let msg = report::would_block_report(rule, display, excerpt);
+fn block_unreadable(display: &str) -> ! {
+    let msg = format!("BLOCKED: script-unreadable: {}", display);
     eprintln!("{}", msg);
-    audit(
-        &format!("would-block rule: {}", rule.id),
-        &format!("{} excerpt={}", display, report::flatten(excerpt)),
-    );
+    if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
+        let _ = writeln!(&tty, "{}", msg);
+    }
+    audit("blocked rule: script-unreadable", display);
+    process::exit(1);
 }
 
 fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
@@ -468,16 +476,14 @@ fn main() {
                 process::exit(1);
             }
             ScriptClass::Unreadable => {
-                eprintln!(
-                    "shell guard: warning: cannot read script {:?}; passing through",
-                    path
-                );
-                exec_real(&args, None);
+                let display = format!("bash {} (unreadable script)", path.to_string_lossy());
+                block_unreadable(&display);
             }
             ScriptClass::Trusted(content) => {
                 if let Some(hit) = report::find_hit(&content, &rules, true) {
+                    let display = format!("bash {} (trusted script body)", path.to_string_lossy());
                     let excerpt = report::excerpt(&content, hit.start, hit.end, true);
-                    would_block(hit.rule, &path.to_string_lossy(), &excerpt);
+                    block(hit.rule, &display, &excerpt);
                 }
                 exec_real(&args, None);
             }

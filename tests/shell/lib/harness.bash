@@ -253,11 +253,11 @@ _clear_stub_env() {
 # control vars lost), PATH is reset (stubs unreachable), and untrusted
 # script bodies are scanned. That breaks fixture hermeticity, which
 # targets the repo scripts, not the host guard (host-guard runtime is
-# covered by the QEMU e2e). The diverted stock bash at
-# /usr/bin/bash.distrib bypasses the guard binary at the execve level,
-# so a `bash` stub with that shebang restores pre-install semantics.
+# covered by the QEMU e2e). Root-only test orchestration may use the sealed
+# real bash. Never use the package-diverted .distrib copy as a bypass.
 _stock_bash_override() {
-    local stock=/usr/bin/bash.distrib
+    [ "$(id -u)" -eq 0 ] || return 0
+    local stock=/bin/bash.real
     [ -x "$stock" ] || return 0
     local dir="$TEST_TMPDIR/shell-override"
     mkdir -p "$dir"
@@ -296,6 +296,8 @@ guard_setup() {
     : > "$GUARD_DIVERT_DB"
     PATH="$STUBS_DIR:$PATH"
     export PATH
+    export SHG_GETCAP="$STUBS_DIR/getcap"
+    export SHG_SETCAP="$STUBS_DIR/setcap"
     _stock_bash_override
 }
 

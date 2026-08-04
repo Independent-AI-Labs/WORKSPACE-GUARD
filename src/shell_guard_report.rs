@@ -1,8 +1,8 @@
 //! Block-report rendering for the shell guard: match spans, sanitized
-//! offending excerpts, and a process-ancestry origin trace. Every
-//! block/would-block decision prints this report to stderr (and the
-//! controlling tty) and writes the same excerpt to the audit log, so
-//! operators see exactly which text fired which rule and who invoked it.
+//! offending excerpts, and a process-ancestry origin trace. Block
+//! decisions print this report to stderr (and the controlling tty) and
+//! write the same excerpt to the audit log, so operators see exactly
+//! which text fired which rule and who invoked it.
 
 use std::fs;
 use std::process;
@@ -172,16 +172,6 @@ pub fn block_report(rule: &Rule, display: &str, excerpt: &str, ts: &str) -> Stri
         rule.id,
         ts,
         rule.hint,
-        excerpt,
-        origin()
-    )
-}
-
-pub fn would_block_report(rule: &Rule, display: &str, excerpt: &str) -> String {
-    format!(
-        "shell guard: would-block ({}) in trusted-tier script: {}\n  -> Offending excerpt:\n{}\n  -> Origin: {}",
-        rule.id,
-        display,
         excerpt,
         origin()
     )

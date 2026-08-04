@@ -28,17 +28,14 @@ Agent / user invokes: bash -c '<command string>'     (or: bash script.sh, sh -c 
         │                     │                          │
         └─────────────────────┼──────────────────────────┘
                               │
-                        Any pattern matches?
-                            ┌──┴──┐
-                          YES     NO
-                           │       │
-                           ▼       ▼
-                    Block + log  execve("/bin/bash.real",
-                    (exit 1;     original argv, clean envp)
-                    trusted-tier
-                    scripts:     real shell: root:root 0700, +i
-                    would-block
-                    audit + run)
+                         Any pattern matches?
+                             ┌──┴──┐
+                           YES     NO
+                            │       │
+                            ▼       ▼
+                     Block + log  execve("/bin/bash.real",
+                     (exit 1)     original argv, clean envp)
+                     all tiers    real shell: root:root 0700, +i
 ```
 
 The guard is a **thin capability-enabled wrapper**. Its sole purpose
@@ -175,20 +172,20 @@ A script file is **trusted tier** iff, at `open(O_NOFOLLOW)` +
    (unlink+recreate). An immutable boundary directory cannot be
    renamed or replaced by the agent-owned parent above it, so the
    anchored chain is exactly as tamper-proof as the full-root chain.
-   The anchor is how root-deployed toolchains that live under the
-   agent's home (e.g. `projects/CI` with `chattr +i`) stay usable:
-   `scripts/generate-hooks` legitimately contains `chattr -i` in a
-   diagnostic string and runs exempt-with-audit.
+    The anchor is how root-deployed toolchains that live under the
+    agent's home (e.g. `projects/CI` with `chattr +i`) stay trusted:
+    they are tamper-proof, but they are still scanned and must obey
+    the same policy as untrusted code.
 
-Trusted tier: policy violations are audit-logged as `would-block`
-warnings (stderr + log file) but NOT blocked. Rationale: dpkg
-maintainer scripts, cron jobs, and init scripts legitimately use
-`2>/dev/null`, `| tail`, even `killall`; blocking root-owned system
-code risks bricking boot and package operations, and the agent
-cannot author or modify it. Untrusted tier (everything else,
-including all agent-writable files and every `-c` string): the full
-block policy applies to all users including root. Root's channel
-for suppression idioms is `/bin/bash.real` directly.
+Trusted tier: policy violations are blocked just like the untrusted
+tier. The only difference is how the file reached the guard: it is
+root-owned under an immutable-anchored path, so the agent cannot
+author or modify it. Root maintenance that legitimately needs a
+forbidden idiom (e.g. `chattr -i`, output suppression, or a pipe to
+`tail`) must use `/bin/bash.real` directly: the guard never runs
+for commands executed by the real shell. Untrusted tier (everything
+else, including all agent-writable files and every `-c` string): the
+full block policy applies to all users including root.
 
 Parsing rules:
 
@@ -251,9 +248,10 @@ scanned byte-exactly (REQ-SHG-205, REQ-SHG-703).
 Every pattern in the policy table is tried against the raw text; the
 first match wins. Patterns carry a `scope` (REQ-SHG-312): `command`
 rules only apply to `-c` text, `script` rules only to script bodies,
-`both` (the default) to every scanned context. For trusted-tier
-script bodies (§4.1), a match is downgraded to a `would-block`
-audit warning and execution continues.
+`both` (the default) to every scanned context. Trusted-tier script
+bodies (§4.1) are scanned with the same rules and are blocked on a
+match; the tier only certifies provenance, not an execution
+exemption.
 
 The pattern groups (exact regexes live in
 `config/shell_guard_policy.yaml`, §7):
@@ -772,7 +770,7 @@ expose `MFD_EXEC`).
 | scanner | non-UTF-8 input, patterns inside quotes match (documented false positive), quote-split evasion does NOT match (documented residual), 1 MiB bound |
 | policy | every pattern family: destructive set, `mkfs.*`, blocked shells (path-qualified `/usr/bin/zsh`, prefixed `env fish`, `busybox sh`, nested `bash -c` allowed), power verbs, kill matrix (§6.2), chattr/rm/swapoff flag gates, dd device prefixes, protected-path mounts |
 | suppression | pipe sinks (`\| tail`, `\| tail -n N`, `2>&1 \| head`, `$(x \| tail)`), redirect targets (`> /dev/null`, `2>/dev/null`, `&> /dev/null`, `>/dev/null 2>&1`, `2>"/dev/null"`), null swallows (`\|\| true`, `\| true`, `\|\| :`), allowed controls (bare `tail file`, `true` after `;`/`&&`, `2>&1` alone) |
-| trust tiers | root-owned script exemption with `would-block` audit, agent-writable script full policy, memfd exec of scanned bytes (script-swap fixture stays blocked), `$0` divergence documented |
+| trust tiers | root-owned script scanned and blocked on policy match, agent-writable script full policy, memfd exec of scanned bytes (script-swap fixture stays blocked), `$0` divergence documented |
 | env | BASH_ENV/functions/LD_* dropped, PATH reset, OPENCODE_*/WORKSPACE_* preserved |
 | logging | block line format, truncation, secret redaction, log-open failure still blocks |
 | install | dry-run, idempotency, rollback on sanity-check failure, uninstall restores |
@@ -837,12 +835,11 @@ expose `MFD_EXEC`).
 - **Script-scan gap**: an unreadable script file passes through
   unwatched (REQ-SHG-202); the real shell then fails identically for
   the non-root agent, so the gap is root-adjacent only.
-- **Trusted-tier indirection**: a root-owned script is
-  exempt-with-audit (§4.1). If existing root-owned content evaluates
-  caller-controlled input (e.g. a system script doing `eval "$1"`),
-  the agent could route a blocked idiom through it. The agent cannot
-  author such a script, only discover one; would-block audit lines
-  make the attempt visible. Operators should treat any
+- **Trusted-tier indirection**: a root-owned script is still scanned
+  and blocked on policy match (§4.1). If existing root-owned content
+  evaluates caller-controlled input (e.g. a system script doing
+  `eval "$1"`), the agent could route a blocked idiom through it; the
+  block stops the agent. Operators should treat any
   argument-evaluating root-owned script as a defect.
 - **Interpreter-internal suppression**: `python3 -c
   'subprocess.run(..., stdout=subprocess.DEVNULL)'` hides output
