@@ -43,13 +43,14 @@ make lint
 echo "==> Tier 1: check"
 make check
 
+ensure_testagent
+
 echo "==> Tier 1: unit tests (capability-mode)"
 cargo test --workspace --bins
 
 echo "==> Tier 1: unit tests (root-only)"
-cargo test --no-default-features --features root-only --bins
+su "$_TESTAGENT_USER" -c "export PATH=\"${_CARGO_BIN}:\$PATH\"; cd \"$_REPO_ROOT\" && cargo test --no-default-features --features root-only --bins"
 
-ensure_testagent
 _chown_target_for_testagent
 
 echo "==> Tier 1: integration tests (capability-mode, as $_TESTAGENT_USER)"
