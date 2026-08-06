@@ -110,7 +110,7 @@ hp_e2e_assert_install_gate_blocks() {
     guard_root="$(hp_e2e_guard_root)"
     ci_root="/projects/CI"
     if [[ ! -f "$ci_root/lib/guard-host-exec.sh" ]]; then
-        echo "ERROR: WORKSPACE-CI not mounted at $ci_root" >&2
+        echo "ERROR: deployed CI not mounted at $ci_root" >&2
         return 1
     fi
     _guard_dir="$guard_root"

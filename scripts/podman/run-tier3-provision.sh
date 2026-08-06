@@ -45,7 +45,7 @@ echo "==> Host provision E2E in $_IMAGE"
     "$_IMAGE" \
     bash -c 'set -euo pipefail
 bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
-export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
+export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/CI
 cd "$GUARD_ROOT"
 bash scripts/podman/e2e-host-provision.sh'
 
@@ -56,7 +56,7 @@ echo "==> Host provision safety E2E in $_IMAGE"
     "$_IMAGE" \
     bash -c 'set -euo pipefail
 bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
-export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
+export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/CI
 cd "$GUARD_ROOT"
 bash scripts/podman/e2e-host-provision-safety.sh'
 
