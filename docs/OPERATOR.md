@@ -91,6 +91,7 @@ brackets (`paths=[a,b]`, single-element `paths=[x]`):
 sudo make yaml-add      FILE=config/quality_exceptions.yaml KEY=exceptions FIELDS="hook=pre-commit;added_by=me;reason=<20+ chars>;paths=[src/x.py]"
 sudo make yaml-remove   FILE=config/quality_exceptions.yaml KEY=exceptions FIELDS="hook=pre-commit;paths=[src/x.py]"
 sudo make yaml-set      FILE=config/coverage_thresholds.yaml KEY=unit.threshold VALUE=80
+sudo make yaml-bootstrap FILE=config/file_length_limits.yaml KEY=max_file_bytes VALUE=262144
 make yaml-get           FILE=config/coverage_thresholds.yaml KEY=unit.threshold
 make yaml-list          FILE=config/quality_exceptions.yaml KEY=exceptions
 make yaml-validate      FILE=config/quality_exceptions.yaml
@@ -99,6 +100,9 @@ make yaml-validate      FILE=config/quality_exceptions.yaml
 Useful flags: `--dry-run` (print a unified diff, no install, no root
 needed), `--allow-no-match` (remove: no-match exits 0), `--string`
 (set: force string typing).
+
+Use `yaml-bootstrap` once to create a missing top-level scalar key; it
+rejects keys that already exist. Use `yaml-set` for subsequent updates.
 
 If a file carries the chattr immutable flag (e.g. it is under
 WORKSPACE-CI's exemption manifest), the tool clears the flag only for

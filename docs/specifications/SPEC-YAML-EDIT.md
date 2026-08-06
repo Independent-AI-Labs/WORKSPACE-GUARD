@@ -91,6 +91,7 @@ authoritative change record.
 workspace-yaml-edit add      <file> <list-key> <field-spec>...   (ROOT)
 workspace-yaml-edit remove   <file> <list-key> <field-spec>...   (ROOT)
 workspace-yaml-edit set      <file> <dotted.key> <value>         (ROOT)
+workspace-yaml-edit bootstrap <file> <top-level-key> <value>      (ROOT)
 workspace-yaml-edit get      <file> <dotted.key>
 workspace-yaml-edit list     <file> [<list-key>]
 workspace-yaml-edit validate <file>
@@ -320,6 +321,7 @@ failure aborts before install (REQ-YE-601).
 yaml-add:      ## (ROOT) FIELDS="hook=x;reason=...;paths=[a,b];added_by=.."
 yaml-remove:   ## (ROOT) FIELDS="hook=x;paths=[a]"
 yaml-set:      ## (ROOT) FILE=.. KEY=unit.threshold VALUE=80
+yaml-bootstrap: ## (ROOT) FILE=.. KEY=top_level VALUE=123
 yaml-get:      ## FILE=.. KEY=unit.threshold
 yaml-list:     ## FILE=.. [KEY=exceptions]
 yaml-validate: ## FILE=..

@@ -35,6 +35,7 @@ fn usage() -> ! {
          workspace-yaml-edit add      <file> <list-key> <field-spec>... [--dry-run]\n  \
          workspace-yaml-edit remove   <file> <list-key> <field-spec>... [--dry-run] [--allow-no-match]\n  \
          workspace-yaml-edit set      <file> <dotted.key> <value> [--string] [--dry-run]\n  \
+         workspace-yaml-edit bootstrap <file> <top-level-key> <value> [--string] [--dry-run]\n  \
          workspace-yaml-edit get      <file> <dotted.key>\n  \
          workspace-yaml-edit list     <file> [<list-key>]\n  \
          workspace-yaml-edit validate <file>\n\
@@ -50,6 +51,7 @@ fn main() {
         ops::Intent::Add => ops::run_add(&cli),
         ops::Intent::Remove => ops::run_remove(&cli),
         ops::Intent::Set => ops::run_set(&cli),
+        ops::Intent::Bootstrap => ops::run_bootstrap(&cli),
         ops::Intent::Get => ops::run_get(&cli),
         ops::Intent::List => ops::run_list(&cli),
         ops::Intent::Validate => ops::run_validate(&cli),

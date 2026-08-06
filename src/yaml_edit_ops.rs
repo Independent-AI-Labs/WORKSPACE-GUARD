@@ -28,6 +28,7 @@ pub enum Intent {
     Add,
     Remove,
     Set,
+    Bootstrap,
     Get,
     List,
     Validate,
@@ -54,6 +55,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         Some("add") => Intent::Add,
         Some("remove") => Intent::Remove,
         Some("set") => Intent::Set,
+        Some("bootstrap") => Intent::Bootstrap,
         Some("get") => Intent::Get,
         Some("list") => Intent::List,
         Some("validate") => Intent::Validate,
@@ -73,7 +75,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
     }
     let need = match intent {
         Intent::Add | Intent::Remove => 3,
-        Intent::Set => 3,
+        Intent::Set | Intent::Bootstrap => 3,
         Intent::Get => 2,
         Intent::List => 1,
         Intent::Validate => 1,
@@ -86,7 +88,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         Intent::Add | Intent::Remove => {
             (Some(positional[1].clone()), positional[2..].to_vec(), None)
         }
-        Intent::Set => (
+        Intent::Set | Intent::Bootstrap => (
             Some(positional[1].clone()),
             Vec::new(),
             Some(positional[2].clone()),
@@ -224,7 +226,7 @@ fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
             }
         })?;
     let key = cli.key.clone().unwrap_or_default();
-    let fields = if cli.intent == Intent::Set {
+    let fields = if matches!(cli.intent, Intent::Set | Intent::Bootstrap) {
         format!("value={}", cli.value.clone().unwrap_or_default())
     } else {
         cli.specs.join(";")
@@ -381,6 +383,30 @@ pub fn run_set(cli: &Cli) {
     });
 }
 
+pub fn run_bootstrap(cli: &Cli) {
+    let key = cli.key.as_deref().unwrap_or_default();
+    if key.is_empty() || key.contains('.') {
+        fail(2, "bootstrap requires a non-empty top-level key");
+    }
+    let raw_value = cli.value.clone().unwrap_or_default();
+    mutate(cli, &mut |doc, original| {
+        let root = doc
+            .as_mapping()
+            .ok_or(())
+            .unwrap_or_else(|_| fail(1, "document root is not a mapping"));
+        if root.contains_key(key) {
+            fail(2, &format!("key already exists: {key}"));
+        }
+        let value =
+            engine::typed_value(&raw_value, cli.force_string).unwrap_or_else(|e| fail(2, &e));
+        let mut expected = doc.clone();
+        expected
+            .as_mapping_mut()
+            .expect("root checked")
+            .insert(Value::String(key.to_string()), value.clone());
+        splice::splice_insert_top_level(original, key, &value).map(|out| (out, expected))
+    });
+}
 /// Shared mutation pipeline: preflight, lock, parse, transform,
 /// verify, schema-validate, audit, install (REQ-YE-105).
 /// Transform result: new file content plus the expected document
@@ -422,6 +448,7 @@ fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
         Intent::Add => "add",
         Intent::Remove => "remove",
         Intent::Set => "set",
+        Intent::Bootstrap => "bootstrap",
         _ => "?",
     };
     audit(cli, intent).unwrap_or_else(|e| fail(1, &e));

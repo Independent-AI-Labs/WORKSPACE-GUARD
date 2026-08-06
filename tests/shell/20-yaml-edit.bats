@@ -13,23 +13,23 @@ setup() { guard_setup; }
 
 teardown() { guard_teardown; }
 
-# Locate (or build once) the binary under test. Install location
-# first, then cargo outputs; agent-side builds must land in
-# target/agent per the repository target/ ownership rules.
+# Locate (or build once) the binary under test. Agent-side builds are
+# preferred so tests exercise the current source, then installed and
+# other cargo outputs are considered.
 _ye() {
-    if [ -x /usr/bin/workspace-yaml-edit ]; then
-        echo /usr/bin/workspace-yaml-edit
+    local b
+    if [ -x "$GUARD_ROOT/target/agent/debug/workspace-yaml-edit" ]; then
+        echo "$GUARD_ROOT/target/agent/debug/workspace-yaml-edit"
         return 0
     fi
-    local b
     for b in release debug; do
         if [ -x "$GUARD_ROOT/target/$b/workspace-yaml-edit" ]; then
             echo "$GUARD_ROOT/target/$b/workspace-yaml-edit"
             return 0
         fi
     done
-    if [ -x "$GUARD_ROOT/target/agent/debug/workspace-yaml-edit" ]; then
-        echo "$GUARD_ROOT/target/agent/debug/workspace-yaml-edit"
+    if [ -x /usr/bin/workspace-yaml-edit ]; then
+        echo /usr/bin/workspace-yaml-edit
         return 0
     fi
     (cd "$GUARD_ROOT" && CARGO_TARGET_DIR="$GUARD_ROOT/target/agent" \
@@ -267,6 +267,22 @@ EOF
     run "$(_ye)" set "$f" coverage_thresholds.nope 1 --dry-run
     assert_equal "$status" 1
     assert_output --partial "key not found"
+}
+
+@test "bootstrap creates a missing top-level scalar" {
+    local f="$TEST_TMPDIR/bootstrap.yaml"
+    printf 'version: 1\n' > "$f"
+    run "$(_ye)" bootstrap "$f" max_file_bytes 262144 --dry-run
+    assert_success
+    assert_output --partial "+max_file_bytes: 262144"
+}
+
+@test "bootstrap rejects an existing key" {
+    local f="$TEST_TMPDIR/bootstrap-existing.yaml"
+    printf 'version: 1\n' > "$f"
+    run "$(_ye)" bootstrap "$f" version 2 --dry-run
+    assert_equal "$status" 2
+    assert_output --partial "key already exists"
 }
 
 @test "add rejects a schema-invalid entry in dry-run" {

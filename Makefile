@@ -554,7 +554,7 @@ install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (R
 # when missing) and plain bash otherwise.
 YAML_SH := $(SCRIPT_BASH)
 
-.PHONY: yaml-add yaml-remove yaml-set yaml-get yaml-list yaml-validate
+.PHONY: yaml-add yaml-remove yaml-set yaml-bootstrap yaml-get yaml-list yaml-validate
 yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
@@ -574,6 +574,12 @@ yaml-set: ## Set a scalar: make yaml-set FILE=.. KEY=.. VALUE=.. (ROOT)
 		echo "ERROR: yaml-set needs root: sudo make yaml-set" >&2; exit 1; \
 	fi'
 	"$(YAML_SH)" -c '"$(YAML_EDIT)" set "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)'
+
+yaml-bootstrap: ## Create a top-level scalar: make yaml-bootstrap FILE=.. KEY=.. VALUE=.. (ROOT)
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-bootstrap needs root: sudo make yaml-bootstrap" >&2; exit 1; \
+	fi'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" bootstrap "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)'
 
 yaml-get: ## Print a scalar: make yaml-get FILE=.. KEY=..
 	"$(YAML_EDIT)" get "$(FILE)" "$(KEY)"

@@ -435,3 +435,11 @@ pub fn splice_set(original: &str, segments: &[String], value: &Value) -> Result<
     out.extend(lines[end + 1..].iter().map(|s| s.to_string()));
     Ok(join_lines(&out, original))
 }
+
+/// Append a previously absent scalar key at the document's top level.
+pub fn splice_insert_top_level(original: &str, key: &str, value: &Value) -> Result<String, String> {
+    let mut lines: Vec<String> = original.lines().map(str::to_string).collect();
+    let emitted = emit_kv(key, value, 0);
+    lines.extend(emitted);
+    Ok(join_lines(&lines, original))
+}
