@@ -2,6 +2,7 @@
 
 HP_SUDOERS_ADMIN="${HP_SUDOERS_ADMIN:-/etc/sudoers.d/90-workspace-guard-admin}"
 HP_STATE_DIR="${HP_STATE_DIR:-/usr/lib/workspace-guard}"
+HP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HP_MARKER_BEGIN="# BEGIN workspace-guard managed"
 HP_MARKER_END="# END workspace-guard managed"
 
@@ -176,20 +177,12 @@ hp_admin_verify_password() {
         echo "ERROR: WORKSPACE_ADMIN_PASSWORD_VERIFY=skip refused (password gate cannot be bypassed)" >&2
         return 1
     fi
-    local openssl_path
-    if ! openssl_path="$(command -v openssl)" || [[ ! -x "$openssl_path" ]]; then
-        echo "ERROR: openssl required to verify admin password" >&2
+    local perl_path
+    if ! perl_path="$(command -v perl)" || [[ ! -x "$perl_path" ]]; then
+        echo "ERROR: perl required to verify admin password" >&2
         return 1
     fi
-    local hash salt calculated
-    hash="$(awk -F: -v want="$name" '$1 == want {print $2; exit}' /etc/shadow)"
-    [[ -n "$hash" && "$hash" != \!* && "$hash" != \** ]] || return 1
-    case "$hash" in
-        \$6\$*) salt="${hash#\$6\$}"; salt="${salt%%\$*}" ;;
-        *) echo "ERROR: unsupported password hash for $name (need SHA-512)" >&2; return 1 ;;
-    esac
-    calculated="$(openssl passwd -6 -salt "$salt" "$pass")"
-    [[ "$calculated" == "$hash" ]]
+    "$perl_path" "$HP_SCRIPT_DIR/verify-password.pl" "$name" "$pass"
 }
 
 hp_admin_prompt_password() {

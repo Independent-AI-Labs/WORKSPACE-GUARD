@@ -33,6 +33,10 @@ if [[ ! -d "$_PROJECTS_ROOT/CI" ]]; then
 fi
 
 PODMAN="$(resolve_podman)"
+CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc)}"
+if (( CARGO_BUILD_JOBS < 4 )); then CARGO_BUILD_JOBS=4; fi
+if (( CARGO_BUILD_JOBS > 8 )); then CARGO_BUILD_JOBS=8; fi
+export CARGO_BUILD_JOBS
 
 bash "$_SCRIPT_DIR/podman/ensure-machine.sh"
 
@@ -40,7 +44,10 @@ echo "════════════════════════�
 echo " WORKSPACE-GUARD Podman Test Harness"
 echo " Image: $_IMAGE"
 echo " Projects: $_PROJECTS_ROOT"
+echo " Cargo jobs: $CARGO_BUILD_JOBS"
 echo "═══════════════════════════════════════════════════════"
+
+_phase_started=$SECONDS
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
     echo ""
@@ -51,9 +58,11 @@ fi
 echo ""
 echo "==> Building test image..."
 "$PODMAN" build -f "$_REPO_ROOT/Containerfile.test" -t "$_IMAGE" "$_REPO_ROOT"
+echo "==> Image phase: $((SECONDS - _phase_started))s"
 
 echo ""
 bash "$_SCRIPT_DIR/podman/run-tier12.sh"
+echo "==> Tier 1+2 phase: $((SECONDS - _phase_started))s total"
 
 if [[ "${TEST_PODMAN_QUICK:-0}" == "1" ]]; then
     echo ""
@@ -61,6 +70,7 @@ if [[ "${TEST_PODMAN_QUICK:-0}" == "1" ]]; then
 else
     echo ""
     bash "$_SCRIPT_DIR/podman/run-tier3.sh"
+    echo "==> Tier 3 phase: $((SECONDS - _phase_started))s total"
 fi
 
 echo ""

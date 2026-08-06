@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rm -rf /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
-mkdir /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
+for path in /tmp/WORKSPACE-GUARD/*; do
+    [[ "$path" == /tmp/WORKSPACE-GUARD/target ]] || rm -rf "$path"
+done
+rm -rf /tmp/WORKSPACE-CI
+mkdir -p /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
 tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .
 tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD
 tar --exclude=.git --exclude=.venv --exclude=node_modules -cf /tmp/workspace-ci.tar -C /projects/CI .

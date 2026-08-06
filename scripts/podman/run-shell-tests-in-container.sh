@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rm -rf /tmp/WORKSPACE-GUARD /tmp/CI /tmp/workspace-guard.tar /tmp/ci.tar
-mkdir /tmp/WORKSPACE-GUARD /tmp/CI
+for path in /tmp/WORKSPACE-GUARD/*; do
+    [[ "$path" == /tmp/WORKSPACE-GUARD/target ]] || rm -rf "$path"
+done
+rm -rf /tmp/CI /tmp/workspace-guard.tar /tmp/ci.tar
+mkdir -p /tmp/WORKSPACE-GUARD /tmp/CI
 cp /bin/bash /bin/bash.real
 chmod 700 /bin/bash.real
 tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .
