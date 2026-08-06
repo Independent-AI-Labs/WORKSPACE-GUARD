@@ -4,6 +4,7 @@ set -euo pipefail
 for path in /tmp/WORKSPACE-GUARD/*; do
     [[ "$path" == /tmp/WORKSPACE-GUARD/target ]] || rm -rf "$path"
 done
+rm -f /tmp/WORKSPACE-GUARD/target/release/workspace-binary-guard
 rm -rf /tmp/CI /tmp/workspace-guard.tar /tmp/ci.tar
 mkdir -p /tmp/WORKSPACE-GUARD /tmp/CI
 cp /bin/bash /bin/bash.real

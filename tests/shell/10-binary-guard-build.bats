@@ -33,7 +33,7 @@ GUARD_BIN="$GUARD_ROOT/target/release/workspace-binary-guard"
     # The guard has no --version flag; it treats argv[0] basename as
     # the binary to guard. Invoked as workspace-binary-guard it blocks
     # (no policy) and prints a BINARY-GUARD BLOCK line.
-    [ -n "$output" ]
+    [ "$status" -eq 126 ]
     assert_output --partial "BINARY-GUARD BLOCK"
 }
 

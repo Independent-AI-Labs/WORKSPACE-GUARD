@@ -307,9 +307,8 @@ fn log_block(invoked_name: &str, target: &str, reason: &str) {
     {
         use std::io::Write;
         let _ = f.write_all(line.as_bytes());
-    } else {
-        eprint!("{}", line);
     }
+    eprint!("{}", line);
 }
 
 #[cfg(test)]
