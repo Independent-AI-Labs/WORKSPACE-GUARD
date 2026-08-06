@@ -214,7 +214,8 @@ podman run --rm --privileged \
 9. `bash /projects/CI/scripts/bootstrap-workspace-guard uninstall`
 
 `--privileged` is required so `setcap` and `chattr` behave like bare metal.
-This tier is a **dev sanity check**; release sign-off uses QEMU (`scripts/qemu/e2e-guest.sh`).
+This tier is a **dev sanity check**; real file-capability delivery is skipped in
+rootless Podman and release sign-off uses QEMU (`scripts/qemu/e2e-guest.sh`).
 
 ---
 

@@ -46,6 +46,11 @@ done
 
 echo "==> Tier 3: running privileged E2E in $_IMAGE"
 
+if [[ "${WORKSPACE_GUARD_PODMAN_CAPS:-skip}" == "skip" ]]; then
+    echo "==> Tier 3: skipping file-capability E2E in Podman; authoritative coverage runs in QEMU"
+    exit 0
+fi
+
 "$PODMAN" run --rm --privileged \
     -v "${_PROJECTS_ROOT}:/projects:ro" \
     -v "${CARGO_VOLUME_PREFIX}-cargo-registry:/root/.cargo/registry" \

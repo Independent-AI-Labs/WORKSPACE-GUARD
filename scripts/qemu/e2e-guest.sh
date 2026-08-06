@@ -39,9 +39,7 @@ bash scripts/podman/e2e-host-exec.sh
 echo "==> QEMU guest: uninstalling shell guard prerequisite..."
 make uninstall-shell-guard
 
-if [[ "${E2E_SHELL_GUARD:-0}" == "1" ]]; then
-    echo "==> QEMU guest: shell-guard E2E (authoritative)..."
-    bash scripts/qemu/e2e-shell-guard-guest.sh
-fi
+echo "==> QEMU guest: shell-guard E2E (authoritative)..."
+bash scripts/qemu/e2e-shell-guard-guest.sh
 
 echo "==> QEMU guest E2E complete"
