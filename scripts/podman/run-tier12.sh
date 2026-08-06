@@ -38,18 +38,6 @@ echo "==> Tier 1+2: running in $_IMAGE (projects mount: $_PROJECTS_ROOT)"
 "$PODMAN" run --rm \
     -v "${_PROJECTS_ROOT}:/projects:rw" \
     "$_IMAGE" \
-    bash -c 'set -euo pipefail
-rm -rf /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
-mkdir /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
-tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .
-tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD
-tar --exclude=.git --exclude=.venv --exclude=node_modules -cf /tmp/workspace-ci.tar -C /projects/CI .
-tar --no-same-owner -xf /tmp/workspace-ci.tar -C /tmp/WORKSPACE-CI
-cd /tmp/WORKSPACE-GUARD
-bash scripts/podman/tier1-test.sh
-echo "==> Tier 2: root-only E2E"
-bash scripts/podman/e2e-root-only.sh
-echo "==> Tier 2b: yaml-edit root-tier E2E"
-bash scripts/podman/e2e-yaml-edit.sh'
+    bash /projects/WORKSPACE-GUARD/scripts/podman/run-tier12-in-container.sh
 
 echo "==> Tier 1+2 complete"
