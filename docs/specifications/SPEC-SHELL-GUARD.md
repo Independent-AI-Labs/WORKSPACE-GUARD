@@ -687,14 +687,11 @@ wires the shell guard in alongside the git guard:
   (install is idempotent/reconciling, REQ-SHG-603).
 - `guard-check`: runs both health checks; combined exit status.
 
-### 12.4 QEMU Guest E2E (`scripts/qemu/e2e-shell-guard-guest.sh`)
+### 12.4 Real-Linux Guest E2E
 
-Authoritative end-to-end suite (REQ-SHG-805/806), driven from the
-WORKSPACE-VM repo by `make test-vm-shell-guard`
-(`tests/e2e/test_vm_qemu_shell_guard.py`, reusing
-`workspace/config/vm-guard-qemu.yaml`). It may also be chained
-behind `E2E_SHELL_GUARD=1` at the end of `scripts/qemu/e2e-guest.sh`.
-Self-contained bash (the guest has no bats), six phases:
+Authoritative end-to-end suite (REQ-SHG-805/806) is driven by a separate
+real-Linux guest harness. The guest-side suite is self-contained bash (the
+guest has no bats), with six phases:
 
 0. **preflight**: root gate, clean-slate uninstall when a previous
    partial run left the guard in, stock-bash baseline hash.

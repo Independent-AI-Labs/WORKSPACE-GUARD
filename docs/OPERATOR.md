@@ -1,6 +1,6 @@
 # Guard operator commands
 
-Run from the **workspace root** (`WORKSPACE-VM`):
+Run from the repository or workspace root:
 
 ```bash
 sudo make guard-up       # idempotent bring-up (provision + guard install as needed)
@@ -54,7 +54,7 @@ they do not authorize a subsequent interpreter invocation.
 Root-deployed toolchains under the agent's home (e.g. `projects/CI`)
 run as trusted tier only while their boundary directory carries the
 immutable flag (REQ-SHG-214 anchored chain): `sudo chattr +i
-"$HOME/WORKSPACE-VM/projects/CI"`. Without the anchor the
+"$HOME/projects/CI"`. Without the anchor the
 scripts stay untrusted and `chattr`-mentioning tooling such as
 `generate-hooks` is hard-blocked.
 

@@ -128,7 +128,7 @@ script class.
 
 ### LOW-010: Temporary E2E fixtures are world-writable
 
-**Locations:** `scripts/qemu/e2e-shell-guard-guest.sh:186-201,228-298`.
+**Locations:** the external real-Linux guest shell-guard suite.
 
 The fixtures intentionally test unsafe permissions under `/tmp`, but this is
 unsafe outside an isolated guest.

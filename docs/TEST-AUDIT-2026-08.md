@@ -107,7 +107,7 @@ rootless containers skip AT_SECURE tests; Darwin skips Rust tests.
 
 ### TA-008: Linux pre-push omits authoritative QEMU shell-guard coverage
 
-**Locations:** `Makefile:278-284`, `scripts/qemu/e2e-guest.sh:36-39`.
+**Locations:** historical pre-push and guest-harness integration.
 
 Linux pre-push runs provisioning E2E but does not require the QEMU shell-guard
 suite, which is itself opt-in.

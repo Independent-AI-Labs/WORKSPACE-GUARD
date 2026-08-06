@@ -1,4 +1,4 @@
-# WORKSPACE-GUARD Podman test image (ubuntu:22.04, matches WORKSPACE-VM).
+# WORKSPACE-GUARD Podman test image (ubuntu:22.04).
 # Build: podman build -f Containerfile.test -t workspace-guard-test:ubuntu-22.04 .
 FROM ubuntu:22.04
 

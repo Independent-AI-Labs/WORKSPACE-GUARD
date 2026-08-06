@@ -52,8 +52,7 @@ model exercised in Tier 2.
 
 ### 2. Container Image
 
-- **REQ-POD-010**: The test image base shall be **`ubuntu:22.04`**, matching
-  WORKSPACE-VM convention.
+- **REQ-POD-010**: The test image base shall be **`ubuntu:22.04`**.
 - **REQ-POD-011**: The image shall install system packages equivalent to Linux
   `make init`: `build-essential`, `pkg-config`, `git`, `curl`, `ca-certificates`,
   `libcap2-bin`, `e2fsprogs`, `file`, `bats`, `dpkg-dev`, and a stable Rust

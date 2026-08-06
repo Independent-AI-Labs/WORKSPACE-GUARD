@@ -13,9 +13,9 @@ This spec defines the **dev sanity check** layout for running WORKSPACE-GUARD's
 Linux quality gate and guard-install E2E via Podman. It enables macOS developers
 to iterate quickly without a dedicated Linux box.
 
-**Authoritative** capability and policy-matrix E2E on real guest `/` runs inside
-WORKSPACE-VM QEMU guests only (`make test-vm-guard`). See
-[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../../docs/requirements/REQ-VM-HYPERVISOR.md) §FR-7.
+Authoritative capability and policy-matrix E2E on a real guest is an external
+release-signoff responsibility. This specification covers only the local
+Podman sanity harness.
 
 ```
 Host (Darwin or Linux)
@@ -47,13 +47,12 @@ Orchestrator: `scripts/test-in-podman.sh`
 | `scripts/podman/e2e-root-only.sh` | Root-only install sanity check (runs inside container) |
 | `scripts/podman/e2e-capability.sh` | Capability install sanity check (runs inside container) |
 | `scripts/podman/e2e-policy-matrix.sh` | Policy-matrix live vectors (Tier 3, after capability install) |
-| `scripts/qemu/e2e-guest.sh` | Authoritative gate orchestrator (bare QEMU guest, not container) |
 
 ---
 
 ## 3. Container Image (`Containerfile.test`)
 
-Base: `ubuntu:22.04` (matches WORKSPACE-VM `Dockerfile.vm.j2`).
+Base: `ubuntu:22.04`.
 
 Packages (mirrors Linux `make init`):
 
@@ -215,7 +214,8 @@ podman run --rm --privileged \
 
 `--privileged` is required so `setcap` and `chattr` behave like bare metal.
 This tier is a **dev sanity check**; real file-capability delivery is skipped in
-rootless Podman and release sign-off uses QEMU (`scripts/qemu/e2e-guest.sh`).
+Rootless Podman is a development sanity check only; release sign-off uses a
+separate real-Linux guest harness.
 
 ---
 

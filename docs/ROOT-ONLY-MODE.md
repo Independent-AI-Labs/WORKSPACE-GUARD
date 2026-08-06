@@ -124,20 +124,7 @@ For production environments with non-root users, always use capability mode.
 
 ## Authoritative E2E (capability mode)
 
-Capability-mode install and policy-matrix E2E on **real** guest `/usr/bin/git`
-(with `setcap`, mode-0700 `git.original`) is the release sign-off path. It runs
-inside WORKSPACE-VM QEMU guests only:
-
-```bash
-# WORKSPACE-VM root:
-make test-vm-guard
-
-# Inside provisioned guest:
-sudo bash /opt/workspace/projects/WORKSPACE-GUARD/scripts/qemu/e2e-guest.sh
-```
-
-Podman Tier 3 (`make test-podman`) is a faster dev sanity check in a privileged
-container; file-capability delivery is covered authoritatively by QEMU and
-Podman does not replace that gate. See
-[WORKSPACE-VM REQ-VM-HYPERVISOR](../../../docs/requirements/REQ-VM-HYPERVISOR.md) §FR-7 and
-[SPEC-VM-HYPERVISOR](../../../docs/specifications/SPEC-VM-HYPERVISOR.md) §12.
+Capability-mode install and policy-matrix E2E on a real Linux guest is an
+external release-signoff responsibility. Podman Tier 3 (`make test-podman`)
+remains the local development sanity check; it does not claim to establish
+kernel-enforced file capabilities.

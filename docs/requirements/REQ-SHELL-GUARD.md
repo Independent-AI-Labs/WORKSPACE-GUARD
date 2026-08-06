@@ -497,11 +497,11 @@ handled by `make install-shell-guard`.
   working `/bin/bash`.
 
 - **REQ-SHG-605**: Post-install verification is split between the
-  installer and the QEMU guest e2e. The installer shall confirm:
+  installer and the real-Linux guest e2e. The installer shall confirm:
   correct modes/owners/caps, divert registered, apt hook present,
   guard hash matches the release build, root `-c` exits 3
   (fail-closed), and non-root benign `-c` exits 0. The QEMU guest
-  e2e (`scripts/qemu/e2e-shell-guard-guest.sh`) shall additionally
+  guest e2e shall additionally
   confirm: `bash -c 'pkill x'` blocked with exit 1 as non-root;
   `bash -c 'ls | tail'` and `bash -c 'ls 2>/dev/null'` blocked with
   exit 1 as non-root and fail-closed exit 3 as root; a trusted-tier
@@ -515,7 +515,7 @@ handled by `make install-shell-guard`.
   0, `--version` exit 0, concat-built destructive probe exit 1) and
   shall confirm root probes exit 3, before and after committing the
   divert, and shall refuse to proceed (roll back) otherwise. The
-  QEMU guest e2e shall additionally prove a dpkg-style root-owned
+  The guest e2e shall additionally prove a dpkg-style root-owned
   script exercising `2>/dev/null` keeps working via the trusted
   tier, so package operations keep functioning.
 
@@ -592,11 +592,8 @@ handled by `make install-shell-guard`.
   a valid bytes-regex, every entry carries a non-empty hint, and
   every matrix case references a known rule id.
 
-- **REQ-SHG-805**: An authoritative end-to-end suite
-  (`scripts/qemu/e2e-shell-guard-guest.sh`, driven by the
-  WORKSPACE-VM pytest `tests/e2e/test_vm_qemu_shell_guard.py`,
-  `make test-vm-shell-guard`) shall run inside a bare QEMU Linux
-  guest as real root and cover: the full runtime block matrix
+- **REQ-SHG-805**: An authoritative end-to-end suite shall run inside a
+  bare real-Linux guest as real root and cover: the full runtime block matrix
   through a capability-context guard, the install lifecycle
   (NOT INSTALLED -> install -> OK, idempotent reconcile), live-fire
   blocks through the installed `/bin/bash` as root and as a

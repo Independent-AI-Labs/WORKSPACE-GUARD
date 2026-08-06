@@ -74,9 +74,8 @@ export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-
 # Repo root from this Makefile (not git: root/sudo often hits safe.directory).
 _WORKSPACE_GUARD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
 REPO_ROOT := $(patsubst %/,%,$(dir $(_WORKSPACE_GUARD_MK)))
-# Guard builds use the agent-owned CI checkout because it owns the bootstrapped
-# Rust toolchain. The locked deployment mirror is runtime-only.
-CI_DIR := $(abspath $(REPO_ROOT)/../WORKSPACE-CI)
+# Guard builds and tests use the deployed, sanctioned CI checkout.
+CI_DIR := $(abspath $(REPO_ROOT)/../CI)
 CI_BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 CI_BOOT_BIN := $(CI_DIR)/$(CI_BOOT_NAME)/bin
 export PATH := $(CI_BOOT_BIN):$(PATH)
@@ -100,7 +99,7 @@ WORKSPACE_ROOT := $(shell \
 BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 GITLEAKS_BIN := $(WORKSPACE_ROOT)/$(BOOT_NAME)/bin/gitleaks
 
-# Absolute cargo, single source: WORKSPACE-CI owns the Rust toolchain
+# Absolute cargo, single source: deployed CI owns the Rust toolchain
 # (scripts/bootstrap-rust installs into $(CI_BOOT_BIN)); this repo
 # consumes it. The shell guard resets PATH on every exec, so recipe
 # shells never see exported bin dirs; prefix the boot bin on PATH for
@@ -153,9 +152,9 @@ init: ## Install system-level dependencies (platform-aware via config/system-dep
 preflight: ## Verify required tooling is present
 	command -v git || { echo "ERROR: git not on PATH"; exit 1; }
 	test -x "$(_CARGO_BOOT)/cargo" || { echo "ERROR: cargo missing at $(_CARGO_BOOT)/cargo; run: $(CI_DIR)/scripts/bootstrap-rust"; exit 1; }
-	test -d "$(CI_DIR)" || { echo "ERROR: WORKSPACE-CI not found at $(CI_DIR)"; exit 1; }
-	test -f "$(CI_DIR)/scripts/generate-hooks" || { echo "ERROR: WORKSPACE-CI/scripts/generate-hooks missing"; exit 1; }
-	echo "Preflight OK (WORKSPACE-CI at $(CI_DIR))"
+	test -d "$(CI_DIR)" || { echo "ERROR: deployed CI not found at $(CI_DIR)"; exit 1; }
+	test -f "$(CI_DIR)/scripts/generate-hooks" || { echo "ERROR: deployed CI/scripts/generate-hooks missing"; exit 1; }
+	echo "Preflight OK (deployed CI at $(CI_DIR))"
 
 # =============================================================================
 # Installation
@@ -282,7 +281,6 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests
 	$(MAKE) test
 	$(MAKE) test-shell
 	$(MAKE) test-podman
-	$(MAKE) test-qemu-authoritative
 
 # Podman test harness: macOS + Linux hosts without native Linux kernel.
 # See docs/specifications/SPEC-PODMAN-TESTING.md
@@ -290,7 +288,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests
 # Podman Test Harness
 # =============================================================================
 
-.PHONY: test-podman test-podman-quick test-podman-provision test-qemu-guest test-qemu-authoritative
+.PHONY: test-podman test-podman-quick test-podman-provision
 .PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard purge-guard-state check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
@@ -301,20 +299,6 @@ test-podman-quick: init-check ## Podman harness Tiers 0-2 only (skip capability 
 
 test-podman-provision: init-check ## Podman host-provision E2E only (phases 0-4, privileged)
 	$(SCRIPT_BASH) scripts/podman/run-tier3-provision.sh
-
-test-qemu-guest: ## Authoritative E2E inside QEMU guest only (requires root in guest)
-	$(SCRIPT_BASH) scripts/qemu/e2e-guest.sh
-
-test-qemu-authoritative: init-check ## Run the authoritative QEMU guest through WORKSPACE-VM
-	if [ ! -d "$(REPO_ROOT)/../../" ]; then \
-		echo "ERROR: WORKSPACE-VM is required for the authoritative QEMU E2E" >&2; \
-		exit 1; \
-	fi
-	if [ ! -f "$(REPO_ROOT)/../../tests/e2e/test_vm_qemu_guard.py" ]; then \
-		echo "ERROR: WORKSPACE-VM QEMU test sources are missing" >&2; \
-		exit 1; \
-	fi
-	$(MAKE) -C "$(REPO_ROOT)/../../" test-e2e-qemu
 
 # =============================================================================
 # Git Guard

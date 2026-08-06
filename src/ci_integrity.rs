@@ -379,7 +379,7 @@ pub fn check_ci_integrity(toplevel: &str, wsroot: &str) -> Result<(), GuardError
     }
     Err(GuardError::ContractFailed(format!(
         "CI integrity: deployment {} failed verification:\n  {}\n\
-         Fix: sudo --preserve-env=HOME,SSH_AUTH_SOCK make -C projects/WORKSPACE-CI deploy-ci",
+         Fix: sudo --preserve-env=HOME,SSH_AUTH_SOCK make -C projects/CI deploy-ci",
         ci_path.display(),
         violations.join("\n  ")
     )))

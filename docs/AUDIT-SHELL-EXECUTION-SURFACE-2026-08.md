@@ -132,7 +132,7 @@ Heredoc writers and payloads occur in:
 - `scripts/podman/e2e-policy-matrix.sh:29`
 - `scripts/podman/lib/host-provision-e2e.sh:60,75,97,223`
 - `scripts/podman/e2e-host-provision-safety.sh:154`
-- `scripts/qemu/e2e-shell-guard-guest.sh:348`
+- the external real-Linux guest shell-guard suite
 - `scripts/lib/host-provision-admin.sh:184`
 
 Impact: the guard does not distinguish a data heredoc, a shell program, or an

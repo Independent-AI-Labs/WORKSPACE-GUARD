@@ -341,7 +341,6 @@ make test-shell        # bats suite (scripts and helpers)
 make test-podman-provision # host-provision E2E only (also in check-push on Linux)
 make test-podman-quick # Podman tiers 0-2
 make test-podman       # + Tier 3 host-exec E2E
-make test-qemu-guest   # Authoritative host-exec E2E in QEMU guest
 ```
 
 ```bash
@@ -365,7 +364,7 @@ See [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md).
 | Home lock | [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md) | [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md) |
 | Shell guard | [REQ-SHELL-GUARD](docs/requirements/REQ-SHELL-GUARD.md) | [SPEC-SHELL-GUARD](docs/specifications/SPEC-SHELL-GUARD.md) |
 | Host provision | n/a | [SPEC-HOST-PROVISION](docs/specifications/SPEC-HOST-PROVISION.md) |
-| Podman / QEMU testing | [REQ-PODMAN-TESTING](docs/requirements/REQ-PODMAN-TESTING.md) | [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md) |
+| Podman testing | [REQ-PODMAN-TESTING](docs/requirements/REQ-PODMAN-TESTING.md) | [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md) |
 
 Canonical reference sources: [docs/references/SOURCES.md](docs/references/SOURCES.md).
 
