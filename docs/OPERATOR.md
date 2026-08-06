@@ -10,6 +10,10 @@ sudo make guard-down     # remove shell guard first, then git guard (provision s
 sudo GUARD_PURGE_CONFIRM=1 make guard-reset  # factory reset then bring-up
 ```
 
+`guard-check`, `check-guard-host-exec`, and `shell-guard-check` are read-only
+and may be run as a non-root user. Install, refresh, reset, up, and down remain
+root-only because they change system state.
+
 Policy and implementation detail: `docs/specifications/`.
 
 ## Shell guard (`/bin/bash` replacement)

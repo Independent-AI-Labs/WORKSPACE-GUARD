@@ -53,11 +53,11 @@ _user_mgmt_enabled() {
 }
 
 _guard_check_status() {
-    if [[ ! -x "$CI_ROOT/scripts/bootstrap-workspace-guard" ]]; then
-        echo "ERROR: bootstrap-workspace-guard missing at $CI_ROOT" >&2
+    if [[ ! -x "$REPO_ROOT/scripts/check-guard-host-exec-readonly" ]]; then
+        echo "ERROR: read-only host-exec checker missing" >&2
         return 2
     fi
-    bash "$CI_ROOT/scripts/bootstrap-workspace-guard" check-host-exec 2>&1
+    bash "$REPO_ROOT/scripts/check-guard-host-exec-readonly" 2>&1
 }
 
 _guard_needs_install() {

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Read-only host-exec health check. Safe for non-root callers.
+set -u
+
+FAIL=0
+NOTE=0
+
+ok() { echo "OK: $*"; }
+bad() { echo "DRIFTED: $*"; FAIL=1; }
+note() { echo "NOTE: $*"; NOTE=1; }
+
+deployment_class=""
+deployment_class="$(cat /usr/lib/workspace-guard/deployment-class)" || deployment_class=""
+if [[ "$deployment_class" == "host-exec" ]]; then
+    ok "deployment class host-exec"
+else
+    bad "deployment class is not host-exec"
+fi
+
+if [[ -f /usr/bin/git.original ]]; then
+    original_stat=""
+    if original_stat="$(stat -c '%a %U:%G' /usr/bin/git.original)"; then
+        read -r original_mode original_owner <<<"$original_stat"
+    else
+        original_mode="unknown"; original_owner="unknown"
+    fi
+    if [[ "${original_mode:-}" == "700" && "${original_owner:-}" == "root:root" ]]; then
+        ok "/usr/bin/git.original is 0700 root:root"
+    else
+        bad "/usr/bin/git.original expected 0700 root:root, got ${original_mode:-unknown} ${original_owner:-unknown}"
+    fi
+else
+    bad "/usr/bin/git.original missing"
+fi
+
+if [[ -x /usr/bin/git ]]; then
+    git_stat=""
+    if git_stat="$(stat -c '%a %U:%G' /usr/bin/git)"; then
+        read -r git_mode git_owner <<<"$git_stat"
+    else
+        git_mode="unknown"; git_owner="unknown"
+    fi
+    [[ "${git_mode:-}" == "755" && "${git_owner:-}" == "root:root" ]] \
+        && ok "/usr/bin/git is 0755 root:root" \
+        || bad "/usr/bin/git expected 0755 root:root, got ${git_mode:-unknown} ${git_owner:-unknown}"
+else
+    bad "/usr/bin/git missing or not executable"
+fi
+
+if [[ -x /usr/sbin/getcap ]]; then
+    actual_caps="$(/usr/sbin/getcap /usr/bin/git)"
+    actual_caps="${actual_caps#*/usr/bin/git }"
+    actual_caps="${actual_caps%=ep}"
+    actual_caps="$(printf '%s\n' "$actual_caps" | tr ',' '\n' | sed '/^$/d' | LC_ALL=C sort | paste -sd, -)"
+    expected_caps="cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_setpcap"
+    if [[ "$actual_caps" == "$expected_caps" ]]; then
+        ok "/usr/bin/git has required host-exec capabilities"
+    else
+        bad "/usr/bin/git capabilities expected ${expected_caps}=ep, got ${actual_caps:-none}"
+    fi
+else
+    bad "/usr/sbin/getcap missing"
+fi
+
+if dpkg-divert --list /usr/bin/git | grep -q 'git.distrib'; then
+    ok "dpkg diversion active for /usr/bin/git"
+else
+    bad "dpkg diversion missing for /usr/bin/git"
+fi
+
+if [[ -f /etc/apt/apt.conf.d/99workspace-guard ]]; then
+    ok "apt post-invoke hook present"
+else
+    bad "apt post-invoke hook missing"
+fi
+
+if git --version; then
+    ok "git runs through host-exec guard"
+else
+    bad "git cannot run through host-exec guard"
+fi
+
+if lsattr_path="$(command -v lsattr)" && [[ -e /usr/bin/git ]]; then
+    attrs="$(lsattr /usr/bin/git)"
+    if [[ -z "$attrs" ]]; then
+        note "immutable state is not readable as this user"
+    elif [[ "$attrs" == ????i* ]]; then
+        ok "/usr/bin/git immutable"
+    else
+        bad "/usr/bin/git is not immutable"
+    fi
+fi
+
+if [[ "$FAIL" -ne 0 ]]; then
+    exit 1
+fi
+echo "host-exec guard: HEALTHY"

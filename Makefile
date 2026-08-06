@@ -358,7 +358,7 @@ check-guard: ## REMOVED - use check-guard-host-exec
 	exit 1
 
 check-guard-host-exec: ## Check host-exec git-guard installation status
-	$(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" check-host-exec
+	$(SCRIPT_BASH) scripts/check-guard-host-exec-readonly
 
 .PHONY: install-shell-guard uninstall-shell-guard shell-guard-check
 install-shell-guard: build-shell-guard ## Install shell guard at /bin/bash + /bin/sh (ROOT)
@@ -515,6 +515,10 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: guard-%
+guard-check: ## Read-only combined guard health check (non-root safe)
+	$(SCRIPT_BASH) scripts/check-guard-host-exec-readonly
+	$(SCRIPT_BASH) scripts/shell-guard-check "$(REPO_ROOT)"
+
 guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	"$(SCRIPT_BASH)" scripts/guard-operator.sh '$*'
 

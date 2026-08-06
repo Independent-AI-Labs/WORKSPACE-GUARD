@@ -100,6 +100,18 @@ teardown() { guard_teardown; }
     grep -q '^build-shell-guard:' "$mk"
 }
 
+@test "non-root guard checks use the read-only host-exec checker" {
+    local mk="$GUARD_ROOT/Makefile"
+    local op="$GUARD_ROOT/scripts/guard-operator.sh"
+    local checker="$GUARD_ROOT/scripts/check-guard-host-exec-readonly"
+    grep -q '^guard-check:' "$mk"
+    grep -q 'scripts/check-guard-host-exec-readonly' "$mk"
+    grep -q 'scripts/check-guard-host-exec-readonly' "$op"
+    [ -x "$checker" ]
+    ! grep -qE '(^|[[:space:]])(chattr|setcap|mv|rm)([[:space:]]|$)' "$checker"
+    ! grep -qE '2>[[:space:]]*/dev/null|>[[:space:]]*/dev/null' "$checker"
+}
+
 @test "guard Makefile shell-guard-check routes root through bash.real" {
     run make -n shell-guard-check
     assert_success
