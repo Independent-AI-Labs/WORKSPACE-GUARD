@@ -32,9 +32,6 @@ cases:
   - {id: fish-env,          input: "env fish",                 expect: blocked, rule: alt-shell}
   - {id: busybox-sh,        input: "busybox sh -c 'id'",       expect: blocked, rule: busybox-shell}
   - {id: busybox-ls-ok,     input: "busybox ls /tmp",          expect: allowed}
-  - {id: nested-bash-ok,    input: "bash -c 'echo nested'",    expect: allowed}
-
-  # --- power verbs ---
   - {id: systemctl-poweroff, input: "systemctl poweroff",      expect: blocked, rule: power-verb}
   - {id: systemctl-kill,    input: "systemctl kill sshd",      expect: blocked, rule: power-verb}
   - {id: loginctl-suspend,  input: "loginctl suspend",         expect: blocked, rule: power-verb}
@@ -102,10 +99,6 @@ cases:
   - {id: echo-ok,           input: "echo hello",               expect: allowed}
   - {id: pipeline-ok,       input: "grep foo bar.txt | wc -l", expect: allowed}
   - {id: make-ok,           input: "make lint && make check",  expect: allowed}
-  - id: py3-inline
-    input: python3 -c pass
-    expect: blocked
-    rule: alt-interp
   - id: py-script-file
     input: python3 /tmp/x.py
     expect: blocked
@@ -132,15 +125,8 @@ cases:
   - id: pyproject-ok
     input: grep name pyproject.toml
     expect: allowed
-  - id: script-interp-ok
-    ctx: script
-    input: python3 helper.py --mode doctor
-    expect: allowed
   - id: uv-run-module-ok
     input: uv run python -m ci.check_markdown_docs --check-remote
-    expect: allowed
-  - id: uv-run-inline-ok
-    input: uv run python -c print(1)
     expect: allowed
   - id: venv-path-ok
     input: .venv/lib/python3.11/site-packages/tool run
@@ -172,3 +158,44 @@ cases:
     input: env FOO=1 python3 x
     expect: blocked
     rule: alt-interp
+  - id: podman-run-shell
+    input: podman run --rm image bash -c echo-hi
+    expect: blocked
+    rule: podman-command
+  - id: podman-exec-shell
+    input: podman exec ctr /bin/sh -c id
+    expect: blocked
+    rule: podman-command
+  - id: podman-path-shell
+    input: /usr/bin/podman run image sh
+    expect: blocked
+    rule: podman-command
+  - id: podman-sudo
+    input: sudo podman ps
+    expect: blocked
+    rule: podman-command
+  - id: podman-script-approved
+    input: podman run image bash -c id
+    expect: allowed
+    ctx: script
+  - id: uv-run-script-ok
+    input: uv run python tools/check.py
+    expect: allowed
+  - id: uv-run-inline-blocked
+    input: uv run python -c print(1)
+    expect: blocked
+    rule: uv-inline-interp
+  - id: python-heredoc-blocked
+    ctx: untrusted-script
+    input: python3 - <<PY
+    expect: blocked
+    rule: inline-code-channel
+  - id: nested-shell-blocked
+    ctx: untrusted-script
+    input: bash -c echo-inline
+    expect: blocked
+    rule: inline-shell
+  - id: nested-bash-blocked
+    input: bash -c echo-nested
+    expect: blocked
+    rule: inline-shell

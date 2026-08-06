@@ -15,15 +15,15 @@ pub struct ScanHit<'r> {
     pub end: usize,
 }
 
-fn scope_applies(scope: &str, is_script: bool) -> bool {
-    scope == "both" || (is_script && scope == "script") || (!is_script && scope == "command")
+fn scope_applies(scope: &str, context: &str) -> bool {
+    scope == "both" || scope == context || (scope == "script" && context == "untrusted-script")
 }
 
 /// First rule matching `text`, with the byte span of the match so the
 /// report can quote the offending excerpt instead of the whole body.
-pub fn find_hit<'r>(text: &[u8], rules: &'r [Rule], is_script: bool) -> Option<ScanHit<'r>> {
+pub fn find_hit<'r>(text: &[u8], rules: &'r [Rule], context: &str) -> Option<ScanHit<'r>> {
     rules.iter().find_map(|r| {
-        if !scope_applies(r.scope, is_script) {
+        if !scope_applies(r.scope, context) {
             return None;
         }
         r.re.find(text).map(|m| ScanHit {

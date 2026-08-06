@@ -137,6 +137,11 @@ model exercised in Tier 2.
   `scripts/test-in-podman.sh` shall avoid bash process substitution per
   `../CI/docs/PORTABILITY.md`.
 - **REQ-POD-081**: Harness scripts shall use `set -euo pipefail`.
+- **REQ-POD-082**: Harnesses shall not use inline executable payloads.
+  Podman entrypoints shall be checked-in, extension-qualified scripts.
+  `bash -c`, `sh -c`, interpreter `-c`/stdin/heredoc forms, and dynamically
+  generated executable source are prohibited except where a test explicitly
+  verifies that the shell guard blocks the form.
 
 ### 10. Non-Interactive Install
 

@@ -10,7 +10,8 @@
 # the guard still finds /bin/bash.real through the symlink.
 #
 # /bin/sh is only covered when it resolves to the bash being replaced
-# (Debian/Ubuntu point it at dash, which stays untouched).
+# (Debian/Ubuntu normally point it at another POSIX shell, which stays
+# untouched).
 #
 # Idempotent and reconciling (REQ-SHG-603): stale guard hash, wrong
 # caps, missing divert/hook, missing +i, or relaxed .real mode are
@@ -106,6 +107,7 @@ BASH_PATH="$(readlink -f "$BASH_LINK")"
 REAL_PATH="$SHG_ROOT/bin/bash.real"
 DISTRIB_PATH="$BASH_PATH.distrib"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
+APT_CHECK="$SHG_ROOT/usr/lib/workspace-guard/apt-shell-check"
 
 sh_covered() {
     local shlink="$SHG_ROOT/bin/sh"
@@ -148,7 +150,7 @@ guard_installed() {
 REPLACED=0
 DONE=0
 rollback() {
-    local rc=$?
+    local status_code=$?
     if [ "$DONE" -ne 1 ] && [ "$REPLACED" -eq 1 ] && [ -f "$REAL_PATH" ]; then
         warn "rolling back: restoring $BASH_PATH from $REAL_PATH"
         local rb="$BASH_PATH.rollback.$$"
@@ -160,7 +162,7 @@ rollback() {
     if [ "${SHG_STAGED:-0}" = "1" ]; then
         rm -f "$0"
     fi
-    return $rc
+    return $status_code
 }
 trap rollback EXIT
 
@@ -169,22 +171,22 @@ trap rollback EXIT
 # compiled-in /bin/bash.real path does not exist inside the fixture.
 sanity_probes() {
     [ -z "$SHG_ROOT" ] || { log "SHG_ROOT set: skipping runtime sanity probes"; return 0; }
-    local scratch rc
+    local scratch status_code
     scratch="$(mktemp /tmp/shg-sanity.XXXXXX)"
     cp "$GUARD_BIN" "$scratch"
     chmod 0755 "$scratch"
     "$SETCAP" cap_dac_override=ep "$scratch"
     # Built by concat so the policy pattern never matches this script.
     local probe="pk"; probe="${probe}ill x"
-    rc=0
-    "$scratch" -c 'echo shg-sanity' >"$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 0 ] || { rm -f "$scratch"; die "sanity: benign -c rc=$rc (want 0)"; }
-    rc=0
-    "$scratch" --version >"$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 0 ] || { rm -f "$scratch"; die "sanity: --version pass-through rc=$rc (want 0)"; }
-    rc=0
-    "$scratch" -c "$probe" >"$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 1 ] || { rm -f "$scratch"; die "sanity: destructive probe rc=$rc (want 1)"; }
+    status_code=0
+    "$scratch" -c 'echo shg-sanity' >"$DEVNULL" 2>&1 || status_code=$?
+    [ "$status_code" -eq 0 ] || { rm -f "$scratch"; die "sanity: benign -c status=$status_code (want 0)"; }
+    status_code=0
+    "$scratch" --version >"$DEVNULL" 2>&1 || status_code=$?
+    [ "$status_code" -eq 0 ] || { rm -f "$scratch"; die "sanity: --version pass-through status=$status_code (want 0)"; }
+    status_code=0
+    "$scratch" -c "$probe" >"$DEVNULL" 2>&1 || status_code=$?
+    [ "$status_code" -eq 1 ] || { rm -f "$scratch"; die "sanity: destructive probe status=$status_code (want 1)"; }
     rm -f "$scratch"
     log "sanity probes passed (benign -c, --version, destructive probe blocked)"
 }
@@ -192,11 +194,27 @@ sanity_probes() {
 # --- apt hook ------------------------------------------------------------------
 write_apt_hook() {
     install -d -m 0755 "$(dirname "$APT_HOOK")"
+    install -d -m 0755 "$(dirname "$APT_CHECK")"
+    cat > "$APT_CHECK" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+for path in /bin/bash.distrib /usr/bin/bash.distrib; do
+    if [[ -e "$path" ]]; then
+        mode="$(/usr/bin/stat -c %a "$path")"
+        if [[ "$mode" != "700" ]]; then
+            echo "WARN: workspace-shell-guard diverted shell is not root-only; run: sudo make install-shell-guard" >&2
+        fi
+    fi
+done
+EOF
+    chown root:root "$APT_CHECK"
+    chmod 0755 "$APT_CHECK"
     cat > "$APT_HOOK" <<'EOF'
 // WORKSPACE-GUARD: warn when the diverted shell or guard changes.
 // The divert keeps the guard in place across upgrades; this hook
 // only warns. It never auto-reinstalls (SPEC-SHELL-GUARD section 12.1).
-DPkg::Post-Invoke { "for p in /bin/bash.distrib /usr/bin/bash.distrib; do if [ -e \"$p\" ] && [ \"\$(/usr/bin/stat -c %a \"$p\")\" != 700 ]; then echo 'WARN: workspace-shell-guard diverted shell is not root-only; run: sudo make install-shell-guard' >&2; fi; done"; };
+DPkg::Post-Invoke { "/usr/lib/workspace-guard/apt-shell-check"; };
 EOF
     chown root:root "$APT_HOOK"
     chmod 0644 "$APT_HOOK"
@@ -303,13 +321,13 @@ if [ -z "$SHG_ROOT" ]; then
     # Root bypasses the AT_SECURE gate: benign commands pass through and
     # destructive commands are still blocked. Non-root runtime behavior is
     # covered by the installed QEMU suite, not this root-only transaction.
-    rc=0
-    "$BASH_PATH" -c 'echo shg-ok' >"$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 0 ] || die "post-check: root bash -c rc=$rc (want 0 pass-through)"
-    rc=0
+    status_code=0
+    "$BASH_PATH" -c 'echo shg-ok' >"$DEVNULL" 2>&1 || status_code=$?
+    [ "$status_code" -eq 0 ] || die "post-check: root bash -c status=$status_code (want 0 pass-through)"
+    status_code=0
     probe="pk"; probe="${probe}ill x"
-    "$BASH_PATH" -c "$probe" >"$DEVNULL" 2>&1 || rc=$?
-    [ "$rc" -eq 1 ] || die "post-check: root destructive probe rc=$rc (want 1 blocked)"
+    "$BASH_PATH" -c "$probe" >"$DEVNULL" 2>&1 || status_code=$?
+    [ "$status_code" -eq 1 ] || die "post-check: root destructive probe status=$status_code (want 1 blocked)"
 fi
 
 DONE=1

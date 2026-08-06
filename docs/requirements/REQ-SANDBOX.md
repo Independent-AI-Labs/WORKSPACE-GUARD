@@ -469,9 +469,11 @@ The threat model and CVE catalog that these requirements defend against are in
 - **No purge**: No binary is ever removed. The disposition is always
   contain-via-guard + audit. Purging breaks system updates and package
   management.
-- **No bare interpreter**: Scripts use bash only. No bare interpreter
-  invocations outside a venv (`uv run`). YAML generation may use `uv run`
-  with the venv interpreter if needed.
+- **No unsanctioned interpreter or inline code**: Scripts use Bash and the
+  approved standard text tools only. General-purpose interpreters are invoked
+  only through `uv` and only against checked-in, extension-qualified isolated
+  script files. Inline `-c`/`-e`/stdin/heredoc forms are forbidden, including
+  under `uv run`. YAML generation may use `uv run` with a script file if needed.
 - **File length**: All `.sh` scripts are under 512 lines. All `.md`
   documents are not subject to file length limits but should be concise.
 - **Banned words**: All documents follow the repo banned words policy. No

@@ -76,11 +76,7 @@ hp_admin_generate_password() {
         openssl rand -base64 24
         return 0
     fi
-    if command -v perl; then
-        perl -e 'print join("", map { ("A".."Z","a".."z",0..9)[rand 62] } 1..32), "\n"'
-        return 0
-    fi
-    echo "ERROR: openssl or perl required to generate admin password" >&2
+    echo "ERROR: openssl required to generate admin password" >&2
     return 1
 }
 
@@ -180,28 +176,20 @@ hp_admin_verify_password() {
         echo "ERROR: WORKSPACE_ADMIN_PASSWORD_VERIFY=skip refused (password gate cannot be bypassed)" >&2
         return 1
     fi
-    if command -v perl; then
-        perl - "$name" "$pass" <<'PERL'
-use strict;
-use warnings;
-my ($user, $password) = @ARGV;
-getpwnam($user) or exit 1;
-my $hash = "";
-open my $fh, "<", "/etc/shadow" or exit 1;
-while (<$fh>) {
-    chomp;
-    my @f = split /:/, $_, 3;
-    if ($f[0] eq $user) { $hash = $f[1]; last; }
-}
-close $fh;
-exit 1 if !$hash || $hash =~ /^[!*]+$/;
-my $ok = crypt($password, $hash) eq $hash;
-exit($ok ? 0 : 1);
-PERL
-        return $?
+    local openssl_path
+    if ! openssl_path="$(command -v openssl)" || [[ ! -x "$openssl_path" ]]; then
+        echo "ERROR: openssl required to verify admin password" >&2
+        return 1
     fi
-    echo "ERROR: perl required to verify admin password" >&2
-    return 1
+    local hash salt calculated
+    hash="$(awk -F: -v want="$name" '$1 == want {print $2; exit}' /etc/shadow)"
+    [[ -n "$hash" && "$hash" != \!* && "$hash" != \** ]] || return 1
+    case "$hash" in
+        \$6\$*) salt="${hash#\$6\$}"; salt="${salt%%\$*}" ;;
+        *) echo "ERROR: unsupported password hash for $name (need SHA-512)" >&2; return 1 ;;
+    esac
+    calculated="$(openssl passwd -6 -salt "$salt" "$pass")"
+    [[ "$calculated" == "$hash" ]]
 }
 
 hp_admin_prompt_password() {

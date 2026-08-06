@@ -68,3 +68,19 @@ patterns:
     regex: (^|([\n;|&`]|&&|\|\||\$\()\s*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b(\s+(-[^;|&\s]*|[A-Za-z_]+=\S*))*\s+)(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|irb|node|nodejs|deno|bun|php[0-9.]*|lua[0-9.]*|luajit|tclsh|wish|expect|Rscript|raku|julia|awk|gawk|mawk|nawk)\b
     hint: interpreters are an unscanned command channel, run them from a script or the operator shell
     scope: command
+  - id: podman-command
+    regex: (^|([\n\x3b|&\x60]|&&|\|\||\x24\()[[:space:]]*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b([[:space:]]+(-[^|&[:space:]]*|[A-Za-z_][A-Za-z0-9_]*=\S*))*[[:space:]]+)(/[^[:space:]|&\x60]+/)?(real-)?podman\b
+    hint: run the approved Podman harness script - container shells are not an agent command channel
+    scope: command
+  - id: inline-shell
+    regex: (^|([\n\x3b|&\x60]|&&|\|\||\x24\()[[:space:]]*|\b(env|exec|sudo|doas)\b[[:space:]]+)(/[^[:space:]|&\x60]+/)?(bash|sh)\b[[:space:]]+-c\b
+    hint: use an approved extension-qualified isolated script
+    scope: both
+  - id: uv-inline-interp
+    regex: \buv[[:space:]]+run[[:space:]]+python[0-9.]*[[:space:]]+(-c|-([[:space:]]|$)|--eval|--execute|--expr|--code)\b
+    hint: use an approved extension-qualified isolated script
+    scope: both
+  - id: inline-code-channel
+    regex: (<<[-]?[[:space:]]*[A-Za-z_][A-Za-z0-9_]*|\b(eval)\b|\b(source|\.)[[:space:]]*(<\(|\(|/dev/fd/)|\b(python[0-9.]*|perl[0-9.]*|ruby|node|nodejs|lua|php|awk)\b[[:space:]]*<|\b(python[0-9.]*|perl[0-9.]*|ruby|node|nodejs|lua|php|awk)\b[[:space:]]+(-c|-e|-[[:space:]]|--eval|--execute|--expr|--code)\b)
+    hint: use an approved extension-qualified isolated script
+    scope: untrusted-script

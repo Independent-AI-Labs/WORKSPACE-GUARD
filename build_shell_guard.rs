@@ -83,8 +83,11 @@ pub fn emit_shell_guard_config(manifest: &Path) {
             p.id
         );
         assert!(
-            p.scope == "command" || p.scope == "script" || p.scope == "both",
-            "build.rs: shell-guard pattern {:?} has invalid scope {:?} (command|script|both)",
+            p.scope == "command"
+                || p.scope == "script"
+                || p.scope == "untrusted-script"
+                || p.scope == "both",
+            "build.rs: shell-guard pattern {:?} has invalid scope {:?} (command|script|untrusted-script|both)",
             p.id,
             p.scope
         );
@@ -103,7 +106,7 @@ pub fn emit_shell_guard_config(manifest: &Path) {
             case.expect
         );
         assert!(
-            case.ctx == "command" || case.ctx == "script",
+            case.ctx == "command" || case.ctx == "script" || case.ctx == "untrusted-script",
             "build.rs: shell matrix case {:?} has invalid ctx {:?} (command|script)",
             case.id,
             case.ctx

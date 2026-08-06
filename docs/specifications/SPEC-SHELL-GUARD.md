@@ -248,7 +248,8 @@ scanned byte-exactly (REQ-SHG-205, REQ-SHG-703).
 Every pattern in the policy table is tried against the raw text; the
 first match wins. Patterns carry a `scope` (REQ-SHG-312): `command`
 rules only apply to `-c` text, `script` rules only to script bodies,
-`both` (the default) to every scanned context. Trusted-tier script
+`untrusted-script` rules only to untrusted script bodies, and `both` (the
+default) to every scanned context. Trusted-tier script
 bodies (§4.1) are scanned with the same rules and are blocked on a
 match; the tier only certifies provenance, not an execution
 exemption.
@@ -286,17 +287,16 @@ The pattern groups (exact regexes live in
                               lua[0-9.]*|luajit|tclsh|wish|expect|
                               Rscript|raku|julia|awk|gawk|mawk|
                               nawk)\b                      → BLOCK
-                              (scope: command, REQ-SHG-313)
+                               (scope: command and untrusted-script,
+                               REQ-SHG-313)
 14. ALL CLEAR → sanitise env, execve real shell
 ```
 
-Group 13 closes the interpreter-escape vector in `-c` text: an
-interpreter is an unscanned command channel that voids groups 1-12.
-Its `command` scope keeps script bodies (operator tooling, shell
-libraries) free to invoke interpreters; a hostile script body is
-already confined by sealed-memfd staging and the `both`-scoped
-rules, and binary-level interpreter confinement belongs to the
-binary guard (SPEC-BINARY-GUARD, GTFOBins policies).
+Group 13 closes the interpreter-escape vector in command text and untrusted
+script bodies: an interpreter is an unscanned command channel that voids
+groups 1-12. Trusted-tier status does not authorize inline interpreter code.
+Technology mixing uses an approved extension-qualified isolated script or a
+compiled implementation.
 
 Group 2 closes the shell-escape vector: the guarded pair cannot be
 used as a springboard to an unguarded interpreter. Nested `bash` /
@@ -342,7 +342,7 @@ numeric-PID forms never match.
 `shell_guard_policy.schema.yaml`), compiled in by `build.rs`. The
 schema is a flat pattern table: every rule is
 `{id, regex, hint, scope?}` where `scope` is `command` | `script` |
-`both` (default `both`, REQ-SHG-312); the regexes are the group
+`untrusted-script` | `both` (default `both`, REQ-SHG-312); the regexes are the group
 shapes of §6 written out in full. Example
 excerpt:
 
@@ -398,9 +398,17 @@ blocks at the start of the `-c` text or directly after a command
 separator or launcher word (`sudo`, `env`, `exec`, `timeout`,
 `xargs`, ...). Path components (`.venv/lib/python3.11/...`),
 arguments of other commands (`command -v python3`), and
-`uv run python ...` do not match; uv runs repo-declared environments
-and committed project code, the same trust class as the `.py` files
-themselves, which command-text policy never scanned.
+`uv run python path/to/script.py` is permitted only as an approved isolated
+script invocation. `uv run python -c`, `uv run python -`, heredoc/stdin
+payloads, and equivalent inline forms are blocked. `uv` is the sanctioned
+launcher, not an inline-code exemption. Interpreter rules apply in command
+text and untrusted script bodies; trusted-tier status does not authorize
+inline code.
+
+Inline code is prohibited across guarded contexts: interpreter `-c`/`-e`/stdin,
+heredoc program text, nested `bash -c`/`sh -c`, `eval`, dynamic `source`, and
+code-bearing command/process substitutions. Technology mixing uses a reviewed
+extension-qualified script file and its sanctioned launcher.
 
 Adding a rule is a YAML edit (via the secure editor) plus rebuild;
 the Rust code never changes. `build.rs` validates that every pattern
@@ -600,10 +608,12 @@ Root-only. All paths target the RESOLVED bash path (usrmerge:
    (and `/bin/sh` when it resolves to bash).
 6. Install the guard at the resolved bash path (root:root 0755,
    `setcap cap_dac_override=ep`).
-7. Register the apt post-invoke hook
-   (`/etc/apt/apt.conf.d/99workspace-guard-shell`) that warns when
-   the `bash` or `dash` package changes. The hook never
-   auto-reinstalls.
+7. Install a root-owned executable checker at
+   `/usr/lib/workspace-guard/apt-shell-check`, then register the apt
+   post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard-shell`) to
+   invoke that checker. The checker warns when the diverted shell changes;
+   the hook never auto-reinstalls. Keeping shell logic out of the apt
+   configuration avoids nested quoting failures during apt parsing.
 8. Lock the sealed original: `chattr +i /bin/bash.real`.
 9. Post-install verification (REQ-SHG-605): modes/owners/caps,
    divert registered, hook present, guard hash matches the release
@@ -627,8 +637,8 @@ hash, wrong caps, missing divert/hook, missing `+i`, or relaxed
    refuses to rename over a file that differs from the diverted
    original, so the guard binary must be removed first.) When the
    diversion is already gone (drift), copy `.real` back instead.
-3. Remove `/bin/bash.real` and the apt hook (restore `/bin/sh` the
-   same way when covered).
+3. Remove `/bin/bash.real`, the apt hook, and its checker (restore
+   `/bin/sh` the same way when covered).
 4. Verify `bash --version`, `bash -c 'echo sh-ok'`, and
    `/bin/sh -c 'echo sh-ok'` succeed.
 

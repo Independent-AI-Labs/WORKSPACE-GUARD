@@ -106,6 +106,7 @@ fi
 REAL_PATH="$SHG_ROOT/bin/bash.real"
 DISTRIB_PATH="$BASH_PATH.distrib"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
+APT_CHECK="$SHG_ROOT/usr/lib/workspace-guard/apt-shell-check"
 CONFIG_DIR="$REPO_ROOT/config"
 
 PROBLEMS=0
@@ -193,6 +194,11 @@ if [ -f "$APT_HOOK" ]; then
     ok "apt hook present"
 else
     bad "apt hook missing: $APT_HOOK"
+fi
+if [ -x "$APT_CHECK" ]; then
+    ok "apt hook checker present"
+else
+    bad "apt hook checker missing or not executable: $APT_CHECK"
 fi
 
 # --- policy configs ---------------------------------------------------------------

@@ -40,5 +40,8 @@ description = "WORKSPACE-GUARD repository-local allow list (verbatim external re
 # docs/references/ holds cached external reference content; its secrets
 # belong to third parties and are out of scope for THIS repository.
 paths = [
-    '''docs/references/.*''',
+    '''.*docs/references/.*''',
+    '''.*systemshardening-(cap-hardening|dm-verity|chattr)\.html''',
+    '''.*yunolay-(caps-abuse|suid-sgid-abuse)\.html''',
+    '''.*cis-dil-benchmark-suid-rb\.html''',
 ]

@@ -344,7 +344,7 @@ handled by `make install-shell-guard`.
   `  -> Hint: run without truncation; write long output to a file and read it with offset/limit`
 
 - **REQ-SHG-312**: Every policy pattern shall carry a `scope` field
-  (`command` | `script` | `both`, default `both`) selecting the
+  (`command` | `script` | `untrusted-script` | `both`, default `both`) selecting the
   invocation contexts the pattern applies to: `-c` command text
   (`command`), script bodies (`script`), or every scanned context
   (`both`). The scope is validated at build time; every pattern
@@ -358,10 +358,9 @@ handled by `make install-shell-guard`.
   `mawk`/`nawk`) in `-c` command text shall be blocked
   (exit 1) for ALL users including root: an interpreter hands the
   caller a full, unscanned command channel and voids every other
-  rule. The rule shall be `scope: command` so operator tooling and
-  shell libraries that legitimately invoke interpreters from script
-  bodies keep working; script-level interpreter confinement is
-  binary-guard (GTFOBins) territory, not command-text policy.
+  rule. The rule applies to command text and untrusted script bodies.
+  Trusted-tier status does not authorize inline code; trusted maintenance
+  code must use approved isolated files or a compiled implementation.
   The match shall be **command-position only**: an interpreter name
   blocks at the start of the command text or directly after a command
   separator (`\n`, `;`, `|`, `&`, `&&`, `||`, `$(`, backtick) or a
@@ -370,10 +369,28 @@ handled by `make install-shell-guard`.
   and `VAR=value` assignments). Names appearing as path components
   (`.venv/lib/python3.11/...`) or as arguments to other commands
   (`grep name pyproject.toml`, `command -v python3`) shall NOT match.
-  `uv run python ...` shall NOT match: uv executes repo-declared
-  environments and committed project code, the same trust class as
-  the `.py` files it runs, which command-text policy never scanned;
-  the scanned channel is the shell text itself.
+  `uv run python path/to/script.py` may match only as an approved isolated
+  script invocation. `uv run python -c`, `uv run python -`, heredoc/stdin
+  payloads, `exec`, `eval`, and equivalent inline forms shall be blocked.
+  `uv` is the only sanctioned Python launcher; it does not authorize inline
+  code. The same rule applies to every general-purpose interpreter.
+
+ - **REQ-SHG-314**: Inline code shall not be used in any guarded execution
+   context. This includes interpreter `-c`/`-e`/stdin forms, heredocs carrying
+   program text, nested `bash -c`/`sh -c` payloads, `eval`, dynamic `source`,
+   command substitution used as a code channel, and process substitution used
+   to deliver executable text. Technology mixing shall use a checked-in,
+   extension-qualified isolated script invoked through its sanctioned launcher.
+
+ - **REQ-SHG-315**: Every direct subprocess launched by guard-owned Rust code
+   shall have an absolute executable path, an explicit argument contract, a
+   sanitized environment, a bounded timeout where applicable, and a policy
+   classification. Avoidable helpers such as external date formatting shall
+   be implemented in Rust instead of invoking a bare system command.
+
+ - **REQ-SHG-316**: Tool-mediated writes and direct process launches that do
+   not enter guarded Bash are outside the shell scanner and shall be governed
+   by a separate execution-broker/file-write policy.
 
 ---
 

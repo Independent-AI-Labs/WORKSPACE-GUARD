@@ -272,6 +272,38 @@ SHG_DD='--'
     [[ "$output" == *"busybox-shell"* ]]
 }
 
+@test "shell-guard: blocks podman command boundary" {
+    require_root_guard
+    run shg -c 'podman run --rm image bash -c echo-inline'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"podman-command"* ]]
+}
+
+@test "shell-guard: blocks launcher-wrapped podman" {
+    require_root_guard
+    run shg -c 'sudo podman exec container /bin/sh -c id'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"podman-command"* ]]
+}
+
+@test "shell-guard: blocks inline Python from an untrusted script" {
+    require_root_guard
+    printf '#!/bin/bash\npython3 -c print(1)\n' > "$TEST_TMPDIR/inline-python.sh"
+    chmod +x "$TEST_TMPDIR/inline-python.sh"
+    run shg "$TEST_TMPDIR/inline-python.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"inline-code-channel"* ]]
+}
+
+@test "shell-guard: blocks heredoc interpreter code from an untrusted script" {
+    require_root_guard
+    printf '#!/bin/bash\npython3 - <<PY\nprint(1)\nPY\n' > "$TEST_TMPDIR/python-heredoc.sh"
+    chmod +x "$TEST_TMPDIR/python-heredoc.sh"
+    run shg "$TEST_TMPDIR/python-heredoc.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"inline-code-channel"* ]]
+}
+
 @test "shell-guard: blocks kill with two-digit signal (kill-mass)" {
     require_root_guard
     run shg -c 'kill -15 1234'

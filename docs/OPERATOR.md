@@ -40,12 +40,16 @@ resolves `getcap` from `/usr/sbin` by absolute path, and treats an
 unreadable 0700 `/bin/bash.real` as the installed posture
 (OK-with-note), not drift.
 
-Blocked `-c` text now also includes general-purpose interpreters
-(`python*`, `perl`, `ruby`, `node`, `php`, `lua`, `awk`, ...; rule
-`alt-interp`, REQ-SHG-313): run them from script bodies (unchanged)
-or from the operator shell. The match is command-position only:
-`uv run python ...` (repo-declared tooling), interpreter names in
-paths, and detection idioms (`command -v python3`) are allowed.
+Blocked `-c` text and untrusted script bodies include general-purpose
+interpreters (`python*`, `perl`, `ruby`, `node`, `php`, `lua`, `awk`, ...;
+REQ-SHG-313). Inline forms are never permitted, including `-c`, `-e`, stdin,
+heredocs, nested shell payloads, `eval`, and dynamic `source`.
+
+Use `uv` only with an explicit, reviewed, extension-qualified script file,
+for example `uv run python tools/check.py`. `uv run python -c` is blocked;
+`uv` is a sanctioned launcher, not permission to execute inline code.
+Detection-only arguments such as `command -v python3` are not execution, but
+they do not authorize a subsequent interpreter invocation.
 
 Root-deployed toolchains under the agent's home (e.g. `projects/CI`)
 run as trusted tier only while their boundary directory carries the

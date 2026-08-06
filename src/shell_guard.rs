@@ -458,7 +458,7 @@ fn main() {
                 eprintln!("shell guard: command string exceeds 1 MiB limit");
                 process::exit(2);
             }
-            if let Some(hit) = report::find_hit(&text, &rules, false) {
+            if let Some(hit) = report::find_hit(&text, &rules, "command") {
                 let display = format!("bash -c '{}'", report::sanitize_cmd(&text));
                 let excerpt = report::excerpt(&text, hit.start, hit.end, false);
                 block(hit.rule, &display, &excerpt);
@@ -480,7 +480,7 @@ fn main() {
                 block_unreadable(&display);
             }
             ScriptClass::Trusted(content) => {
-                if let Some(hit) = report::find_hit(&content, &rules, true) {
+                if let Some(hit) = report::find_hit(&content, &rules, "script") {
                     let display = format!("bash {} (trusted script body)", path.to_string_lossy());
                     let excerpt = report::excerpt(&content, hit.start, hit.end, true);
                     block(hit.rule, &display, &excerpt);
@@ -488,7 +488,7 @@ fn main() {
                 exec_real(&args, None);
             }
             ScriptClass::Untrusted(content) => {
-                if let Some(hit) = report::find_hit(&content, &rules, true) {
+                if let Some(hit) = report::find_hit(&content, &rules, "untrusted-script") {
                     let display = format!("bash {} (script body)", path.to_string_lossy());
                     let excerpt = report::excerpt(&content, hit.start, hit.end, true);
                     block(hit.rule, &display, &excerpt);

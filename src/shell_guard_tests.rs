@@ -74,12 +74,12 @@ fn policy_matrix_agrees() {
     let rules = rules();
     for case in &matrix.cases {
         assert!(
-            case.ctx == "command" || case.ctx == "script",
+            case.ctx == "command" || case.ctx == "script" || case.ctx == "untrusted-script",
             "case {}: bad ctx {:?}",
             case.id,
             case.ctx
         );
-        let hit = report::find_hit(case.input.as_bytes(), &rules, case.ctx == "script");
+        let hit = report::find_hit(case.input.as_bytes(), &rules, &case.ctx);
         match case.expect.as_str() {
             "blocked" => {
                 let rule =
@@ -136,7 +136,10 @@ fn ids_are_unique() {
 fn scopes_are_valid() {
     for (id, _, _, scope) in shell_config::SHELL_PATTERNS {
         assert!(
-            *scope == "command" || *scope == "script" || *scope == "both",
+            *scope == "command"
+                || *scope == "script"
+                || *scope == "untrusted-script"
+                || *scope == "both",
             "pattern {} has invalid scope {:?}",
             id,
             scope
@@ -153,8 +156,8 @@ fn command_scoped_rule_is_invisible_in_script_context() {
         scope: "command",
     };
     let rules = vec![rule];
-    assert!(report::find_hit(b"zz-probe x", &rules, false).is_some());
-    assert!(report::find_hit(b"zz-probe x", &rules, true).is_none());
+    assert!(report::find_hit(b"zz-probe x", &rules, "command").is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, "script").is_none());
 }
 
 #[test]
@@ -166,8 +169,8 @@ fn script_scoped_rule_is_invisible_in_command_context() {
         scope: "script",
     };
     let rules = vec![rule];
-    assert!(report::find_hit(b"zz-probe x", &rules, true).is_some());
-    assert!(report::find_hit(b"zz-probe x", &rules, false).is_none());
+    assert!(report::find_hit(b"zz-probe x", &rules, "script").is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, "command").is_none());
 }
 
 #[test]
@@ -179,8 +182,8 @@ fn both_scoped_rule_matches_everywhere() {
         scope: "both",
     };
     let rules = vec![rule];
-    assert!(report::find_hit(b"zz-probe x", &rules, false).is_some());
-    assert!(report::find_hit(b"zz-probe x", &rules, true).is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, "command").is_some());
+    assert!(report::find_hit(b"zz-probe x", &rules, "script").is_some());
 }
 
 static ENVP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

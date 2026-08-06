@@ -76,6 +76,9 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     grep -q "chattr +i $FAKE/bin/bash.real" "$GUARD_STUB_LOG"
     # apt hook written
     [ -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
+    [ -x "$FAKE/usr/lib/workspace-guard/apt-shell-check" ]
+    grep -qF 'DPkg::Post-Invoke { "/usr/lib/workspace-guard/apt-shell-check"; };' \
+        "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell"
 }
 
 @test "shell-guard-install: second run is a reconciling no-op" {
@@ -93,6 +96,15 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     run bash "$INSTALL"
     assert_success
     [ -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
+}
+
+@test "shell-guard-install: reconcile repairs a missing apt hook checker" {
+    run bash "$INSTALL"
+    assert_success
+    rm -f "$FAKE/usr/lib/workspace-guard/apt-shell-check"
+    run bash "$INSTALL"
+    assert_success
+    [ -x "$FAKE/usr/lib/workspace-guard/apt-shell-check" ]
 }
 
 @test "shell-guard-install: covers /bin/sh when it resolves to bash" {
@@ -125,6 +137,16 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     [ "$status" -eq 1 ]
     assert_output --partial "DRIFTED"
     assert_output --partial "apt hook missing"
+}
+
+@test "shell-guard-check: flags a missing apt hook checker as DRIFTED" {
+    run bash "$INSTALL"
+    assert_success
+    rm -f "$FAKE/usr/lib/workspace-guard/apt-shell-check"
+    run bash "$CHECK"
+    [ "$status" -eq 1 ]
+    assert_output --partial "DRIFTED"
+    assert_output --partial "apt hook checker missing"
 }
 
 @test "shell-guard-check: flags relaxed .real mode as DRIFTED" {
@@ -212,6 +234,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     [ ! -e "$FAKE/bin/bash.real" ]
     [ ! -e "$FAKE/bin/bash.distrib" ]
     [ ! -e "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
+    [ ! -e "$FAKE/usr/lib/workspace-guard/apt-shell-check" ]
     [ ! -s "$GUARD_DIVERT_DB" ]
     grep -q "chattr -i $FAKE/bin/bash.real" "$GUARD_STUB_LOG"
 }

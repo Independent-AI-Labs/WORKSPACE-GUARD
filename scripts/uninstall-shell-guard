@@ -70,6 +70,7 @@ fi
 REAL_PATH="$SHG_ROOT/bin/bash.real"
 DISTRIB_PATH="$BASH_PATH.distrib"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
+APT_CHECK="$SHG_ROOT/usr/lib/workspace-guard/apt-shell-check"
 
 if [ "$DRY_RUN" -eq 0 ]; then
     if [ "$(id -u)" != "0" ] && [ -z "$SHG_ROOT" ]; then
@@ -150,6 +151,7 @@ fi
 # 3. Remove the sealed original and the apt hook.
 rm -f "$REAL_PATH"
 [ ! -e "$APT_HOOK" ] || { rm -f "$APT_HOOK"; log "removed apt hook"; }
+[ ! -e "$APT_CHECK" ] || { rm -f "$APT_CHECK"; log "removed apt hook checker"; }
 
 # 4. /bin/sh coverage.
 if [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
