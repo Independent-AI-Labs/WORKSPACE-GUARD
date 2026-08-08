@@ -1,21 +1,25 @@
+use std::collections::HashMap;
 use std::ffi::{CStr, CString, OsString};
 use std::fs;
 use std::os::linux::fs::MetadataExt;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
 use nix::sys::resource::{setrlimit, Resource};
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
-use nix::unistd::{getuid, Pid, User};
+use nix::unistd::Pid;
 
 use crate::{
     args::ArgState,
     remote::repo_targets_provisioned_host,
     wsroot::{classify_workspace_root, WorkspaceRoot},
-    GuardError, ALLOWED_VARS, CHILD_PATH, CONTRACT_POLL_MS, CONTRACT_SCRIPT, CONTRACT_TIMEOUT_MS,
-    CORE_LIMIT, GIT_ORIGINAL, NOFILE_LIMIT, WORKSPACE_MARKERS,
+    GuardError, CONTRACT_POLL_MS, CONTRACT_SCRIPT, CONTRACT_TIMEOUT_MS, CORE_LIMIT, GIT_ORIGINAL,
+    NOFILE_LIMIT, WORKSPACE_MARKERS,
 };
+
+#[cfg(test)]
+use crate::ALLOWED_VARS;
 
 #[cfg(feature = "capability-mode")]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
@@ -99,21 +103,6 @@ fn post_exec_reconcile(git_dir: Option<&Path>, mutating: bool, git_code: i32) {
 pub fn set_resource_limits() {
     let _ = setrlimit(Resource::RLIMIT_NOFILE, NOFILE_LIMIT, NOFILE_LIMIT);
     let _ = setrlimit(Resource::RLIMIT_CORE, CORE_LIMIT, CORE_LIMIT);
-}
-
-fn resolve_safe_home() -> String {
-    let uid = getuid();
-    match User::from_uid(uid) {
-        Ok(Some(user)) => {
-            let s = user.dir.to_string_lossy().to_string();
-            if !s.is_empty() {
-                s
-            } else {
-                "/".to_string()
-            }
-        }
-        _ => "/".to_string(),
-    }
 }
 
 fn verify_git_original() -> Result<(), GuardError> {
@@ -224,25 +213,17 @@ pub fn execve_real_git(
         }
     }
 
-    let mut envp: Vec<CString> = Vec::new();
-    for &key in ALLOWED_VARS {
-        if key == "HOME" {
-            continue;
-        }
-        if let Some(val) = std::env::var_os(key) {
-            let entry = format!("{}={}", key, val.to_string_lossy());
-            if let Ok(c) = CString::new(entry) {
-                envp.push(c);
-            }
-        }
+    let mut env_map: HashMap<OsString, OsString> = std::env::vars_os()
+        .filter(|(key, _)| {
+            let key = key.to_string_lossy();
+            !crate::BLOCKED_BYPASS_VARS.contains(&key.as_ref())
+        })
+        .collect();
+
+    let hardened = crate::agent_identity::hardened_git_env_pairs(crate::is_config_privileged());
+    for (key, value) in hardened {
+        env_map.insert(OsString::from(key), OsString::from(value));
     }
-
-    let safe_home = resolve_safe_home();
-    envp.push(CString::new(format!("HOME={}", safe_home)).unwrap());
-
-    envp.push(CString::new(format!("PATH={}", CHILD_PATH)).unwrap());
-
-    crate::agent_identity::push_agent_hardened_git_env(&mut envp, crate::is_config_privileged());
 
     if sudo {
         for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS
@@ -250,13 +231,20 @@ pub fn execve_real_git(
             .chain(crate::SUDO_GATED_EDITOR_ENV_VARS.iter())
         {
             if let Some(val) = std::env::var_os(var) {
-                let entry = format!("{}={}", var, val.to_string_lossy());
-                if let Ok(c) = CString::new(entry) {
-                    envp.push(c);
-                }
+                env_map.insert(OsString::from(var), val);
             }
         }
     }
+
+    let envp: Vec<CString> = env_map
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let mut entry = key.into_vec();
+            entry.push(b'=');
+            entry.extend_from_slice(&value.into_vec());
+            CString::new(entry).ok()
+        })
+        .collect();
 
     let pid;
     #[cfg(feature = "capability-mode")]
@@ -351,7 +339,6 @@ pub fn execve_real_git(
 /// Bounded by a timeout so a wedged resolver can never stall a commit.
 pub fn resolve_toplevel(argv_os: &[OsString], git_bin: &str) -> Option<String> {
     let mut cmd = std::process::Command::new(git_bin);
-    cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
     cmd.args(crate::args::repo_location_args(argv_os));
     crate::apply_safe_directory(&mut cmd);
     cmd.args(["rev-parse", "--show-toplevel"]);
@@ -429,9 +416,6 @@ pub fn check_workspace_ci_contract(
     }
 
     let child = std::process::Command::new("/bin/bash")
-        .env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/")
         .arg(&ci_script)
         .env("WORKSPACE_GGUARD_CMD", subcommand)
         .env("WORKSPACE_GGUARD_REPO_ROOT", &toplevel)

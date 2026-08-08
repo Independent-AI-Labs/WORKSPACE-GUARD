@@ -1,11 +1,3 @@
-// src/yaml_edit_ops.rs
-//
-// Operation layer of workspace-yaml-edit (SPEC-YAML-EDIT section 6):
-// CLI parsing, preflight, locking, the mutation pipeline
-// (parse, transform, verify, schema, audit, install), and the
-// read-only intents. Kept separate from the bin entry point so
-// every file stays within the repository line budget.
-
 use crate::yaml_edit_install::install;
 use serde_yaml::Value;
 use std::io::Write;
@@ -18,8 +10,6 @@ use crate::yaml_edit_engine as engine;
 use crate::yaml_edit_schema as schema;
 use crate::yaml_edit_splice as splice;
 
-/// Mirrors `log_file` in config/shared_paths.yaml; a unit test keeps
-/// the two in sync.
 pub const LOG_FILE_NAME: &str = ".workspace-guard.log";
 const LOCK_PATH: &str = "/var/lib/workspace-guard/yaml-edit.lock";
 
@@ -118,8 +108,6 @@ fn require_root() {
     }
 }
 
-/// Textual normalization of `.` and `..` so the canonical-path
-/// comparison detects symlinked parents without requiring them.
 fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
@@ -134,8 +122,17 @@ fn normalize(p: &Path) -> PathBuf {
     out
 }
 
-/// Preflight (REQ-YE-102): regular file, no symlink anywhere in the
-/// path, and root:root for mutations.
+fn is_deployed_ci_path(path: &Path) -> bool {
+    let components: Vec<_> = path.components().map(|c| c.as_os_str()).collect();
+    components.windows(2).any(|pair| {
+        pair[0] == std::ffi::OsStr::new("projects")
+            && matches!(
+                pair[1].to_str(),
+                Some("CI") | Some("CI.releases") | Some("CI.backup") | Some("CI.previous")
+            )
+    })
+}
+
 fn preflight(path: &Path, mutation: bool) {
     let md = std::fs::symlink_metadata(path)
         .unwrap_or_else(|_| fail(2, &format!("file not found: {}", path.display())));
@@ -157,6 +154,15 @@ fn preflight(path: &Path, mutation: bool) {
     if canon != normalize(&abs) {
         fail(2, &format!("refusing symlinked path: {}", path.display()));
     }
+    if mutation && is_deployed_ci_path(&canon) {
+        fail(
+            2,
+            &format!(
+                "refusing deployed CI artifact path: {}; use the release control plane",
+                path.display()
+            ),
+        );
+    }
     if mutation && (md.uid() != 0 || md.gid() != 0) {
         fail(
             2,
@@ -170,12 +176,10 @@ fn preflight(path: &Path, mutation: bool) {
     }
 }
 
-/// Held until the install completes; drop releases the lock.
 struct LockGuard {
     _flock: nix::fcntl::Flock<std::fs::File>,
 }
 
-/// Global mutation lock (REQ-YE-104).
 fn acquire_lock() -> LockGuard {
     let dir = Path::new("/var/lib/workspace-guard");
     if !dir.exists() {
@@ -200,9 +204,6 @@ fn acquire_lock() -> LockGuard {
     LockGuard { _flock: flock }
 }
 
-/// One audit line per mutation, appended to the operator's guard
-/// log. Operator home resolves via SUDO_UID, never $HOME
-/// (REQ-YE-600). Write failure aborts before install (REQ-YE-601).
 fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
     let uid = std::env::var("SUDO_UID")
         .ok()
@@ -274,9 +275,6 @@ fn set_node(doc: &mut Value, segs: &[String], val: Value) {
     *node = val;
 }
 
-/// Parse the new content and require it to be exactly the expected
-/// document (REQ-YE-006): serde_yaml is the sole arbiter of what
-/// the splice produced.
 fn verify(new_content: &str, expected: &Value, path: &Path) {
     let parsed = parse_doc(new_content, path);
     if &parsed != expected {
@@ -297,8 +295,6 @@ fn basename(path: &Path) -> &str {
         .unwrap_or_default()
 }
 
-/// The schema override file participates in validation decisions,
-/// so mutations refuse a non-root-owned override (fail closed).
 fn check_override_owner(path: &Path) {
     let Some(dir) = path.parent() else { return };
     let reg = dir.join("yaml_edit_schemas.yaml");
@@ -407,10 +403,6 @@ pub fn run_bootstrap(cli: &Cli) {
         splice::splice_insert_top_level(original, key, &value).map(|out| (out, expected))
     });
 }
-/// Shared mutation pipeline: preflight, lock, parse, transform,
-/// verify, schema-validate, audit, install (REQ-YE-105).
-/// Transform result: new file content plus the expected document
-/// the verification step compares it against.
 type Transform = Result<(String, Value), String>;
 
 fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
@@ -510,3 +502,7 @@ pub fn run_validate(cli: &Cli) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "yaml_edit_ops_tests.rs"]
+mod tests;

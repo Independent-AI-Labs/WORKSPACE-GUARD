@@ -189,7 +189,7 @@ fn both_scoped_rule_matches_everywhere() {
 static ENVP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
-fn envp_preserves_ami_prefix_and_resets_path() {
+fn envp_preserves_caller_environment_and_path() {
     let _g = ENVP_LOCK.lock().unwrap();
     std::env::set_var("AMI_QUIET_MODE", "1");
     std::env::set_var("_CI_CAPS_SCRUBBED", "1");
@@ -215,18 +215,32 @@ fn envp_preserves_ami_prefix_and_resets_path() {
          else the pre-commit re-exec loops): {:?}",
         flat
     );
-    assert!(
-        !flat.iter().any(|e| e.starts_with("SHG_TEST_STRIP_ME=")),
-        "unlisted vars must be stripped"
-    );
-    assert!(
-        flat.iter().any(|e| e == &format!("PATH={}", RESET_PATH)),
-        "PATH must be reset"
-    );
+    assert!(flat.iter().any(|e| e == "SHG_TEST_STRIP_ME=x"));
+    let caller_path = std::env::var("PATH").unwrap();
+    assert!(flat.iter().any(|e| e == &format!("PATH={caller_path}")));
     assert!(
         !flat.iter().any(|e| e.starts_with("SHG_SCRIPT_PATH=")),
         "caller-supplied SHG_SCRIPT_PATH must be dropped (only the guard sets it)"
     );
+}
+
+#[test]
+fn envp_removes_shell_injection_and_loader_variables() {
+    let _g = ENVP_LOCK.lock().unwrap();
+    std::env::set_var("BASH_ENV", "/tmp/evil");
+    std::env::set_var("LD_PRELOAD", "/tmp/evil.so");
+    std::env::set_var("SHG_TEST_KEEP", "yes");
+    let envp = build_envp(None);
+    std::env::remove_var("BASH_ENV");
+    std::env::remove_var("LD_PRELOAD");
+    std::env::remove_var("SHG_TEST_KEEP");
+    let flat: Vec<String> = envp
+        .iter()
+        .map(|c| c.to_string_lossy().to_string())
+        .collect();
+    assert!(!flat.iter().any(|e| e.starts_with("BASH_ENV=")));
+    assert!(!flat.iter().any(|e| e.starts_with("LD_PRELOAD=")));
+    assert!(flat.iter().any(|e| e == "SHG_TEST_KEEP=yes"));
 }
 
 #[test]
@@ -258,12 +272,6 @@ fn sanitize_truncates_and_replaces_quotes() {
     let long = vec![b'x'; 500];
     assert_eq!(report::sanitize_cmd(&long).chars().count(), 200);
     assert_eq!(report::sanitize_cmd(b"it's"), "it\u{2019}s");
-}
-
-#[test]
-fn tmpdir_checks() {
-    assert!(!tmpdir_ok(&OsString::from("relative")));
-    assert!(!tmpdir_ok(&OsString::from("/nonexistent-dir-xyz")));
 }
 
 #[test]

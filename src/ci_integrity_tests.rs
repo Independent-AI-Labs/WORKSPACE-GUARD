@@ -270,3 +270,17 @@ fn deployment_exec_bit_mismatch_is_violation() {
         violations
     );
 }
+
+#[test]
+fn active_release_selector_rejects_escape() {
+    let root = unique_temp_dir("release-escape");
+    fs::create_dir_all(root.join("projects/CI.releases")).unwrap();
+    fs::create_dir_all(root.join("projects/outside")).unwrap();
+    std::os::unix::fs::symlink("outside", root.join("projects/CI")).unwrap();
+    let violations = active_release_violations(&root);
+    assert!(
+        violations.iter().any(|v| v.contains("escapes")),
+        "unexpected: {:?}",
+        violations
+    );
+}

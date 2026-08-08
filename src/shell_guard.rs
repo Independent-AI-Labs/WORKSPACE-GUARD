@@ -22,26 +22,35 @@ use shell_guard_report as report;
 const REAL_SHELL: &str = "/bin/bash.real";
 const MAX_TEXT: usize = 1 << 20;
 const LOG_FILE_NAME: &str = ".workspace-guard.log";
-const RESET_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
-
-const PRESERVE_EXACT: &[&str] = &[
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "LANG",
-    "TERM",
-    "COLORTERM",
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
-    "SSH_AUTH_SOCK",
-    "GPG_TTY",
-    "PWD",
-    "OLDPWD",
-    "SHLVL",
-    "SHELL",
-    "TZ",
+const REMOVED_EXACT: &[&str] = &[
+    "BASH_ENV",
+    "ENV",
+    "SHELLOPTS",
+    "BASHOPTS",
+    "PROMPT_COMMAND",
+    "PS4",
+    "IFS",
+    "CDPATH",
+    "GLOBIGNORE",
+    "FIGNORE",
+    "HOSTFILE",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "LD_DEBUG",
+    "GCONV_PATH",
+    "GETCONF_DIR",
+    "NLSPATH",
+    "GLIBC_TUNABLES",
 ];
-const PRESERVE_PREFIX: &[&str] = &["LC_", "XDG_", "OPENCODE_", "WORKSPACE_", "AMI_", "_CI_"];
+
+fn remove_from_child_env(key: &str) -> bool {
+    REMOVED_EXACT.contains(&key)
+        || key.starts_with("LD_")
+        || key.starts_with("BASH_FUNC_")
+        || key.ends_with("%%")
+        || key == "SHG_SCRIPT_PATH"
+}
 
 struct Rule {
     id: &'static str,
@@ -319,19 +328,16 @@ fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
     let mut out: Vec<CString> = Vec::new();
     for (k, v) in std::env::vars_os() {
         let key = k.to_string_lossy();
-        let keep = PRESERVE_EXACT.contains(&key.as_ref())
-            || PRESERVE_PREFIX.iter().any(|p| key.starts_with(p))
-            || (key == "TMPDIR" && tmpdir_ok(&v));
-        if keep {
-            let mut s = k.into_vec();
-            s.push(b'=');
-            s.extend_from_slice(&v.into_vec());
-            if let Ok(c) = CString::new(s) {
-                out.push(c);
-            }
+        if remove_from_child_env(&key) {
+            continue;
+        }
+        let mut s = k.into_vec();
+        s.push(b'=');
+        s.extend_from_slice(&v.into_vec());
+        if let Ok(c) = CString::new(s) {
+            out.push(c);
         }
     }
-    out.push(CString::new(format!("PATH={}", RESET_PATH)).unwrap());
     // Memfd staging rewrites the script argument to /proc/self/fd/N, so
     // $0/BASH_SOURCE no longer name the real file and $0-relative
     // sourcing (dirname "$0"/../lib/...) breaks. Publish the canonical
@@ -345,15 +351,6 @@ fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
         out.extend(CString::new(s).ok());
     }
     out
-}
-
-fn tmpdir_ok(v: &OsString) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    let p = Path::new(v);
-    p.is_absolute()
-        && fs::metadata(p)
-            .map(|m| m.is_dir() && m.uid() == getuid().as_raw())
-            .unwrap_or(false)
 }
 
 fn set_rlimits() {

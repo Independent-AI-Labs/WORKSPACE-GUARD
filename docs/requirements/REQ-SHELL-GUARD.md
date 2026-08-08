@@ -396,17 +396,11 @@ handled by `make install-shell-guard`.
 
 ## 5. Environment Sanitisation (REQ-SHG-400 series)
 
-- **REQ-SHG-400**: Before `execve()`, the guard shall construct the
-  child environment from an allow-list (build from scratch, not
-  remove-list), preserving only: `HOME`, `USER`, `LOGNAME`, `LANG`,
-  `LC_*`, `TERM`, `COLORTERM`, `DISPLAY`, `WAYLAND_DISPLAY`,
-  `SSH_AUTH_SOCK`, `GPG_TTY`, `PWD`, `OLDPWD`, `SHLVL`, `SHELL`,
-  `TMPDIR` (validated: absolute, user-writable), `XDG_*`, `TZ`,
-  `OPENCODE_*` (agent detection markers are inert for the guard but
-  required by the agent), `WORKSPACE_*`, and `AMI_*` (workspace
-  shell-environment contract vars, e.g. `AMI_QUIET_MODE`; stripping
-  them re-triggers per-command banner/toolchain probes in every
-  guarded shell).
+- **REQ-SHG-400**: Before `execve()`, the guard shall preserve the caller
+  environment and PATH by default. It shall remove only variables listed in
+  the shell-guard removal policy, with each removal justified by a named
+  shell-injection, dynamic-loader, or guard-provenance threat. New variables
+  shall not be dropped merely because they are absent from a fixed allowlist.
 
 - **REQ-SHG-401**: The following shall be dropped unconditionally:
   `BASH_ENV`, `ENV` (non-interactive rc injection), `SHELLOPTS`,
@@ -418,8 +412,9 @@ handled by `make install-shell-guard`.
   `GCONV_PATH`, `GETCONF_DIR`, `NLSPATH`, `GLIBC_TUNABLES`, etc.) as
   enumerated in SPEC-SHELL-GUARD §8.
 
-- **REQ-SHG-402**: `PATH` shall be reset to a known-safe value
-  (`/usr/local/bin:/usr/bin:/bin`) before `execve()`.
+- **REQ-SHG-402**: The caller's `PATH` shall be preserved before `execve()`.
+  Guard-owned executables shall use absolute verified paths; PATH resetting is
+  not a substitute for absolute executable selection.
 
 - **REQ-SHG-403**: The binary shall use `secure_getenv()` when
   reading its own environment, so a crafted env var cannot influence
@@ -582,9 +577,10 @@ handled by `make install-shell-guard`.
   stripped), and connector-less controls (`tail file`, `true` after
   `;`) that must NOT match.
 
-- **REQ-SHG-803**: Env-sanitisation tests shall assert `BASH_ENV`,
-  exported functions, and `LD_*` do not survive into the child
-  environment, and `PATH` is the reset value.
+- **REQ-SHG-803**: Environment tests shall assert that caller PATH and
+  ordinary caller variables survive into the child, while `BASH_ENV`,
+  exported functions, and dynamic-loader variables explicitly listed by the
+  removal policy do not survive.
 
 - **REQ-SHG-804**: Config consistency tests in
   `src/config_consistency_tests.rs` shall verify

@@ -43,7 +43,8 @@ pub fn sealed_repo_violation(
     }
     Some(GuardError::Blocked {
         reason: format!("sealed repository (immutable): git {}", subcommand),
-        hint: "Repository is sealed (chattr +i). Operator: unseal via 'lock-repo --unseal' or run deploy-ci".into(),
+        hint: "Repository is sealed (chattr +i). Operator: use the installed release control plane"
+            .into(),
     })
 }
 

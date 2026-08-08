@@ -60,7 +60,9 @@ The core insight: if the *real* binary is mode 0700 root:root and the *guard* bi
 
 - **REQ-GGUARD-060**: The guard shall construct a minimal environment for `execve` containing only a whitelisted set of variables.
 - **REQ-GGUARD-061**: The whitelist shall include: `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `DISPLAY`, `WAYLAND_DISPLAY`, `SSH_AUTH_SOCK`, `GPG_TTY`, `PINENTRY_USER_DATA`, `SHELL`, `PWD`. (See REQ-GGUARD-069 for sudo-gated vars.)
-- **REQ-GGUARD-062**: The guard shall set `PATH` to a hardcoded value: `/usr/local/bin:/usr/bin:/bin`.
+- **REQ-GGUARD-062**: The guard shall preserve the caller's `PATH`. Guard-owned
+  executables shall be selected by absolute verified paths rather than by
+  resetting PATH.
 - **REQ-GGUARD-063**: The guard shall inject `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, `GIT_CONFIG_VALUE_0=*` to suppress git's ownership check without needing a user-level config.
 - **REQ-GGUARD-064**: The guard shall block `-c` flags with dangerous config keys: `core.hookspath`, `core.sshcommand`, `core.excludesfile`, `protocol.allow`, `protocol.ext.allow`, `safe.directory`, `core.gitproxy`, `url.insteadof`, `credential.helper`, `http.proxy`, `https.proxy`. (See REQ-GGUARD-068 for sudo-gated keys.)
 - **REQ-GGUARD-065**: The guard shall block `SKIP` and `PRE_COMMIT_ALLOW_NO_CONFIG` environment variables.

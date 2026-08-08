@@ -37,7 +37,6 @@ const SSH_ADD_BIN: &str = "/usr/bin/ssh-add";
 const KEY_ROOT: &str = "/usr/lib/workspace-guard/ssh-keys";
 const STAGE_DIR_NAME: &str = "workspace-guard";
 const AGENT_SOCK_NAME: &str = "agent.sock";
-const CHILD_PATH_ENV: &str = "/usr/bin:/bin";
 
 include!(concat!(env!("OUT_DIR"), "/git_ssh_config.rs"));
 
@@ -109,8 +108,6 @@ fn runtime_dir(uid: Uid) -> Result<PathBuf, std::io::Error> {
 fn ssh_add_probe(sock: &Path) -> AgentState {
     let out = Command::new(SSH_ADD_BIN)
         .arg("-l")
-        .env_clear()
-        .env("PATH", CHILD_PATH_ENV)
         .env("SSH_AUTH_SOCK", sock)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -128,8 +125,6 @@ fn spawn_agent(sock: &Path) -> Result<(), std::io::Error> {
     let status = Command::new(SSH_AGENT_BIN)
         .arg("-a")
         .arg(sock)
-        .env_clear()
-        .env("PATH", CHILD_PATH_ENV)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -144,8 +139,6 @@ fn spawn_agent(sock: &Path) -> Result<(), std::io::Error> {
 fn load_key_into_agent(sock: &Path, material: &[u8]) -> Result<(), std::io::Error> {
     let mut child = Command::new(SSH_ADD_BIN)
         .arg("-")
-        .env_clear()
-        .env("PATH", CHILD_PATH_ENV)
         .env("SSH_AUTH_SOCK", sock)
         .env("SSH_ASKPASS", "/bin/false")
         .env("SSH_ASKPASS_REQUIRE", "never")

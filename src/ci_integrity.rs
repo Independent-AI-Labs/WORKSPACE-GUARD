@@ -10,7 +10,7 @@
 //!   2. Deployment side: the projects/CI checkout the hooks source
 //!      live is root-owned, has exec bits matching the git index, and
 //!      is not ahead of the last-seen origin/main (behind only warns:
-//!      run deploy-ci to catch up).
+//!      use the installed release control plane to activate a verified release).
 //!
 //! All checks are implemented natively here rather than by shelling
 //! into the CI repo: a tampered verifier cannot be trusted to report
@@ -22,7 +22,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{GuardError, CHILD_PATH};
+use crate::GuardError;
+
+#[path = "ci_release_integrity.rs"]
+mod ci_release_integrity;
+use ci_release_integrity::active_release_violations;
 
 #[cfg(not(test))]
 const GIT_BIN: &str = crate::GIT_ORIGINAL_PATH;
@@ -43,12 +47,7 @@ const UNTRACKED_ALLOWLIST: [&str; 5] = [
 
 fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(GIT_BIN);
-    cmd.env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/")
-        .arg("-C")
-        .arg(dir)
-        .args(args);
+    cmd.arg("-C").arg(dir).args(args);
     crate::apply_safe_directory(&mut cmd);
     let out = crate::child::run_with_timeout(&mut cmd, None, crate::child::CHILD_TIMEOUT).ok()?;
     if !out.success() {
@@ -145,12 +144,7 @@ fn parse_ls_files(blob: &str) -> Vec<(String, String, String)> {
 
 fn blob_hash_of(path: &Path) -> Option<String> {
     let mut cmd = Command::new(GIT_BIN);
-    cmd.env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/")
-        .arg("hash-object")
-        .arg("--")
-        .arg(path);
+    cmd.arg("hash-object").arg("--").arg(path);
     crate::apply_safe_directory(&mut cmd);
     let out = crate::child::run_with_timeout(&mut cmd, None, crate::child::CHILD_TIMEOUT).ok()?;
     if !out.success() {
@@ -187,11 +181,7 @@ fn modified_tracked_files(ci_path: &Path, entries: &[(String, String)]) -> Vec<S
     }
 
     let mut cmd = Command::new(GIT_BIN);
-    cmd.env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/")
-        .arg("hash-object")
-        .arg("--stdin-paths");
+    cmd.arg("hash-object").arg("--stdin-paths");
     crate::apply_safe_directory(&mut cmd);
     let mut payload = batch_paths.join("\n").into_bytes();
     payload.push(b'\n');
@@ -259,7 +249,7 @@ fn divergence_violation(ci_path: &Path, head: &str, upstream: &str, ahead: u64) 
         ));
     }
     eprintln!(
-        "[workspace-guard] WARN: {} is behind origin/main; run: sudo make deploy-ci",
+        "[workspace-guard] WARN: {} is behind origin/main; activate a verified release with workspace-ci-control",
         ci_path.display()
     );
     None
@@ -372,14 +362,23 @@ fn deployment_violations(
 
 pub fn check_ci_integrity(toplevel: &str, wsroot: &str) -> Result<(), GuardError> {
     check_consumer_hooks(toplevel)?;
-    let ci_path = Path::new(wsroot).join(CI_DEPLOY_REL);
-    let violations = deployment_violations(&ci_path, 0, 0, true);
+    let wsroot_path = Path::new(wsroot);
+    let ci_path = wsroot_path.join(CI_DEPLOY_REL);
+    let violations = if fs::symlink_metadata(&ci_path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        active_release_violations(wsroot_path)
+    } else {
+        deployment_violations(&ci_path, 0, 0, true)
+    };
     if violations.is_empty() {
         return Ok(());
     }
     Err(GuardError::ContractFailed(format!(
         "CI integrity: deployment {} failed verification:\n  {}\n\
-         Fix: sudo --preserve-env=HOME,SSH_AUTH_SOCK make -C projects/CI deploy-ci",
+         Fix: freeze deployment and run sudo /usr/libexec/workspace-ci-control recover;\
+         do not edit projects/CI in place",
         ci_path.display(),
         violations.join("\n  ")
     )))

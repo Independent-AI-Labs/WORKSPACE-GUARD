@@ -4,8 +4,7 @@ use std::os::unix::process::ExitStatusExt;
 
 use crate::{
     args::ArgState, is_config_key_blocked, GuardError, BLOCKED_BYPASS_VARS, BLOCKED_SUBCOMMANDS,
-    CHILD_PATH, PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, SUDO_GATED_SUBCOMMANDS,
-    VALUE_TAKING_OPTS,
+    PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, SUDO_GATED_SUBCOMMANDS, VALUE_TAKING_OPTS,
 };
 
 pub fn check_blocked(
@@ -297,7 +296,6 @@ pub fn check_blocked(
 
 fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
     let mut cmd = std::process::Command::new(git_path);
-    cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
     crate::agent_identity::apply_agent_hardened_git_env(&mut cmd, false);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);

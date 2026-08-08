@@ -5,6 +5,7 @@
 //! injected into `git.original` via `GIT_CONFIG_*` overrides. SSH transport
 //! uses guard-injected `GIT_SSH_COMMAND` → `git-ssh-wrapper`.
 
+#[cfg(test)]
 use std::ffi::CString;
 use std::fs;
 use std::os::linux::fs::MetadataExt;
@@ -209,6 +210,7 @@ pub fn base_hardened_entries(identity: &AgentGitIdentity) -> Vec<(String, String
     entries
 }
 
+#[cfg(test)]
 fn push_git_config_count_env(envp: &mut Vec<CString>, entries: &[(String, String)]) {
     envp.push(
         CString::new(format!("GIT_CONFIG_COUNT={}", entries.len())).expect("GIT_CONFIG_COUNT"),
@@ -221,6 +223,7 @@ fn push_git_config_count_env(envp: &mut Vec<CString>, entries: &[(String, String
     }
 }
 
+#[cfg(test)]
 fn push_ssh_wrapper_env(envp: &mut Vec<CString>) {
     if !Path::new(GIT_SSH_WRAPPER_PATH).is_file() {
         return;
@@ -249,6 +252,7 @@ fn ssh_wrapper_env_pairs() -> Vec<(String, String)> {
 /// Privileged (`euid == 0`) callers keep normal global/system config so
 /// operators may use `sudo git config`. Non-privileged agents get nulled
 /// global/system config plus per-user injected identity and SSH wrapper.
+#[cfg(test)]
 pub fn push_agent_hardened_git_env(envp: &mut Vec<CString>, privileged: bool) {
     if privileged {
         crate::push_safe_directory_env(envp);

@@ -680,15 +680,14 @@ line2" ]
 
 # ---------- environment hygiene ----------
 
-@test "shell-guard: PATH is reset to the system default" {
+@test "shell-guard: caller PATH is preserved" {
     require_root_guard
     mkdir -p "$TEST_TMPDIR/fakebin"
     printf '#!/bin/sh\necho fake-ls\n' > "$TEST_TMPDIR/fakebin/ls"
     chmod +x "$TEST_TMPDIR/fakebin/ls"
     run env PATH="$TEST_TMPDIR/fakebin:/usr/bin:/bin" "$BATS_FILE_TMPDIR/shg" -c 'command -v ls'
     [ "$status" -eq 0 ]
-    [[ "$output" != *"fakebin"* ]]
-    [[ "$output" == *"/bin/ls" ]]
+    [[ "$output" == *"fakebin/ls"* ]]
 }
 
 @test "shell-guard: LD_PRELOAD is stripped from the child environment" {
@@ -701,12 +700,12 @@ line2" ]
     [[ "$output" != *"lp=/tmp/shg-evil.so"* ]]
 }
 
-@test "shell-guard: allow-listed prefixes survive, random vars do not" {
+@test "shell-guard: caller variables survive" {
     require_root_guard
     run env LC_SHGTEST=1 WORKSPACE_TAG=abc SHG_RANDOM_VAR=no "$BATS_FILE_TMPDIR/shg" \
         -c 'echo "$LC_SHGTEST:$WORKSPACE_TAG:${SHG_RANDOM_VAR:-unset}"'
     [ "$status" -eq 0 ]
-    [ "$output" = "1:abc:unset" ]
+    [ "$output" = "1:abc:no" ]
 }
 
 @test "shell-guard: HOME survives the environment filter" {
@@ -716,17 +715,17 @@ line2" ]
     [[ "$output" == *"home=/root"* ]]
 }
 
-@test "shell-guard: TMPDIR kept only when absolute and uid-owned" {
+@test "shell-guard: TMPDIR is preserved as caller state" {
     require_root_guard
     run env TMPDIR="$TEST_TMPDIR" "$BATS_FILE_TMPDIR/shg" -c 'echo "t=${TMPDIR:-unset}"'
     [ "$status" -eq 0 ]
     [ "$output" = "t=$TEST_TMPDIR" ]
     run env TMPDIR=relative "$BATS_FILE_TMPDIR/shg" -c 'echo "t=${TMPDIR:-unset}"'
     [ "$status" -eq 0 ]
-    [ "$output" = "t=unset" ]
+    [ "$output" = "t=relative" ]
     run env TMPDIR=/nonexistent-shg "$BATS_FILE_TMPDIR/shg" -c 'echo "t=${TMPDIR:-unset}"'
     [ "$status" -eq 0 ]
-    [ "$output" = "t=unset" ]
+    [ "$output" = "t=/nonexistent-shg" ]
 }
 
 # ---------- resource limits ----------

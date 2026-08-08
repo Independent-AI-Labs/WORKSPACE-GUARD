@@ -2,7 +2,7 @@
 //! no workspace markers but points at a provisioned host is a workspace
 //! clone living outside the gated tree and must not commit or push.
 
-use crate::{CHILD_PATH, GIT_SSH_ALLOWED_HOSTS};
+use crate::GIT_SSH_ALLOWED_HOSTS;
 
 #[cfg(not(test))]
 const REMOTE_GIT_BIN: &str = crate::GIT_ORIGINAL_PATH;
@@ -32,16 +32,13 @@ pub fn remote_url_host(url: &str) -> Option<String> {
 
 fn remote_urls(toplevel: &str) -> Vec<String> {
     let mut cmd = std::process::Command::new(REMOTE_GIT_BIN);
-    cmd.env_clear()
-        .env("PATH", CHILD_PATH)
-        .env("HOME", "/")
-        .args([
-            "-C",
-            toplevel,
-            "config",
-            "--get-regexp",
-            "^remote\\..*\\.url$",
-        ]);
+    cmd.args([
+        "-C",
+        toplevel,
+        "config",
+        "--get-regexp",
+        "^remote\\..*\\.url$",
+    ]);
     crate::apply_safe_directory(&mut cmd);
     let out = match cmd.output() {
         Ok(o) if o.status.success() => o.stdout,

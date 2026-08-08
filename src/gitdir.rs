@@ -84,7 +84,7 @@ use std::process::Command;
 
 use nix::unistd::{chown, Gid, Uid};
 
-use crate::{CHILD_PATH, GIT_ORIGINAL_PATH};
+use crate::GIT_ORIGINAL_PATH;
 
 /// Mode for regular files: world-readable, root-writable only.
 const FILE_MODE: u32 = 0o644;
@@ -306,7 +306,6 @@ fn lock_tree(path: &Path, git_dir: &Path) {
 /// guard invocation from main.rs; both lock passes reuse the result.
 pub fn resolve_git_dir(argv_os: &[OsString]) -> Option<PathBuf> {
     let mut cmd = Command::new(GIT_ORIGINAL_PATH);
-    cmd.env_clear().env("PATH", CHILD_PATH).env("HOME", "/");
     crate::agent_identity::apply_agent_hardened_git_env(&mut cmd, false);
     // Preserve repo-location env overrides; env_clear would drop them and
     // the lock would resolve the cwd repo instead of the intended one.
