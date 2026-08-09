@@ -27,13 +27,15 @@ use crate::GuardError;
 #[path = "ci_release_integrity.rs"]
 mod ci_release_integrity;
 use ci_release_integrity::active_release_violations;
+#[path = "ci_hook_identity.rs"]
+mod ci_hook_identity;
 
 #[cfg(not(test))]
 const GIT_BIN: &str = crate::GIT_ORIGINAL_PATH;
 #[cfg(test)]
 const GIT_BIN: &str = "git";
 
-const REQUIRED_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
+pub(super) const REQUIRED_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
 const HOOK_MARKER_NEEDLES: [&str; 2] = ["AUTO-GENERATED", "generate-hooks"];
 const MAX_LISTED_VIOLATIONS: usize = 10;
 const CI_DEPLOY_REL: &str = "projects/CI";
@@ -45,7 +47,7 @@ const UNTRACKED_ALLOWLIST: [&str; 5] = [
     ".pytest_cache/",
 ];
 
-fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+pub(super) fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(GIT_BIN);
     cmd.arg("-C").arg(dir).args(args);
     crate::apply_safe_directory(&mut cmd);
@@ -129,7 +131,6 @@ fn check_consumer_hooks(toplevel: &str) -> Result<(), GuardError> {
         violations.join("\n  ")
     )))
 }
-
 fn parse_ls_files(blob: &str) -> Vec<(String, String, String)> {
     blob.split('\0')
         .filter_map(|rec| {
@@ -372,6 +373,13 @@ pub fn check_ci_integrity(toplevel: &str, wsroot: &str) -> Result<(), GuardError
     } else {
         deployment_violations(&ci_path, 0, 0, true)
     };
+    if violations.is_empty()
+        && fs::symlink_metadata(&ci_path)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false)
+    {
+        ci_hook_identity::check_consumer_hook_identity(toplevel, wsroot_path)?;
+    }
     if violations.is_empty() {
         return Ok(());
     }

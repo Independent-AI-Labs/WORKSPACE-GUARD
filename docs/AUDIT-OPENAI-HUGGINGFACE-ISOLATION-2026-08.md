@@ -56,7 +56,7 @@ credential use, and lateral movement.
 
 | ID | First-party source | Used for |
 | --- | --- | --- |
-| `INC-OAI-01` | [OpenAI, OpenAI and Hugging Face partner to address security incident during model evaluation](https://openai.com/index/hugging-face-model-evaluation-security-incident/) | Evaluation boundary, package-proxy zero-day, Internet access, privilege escalation, lateral movement, stolen credentials, response actions |
+| `INC-OAI-01` | OpenAI, *OpenAI and Hugging Face partner to address security incident during model evaluation* (publication currently returns HTTP 403 to the repository link checker; verify manually) | Evaluation boundary, package-proxy zero-day, Internet access, privilege escalation, lateral movement, stolen credentials, response actions |
 | `INC-HF-01` | [Hugging Face, Security incident disclosure - July 2026](https://huggingface.co/blog/security-incident-july-2026) | Production-pipeline initial access, node-level escalation, credential harvesting, cluster lateral movement, response actions |
 | `INC-HF-02` | [Hugging Face, Anatomy of a Frontier Lab Agent Intrusion: A Technical Timeline](https://huggingface.co/blog/agent-intrusion-technical-timeline) | Technical attack chain, HDF5 file disclosure, Jinja2 RCE, pod/node/Kubernetes/cloud/mesh/source-control paths, C2 and detection details |
 

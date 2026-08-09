@@ -3,6 +3,7 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub fn active_release_violations(wsroot: &Path) -> Vec<String> {
     let mut violations = Vec::new();
@@ -82,6 +83,9 @@ pub fn active_release_violations(wsroot: &Path) -> Vec<String> {
             release.display()
         ));
     }
+    if let Err(error) = verify_immutable_tree(&release) {
+        violations.push(format!("{}: {error}", release.display()));
+    }
     let id = release
         .file_name()
         .and_then(|name| name.to_str())
@@ -120,6 +124,31 @@ pub fn active_release_violations(wsroot: &Path) -> Vec<String> {
             "{}: manifest identity mismatch",
             manifest_path.display()
         ));
+    }
+    if let (Some(generation_id), Some(generation_digest)) = (
+        manifest.get("generation_id").and_then(|v| v.as_str()),
+        manifest
+            .get("generation_digest")
+            .or_else(|| manifest.get("tree_digest"))
+            .and_then(|v| v.as_str()),
+    ) {
+        if generation_id != format!("sha256-{generation_digest}") {
+            violations.push(format!(
+                "{}: generation identity is not bound to its digest",
+                manifest_path.display()
+            ));
+        }
+    }
+    match manifest.get("manifest_digest").and_then(|v| v.as_str()) {
+        Some(expected) if manifest_binding_digest(&manifest).as_deref() == Some(expected) => {}
+        Some(_) => violations.push(format!(
+            "{}: manifest digest binding mismatch",
+            manifest_path.display()
+        )),
+        None => violations.push(format!(
+            "{}: manifest digest is missing",
+            manifest_path.display()
+        )),
     }
     if manifest
         .get("tree_digest")
@@ -195,6 +224,28 @@ fn release_tree_digest(root: &Path) -> Result<String, String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+fn manifest_binding_digest(manifest: &serde_json::Value) -> Option<String> {
+    let binding = format!(
+        "schema={}\ngeneration_id={}\nsource_repository={}\nsource_commit={}\nsource_tree={}\ngeneration_digest={}\nbuilder_id={}\nvalidator_n={}\nvalidator_n_plus_1={}\nrequired_hooks_digest={}\nhook_abi={}\nprepared_at={}\n",
+        manifest.get("schema")?.as_u64()?,
+        manifest.get("generation_id")?.as_str()?,
+        manifest.get("source_repository")?.as_str()?,
+        manifest.get("source_commit")?.as_str()?,
+        manifest.get("source_tree")?.as_str()?,
+        manifest
+            .get("generation_digest")
+            .or_else(|| manifest.get("tree_digest"))?
+            .as_str()?,
+        manifest.get("builder_id")?.as_str()?,
+        manifest.get("validator_n")?.as_str()?,
+        manifest.get("validator_n_plus_1")?.as_str()?,
+        manifest.get("required_hooks_digest")?.as_str()?,
+        manifest.get("hook_abi")?.as_u64()?,
+        manifest.get("prepared_at")?.as_u64()?,
+    );
+    Some(format!("{:x}", Sha256::digest(binding.as_bytes())))
+}
+
 fn collect_release_files(root: &Path, path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     let mut entries = fs::read_dir(path)
         .map_err(|error| error.to_string())?
@@ -204,6 +255,18 @@ fn collect_release_files(root: &Path, path: &Path, files: &mut Vec<PathBuf>) -> 
     for entry in entries {
         let entry_path = entry.path();
         let metadata = fs::symlink_metadata(&entry_path).map_err(|error| error.to_string())?;
+        if metadata.uid() != 0 || metadata.gid() != 0 {
+            return Err(format!("non-root-owned entry: {}", entry_path.display()));
+        }
+        if metadata.permissions().mode() & 0o022 != 0 {
+            return Err(format!("writable release entry: {}", entry_path.display()));
+        }
+        if metadata.is_file() && metadata.nlink() != 1 {
+            return Err(format!(
+                "hard-linked release entry: {}",
+                entry_path.display()
+            ));
+        }
         if metadata.file_type().is_symlink() {
             return Err(format!("symlink in release: {}", entry_path.display()));
         }
@@ -221,6 +284,24 @@ fn collect_release_files(root: &Path, path: &Path, files: &mut Vec<PathBuf>) -> 
                 "unsupported file in release: {}",
                 entry_path.display()
             ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_immutable_tree(root: &Path) -> Result<(), String> {
+    let output = Command::new("/usr/bin/lsattr")
+        .args(["-R", "-d", "--"])
+        .arg(root)
+        .output()
+        .map_err(|error| format!("cannot inspect immutable flags: {error}"))?;
+    if !output.status.success() {
+        return Err("lsattr failed while checking immutable flags".into());
+    }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let flags = line.split_whitespace().next().unwrap_or_default();
+        if !flags.contains('i') {
+            return Err(format!("release entry is not immutable: {line}"));
         }
     }
     Ok(())

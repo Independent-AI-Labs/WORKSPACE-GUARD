@@ -17,8 +17,8 @@ the agent-writable source checkout as the promotion mechanism.
 Create `/etc/workspace-ci/control.yaml` as root-owned mode `0600`:
 
 ```yaml
-deployment_root: ${WORKSPACE_ROOT}/projects
-release_root: ${WORKSPACE_ROOT}/projects/CI.releases
+deployment_root: /path/to/workspace/projects
+release_root: /path/to/workspace/projects/CI.releases
 repository_cache: /var/lib/workspace-ci-control/repository.git
 upstream_repository: git@github.com:Independent-AI-Labs/WORKSPACE-CI.git
 upstream_ref: refs/heads/main
@@ -32,20 +32,22 @@ hook_abi: 1
 
 The control plane rejects missing or insecure configuration and refuses
 environment-variable or command-line overrides of these values. It fetches the
-exact upstream revision, validates it without executing candidate helpers as
-root, seals a release, and atomically replaces the `CI` symlink.
+exact upstream revision, runs candidate validators as uid/gid `65534` with a
+scrubbed environment and timeout, seals a release, and atomically replaces the
+`CI` symlink. Health and hook-install tools are separate root-owned binaries.
 
 ## First Migration
 
 Before activation, the tool must preserve the existing deployment exactly:
 
 1. Create a prepared release outside `CI`.
-2. Create `CI.next` pointing to that release.
-3. Atomically exchange `CI` and `CI.next`.
-4. Rename the exchanged original directory to `CI.backup`.
-5. Verify and seal `CI.backup`.
+2. Copy the existing `CI` directory to `CI.backup` and seal the copy.
+3. Create `CI.next` pointing to the prepared release.
+4. Atomically exchange `CI` and `CI.next`.
+5. Retain the exchanged original at `CI.next` until health and hooks pass.
 
-If activation or health checks fail, atomically exchange `CI` and `CI.backup`.
+If activation or health checks fail, atomically exchange `CI` and `CI.next`
+back. `CI.backup` remains the emergency recovery copy.
 Never copy files over the live `CI` path.
 
 ## Normal Operations
