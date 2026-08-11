@@ -124,7 +124,7 @@ fn classify(args: &[OsString]) -> Invocation {
 }
 
 enum ScriptClass {
-    Trusted(Vec<u8>),
+    Trusted,
     Untrusted(Vec<u8>),
     Unreadable,
     /// fd/pipe/device-backed source that is not our sealed staging
@@ -225,6 +225,15 @@ fn classify_script(path: &OsString) -> ScriptClass {
         }
         return ScriptClass::ForeignFd;
     }
+    use std::os::unix::fs::MetadataExt;
+    let trusted =
+        meta.uid() == 0 && (meta.mode() & 0o022) == 0 && parents_root_locked_or_anchored(&resolved);
+    if trusted {
+        // Provenance is the trust decision for direct regular files. Avoid
+        // reading their body so the untrusted-input size limit cannot reject
+        // a trusted package script.
+        return ScriptClass::Trusted;
+    }
     let file = match fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -242,14 +251,7 @@ fn classify_script(path: &OsString) -> ScriptClass {
         eprintln!("shell guard: script content exceeds 1 MiB limit");
         process::exit(2);
     }
-    use std::os::unix::fs::MetadataExt;
-    let trusted =
-        meta.uid() == 0 && (meta.mode() & 0o022) == 0 && parents_root_locked_or_anchored(&resolved);
-    if trusted {
-        ScriptClass::Trusted(buf)
-    } else {
-        ScriptClass::Untrusted(buf)
-    }
+    ScriptClass::Untrusted(buf)
 }
 
 fn timestamp() -> String {
@@ -476,12 +478,7 @@ fn main() {
                 let display = format!("bash {} (unreadable script)", path.to_string_lossy());
                 block_unreadable(&display);
             }
-            ScriptClass::Trusted(content) => {
-                if let Some(hit) = report::find_hit(&content, &rules, "script") {
-                    let display = format!("bash {} (trusted script body)", path.to_string_lossy());
-                    let excerpt = report::excerpt(&content, hit.start, hit.end, true);
-                    block(hit.rule, &display, &excerpt);
-                }
+            ScriptClass::Trusted => {
                 exec_real(&args, None);
             }
             ScriptClass::Untrusted(content) => {

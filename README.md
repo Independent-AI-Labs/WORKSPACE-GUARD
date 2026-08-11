@@ -156,14 +156,15 @@ Invariants enforced by the current code:
 
 Shell-guard invariants:
 
-- Every non-root `-c` string and every script body is scanned against a
-  compiled-in regex pattern table; blocks exit 1, oversize/null-byte exit 2.
+- Every non-root `-c` string and every untrusted script body is scanned against
+  a compiled-in regex pattern table; blocks exit 1, oversize/null-byte exit 2.
 - Untrusted scripts execute the exact scanned bytes via a sealed memfd
   (`MFD_ALLOW_SEALING|MFD_EXEC`, `F_ADD_SEALS` full set), closing the
   scan-then-exec TOCTOU race.
-- Trusted tier (script owned by root under an immutable-anchored path) is
-  blocked with the same policy; root maintenance that needs a forbidden
-  idiom must use `/bin/bash.real` directly.
+- Trusted tier (a direct regular script owned by root under an
+  immutable-anchored path) is executed by path without raw-text policy
+  scanning; its provenance is the trust decision. Root maintenance that
+  needs a forbidden command-string idiom must use `/bin/bash.real` directly.
 - Root invocations always fail closed (exit 3): the guard only operates in
   a file-capability context (`AT_SECURE != 0`).
 - Stock bash is sealed as `/bin/bash.real` (0700 root:root, `chattr +i`)

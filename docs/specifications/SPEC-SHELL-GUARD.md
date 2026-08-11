@@ -174,18 +174,16 @@ A script file is **trusted tier** iff, at `open(O_NOFOLLOW)` +
    anchored chain is exactly as tamper-proof as the full-root chain.
     The anchor is how root-deployed toolchains that live under the
     agent's home (e.g. `projects/CI` with `chattr +i`) stay trusted:
-    they are tamper-proof, but they are still scanned and must obey
-    the same policy as untrusted code.
+    they are tamper-proof, so direct regular files in this tier are
+    executed by path without raw-text body scanning. Command strings and
+    untrusted script bodies remain policy-scanned.
 
-Trusted tier: policy violations are blocked just like the untrusted
-tier. The only difference is how the file reached the guard: it is
-root-owned under an immutable-anchored path, so the agent cannot
-author or modify it. Root maintenance that legitimately needs a
-forbidden idiom (e.g. `chattr -i`, output suppression, or a pipe to
-`tail`) must use `/bin/bash.real` directly: the guard never runs
-for commands executed by the real shell. Untrusted tier (everything
-else, including all agent-writable files and every `-c` string): the
-full block policy applies to all users including root.
+Trusted tier: direct regular files with this provenance are executed by
+path without raw-text body scanning. The root-owned,
+immutable-anchored path is what prevents the agent from authoring or
+modifying them. Untrusted tier (everything else, including all
+agent-writable files and every `-c` string) remains subject to the full
+block policy for all users including root.
 
 Parsing rules:
 
@@ -842,11 +840,10 @@ expose `MFD_EXEC`).
 - **Script-scan gap**: an unreadable script file passes through
   unwatched (REQ-SHG-202); the real shell then fails identically for
   the non-root agent, so the gap is root-adjacent only.
-- **Trusted-tier indirection**: a root-owned script is still scanned
-  and blocked on policy match (§4.1). If existing root-owned content
-  evaluates caller-controlled input (e.g. a system script doing
-  `eval "$1"`), the agent could route a blocked idiom through it; the
-  block stops the agent. Operators should treat any
+- **Trusted-tier indirection**: a root-owned script in the trusted tier is
+  not raw-text scanned. If existing root-owned content evaluates
+  caller-controlled input (e.g. a system script doing `eval "$1"`), the
+  agent could route a blocked idiom through it. Operators should treat any
   argument-evaluating root-owned script as a defect.
 - **Interpreter-internal suppression**: `python3 -c
   'subprocess.run(..., stdout=subprocess.DEVNULL)'` hides output

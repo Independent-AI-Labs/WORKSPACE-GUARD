@@ -104,6 +104,17 @@ pub fn parse_spec(arg: &str) -> Result<Spec, String> {
             } else if val.starts_with('[') || val.ends_with(']') {
                 Err(format!("{name}: malformed list brackets"))
             } else {
+                if !val.starts_with(['"', '\''])
+                    && val.split_whitespace().skip(1).any(|token| {
+                        token
+                            .split_once('=')
+                            .is_some_and(|(field, _)| valid_name(field))
+                    })
+                {
+                    return Err(format!(
+                        "{name}: embedded field assignment; separate field specs with ';'"
+                    ));
+                }
                 Ok(Spec::Scalar {
                     name: name.to_string(),
                     value: typed_scalar(val, name)?,

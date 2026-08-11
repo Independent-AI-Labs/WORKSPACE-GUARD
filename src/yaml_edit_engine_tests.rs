@@ -89,6 +89,16 @@ fn empty_and_structured_values_rejected() {
 }
 
 #[test]
+fn embedded_field_assignment_rejected() {
+    assert!(engine::parse_spec("paths=docs/audit patterns=.*").is_err());
+}
+
+#[test]
+fn quoted_scalar_with_assignment_text_is_allowed() {
+    assert!(engine::parse_spec("paths=\"docs/audit patterns=.*\"").is_ok());
+}
+
+#[test]
 fn bare_spec_for_scalar_lists() {
     let specs = engine::parse_specs(&["README.md".to_string()]).expect("specs");
     let entry = engine::entry_from_specs(&specs).expect("entry");

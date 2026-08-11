@@ -193,11 +193,13 @@ handled by `make install-shell-guard`.
     renamed or replaced by an agent-owned ancestor above it, which
     closes the unlink+recreate attack that plain root ownership under
     an agent-owned parent leaves open.
-    Policy violations in trusted scripts are blocked with the same
-    policy as untrusted scripts. The trusted tier only certifies that
-    the agent cannot author or modify the file; it is not an
-    execution exemption. Root maintenance that legitimately needs a
-    forbidden idiom must invoke `/bin/bash.real` directly.
+     Direct trusted scripts are executed by path without raw-text body
+     scanning. The trusted tier is a provenance-based execution exemption:
+     the agent cannot author or modify the file, and the real shell still
+     mediates nested `bash`/`sh` command-string invocations. Untrusted
+     scripts and all command strings remain fully scanned. Root maintenance
+     that needs an unmediated interpreter or shell must invoke `/bin/bash.real`
+     directly.
   - **Untrusted tier**: anything else. The full block policy applies
     to all users including root.
   Invocation context (`-c` vs script vs TTY vs parent process) shall

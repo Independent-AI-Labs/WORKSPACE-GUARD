@@ -1,4 +1,5 @@
 use super::*;
+use std::os::unix::fs::PermissionsExt;
 
 #[test]
 fn excerpt_marks_matching_line_with_context() {
@@ -297,4 +298,36 @@ fn system_paths_pass_anchored_check() {
     if Path::new("/etc/hostname").exists() {
         assert!(parents_root_locked_or_anchored(Path::new("/etc/hostname")));
     }
+}
+
+#[test]
+fn trusted_regular_script_with_alternate_shell_text_is_classified_trusted() {
+    if getuid().as_raw() != 0 {
+        return;
+    }
+    let dir = PathBuf::from(format!("/root/shg-trusted-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = dir.join("package-script.sh");
+    fs::write(&path, b"#!/bin/sh\nprintf '%s\\n' dash\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    let class = classify_script(&path.into_os_string());
+    assert!(matches!(class, ScriptClass::Trusted));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn trusted_regular_script_over_text_limit_is_classified_trusted() {
+    if getuid().as_raw() != 0 {
+        return;
+    }
+    let dir = PathBuf::from(format!("/root/shg-trusted-large-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = dir.join("package-script.sh");
+    fs::write(&path, vec![b'x'; MAX_TEXT + 1]).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    let class = classify_script(&path.into_os_string());
+    assert!(matches!(class, ScriptClass::Trusted));
+    fs::remove_dir_all(&dir).ok();
 }

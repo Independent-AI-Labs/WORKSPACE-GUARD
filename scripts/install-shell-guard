@@ -49,7 +49,16 @@ SETCAP="${SHG_SETCAP:-/usr/sbin/setcap}"
 GETCAP="${SHG_GETCAP:-/usr/sbin/getcap}"
 
 SHG_ROOT="${SHG_ROOT:-}"
-GUARD_BIN="${SHG_GUARD_BIN:-$REPO_ROOT/target/release/workspace-shell-guard}"
+if [[ -n "${SHG_GUARD_BIN:-}" ]]; then
+    GUARD_BIN="$SHG_GUARD_BIN"
+elif [[ -x "$REPO_ROOT/target/agent/release/workspace-shell-guard" ]] \
+    && { [[ ! -e "$REPO_ROOT/target/release/workspace-shell-guard" ]] \
+        || "$REPO_ROOT/target/agent/release/workspace-shell-guard" -nt \
+        "$REPO_ROOT/target/release/workspace-shell-guard"; }; then
+    GUARD_BIN="$REPO_ROOT/target/agent/release/workspace-shell-guard"
+else
+    GUARD_BIN="$REPO_ROOT/target/release/workspace-shell-guard"
+fi
 
 DRY_RUN=0
 while [[ $# -gt 0 ]]; do

@@ -91,8 +91,9 @@ payloads, `exec`, `eval`, and equivalent inline options for every interpreter.
 
 Evidence:
 
-- `src/shell_guard.rs:482-495` scans trusted and untrusted scripts with
-  `is_script = true`.
+- `src/shell_guard.rs` scans untrusted scripts, while trusted direct regular
+  scripts are classified by provenance and executed by path without body
+  scanning.
 - `config/shell_guard_policy.yaml:67-70` sets `alt-interp` to
   `scope: command`.
 - `scripts/lib/host-provision-admin.sh:183-200` executes Perl from a script

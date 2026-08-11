@@ -39,6 +39,11 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     assert_output --partial "--dry-run"
 }
 
+@test "shell-guard-install: prefers newer cargo-configured release binary" {
+    grep -q 'target/agent/release/workspace-shell-guard' "$INSTALL"
+    grep -q 'target/release/workspace-shell-guard' "$INSTALL"
+}
+
 @test "shell-guard-install: unknown arg exits 2" {
     run bash "$INSTALL" --bogus
     assert_failure

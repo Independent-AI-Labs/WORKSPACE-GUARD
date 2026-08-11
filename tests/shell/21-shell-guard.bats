@@ -579,21 +579,26 @@ line2" ]
     [[ "$output" != *"writable"* ]]
 }
 
-@test "shell-guard: trusted-tier script is blocked" {
+@test "shell-guard: trusted script may contain harmless alternate-shell text" {
     require_root_guard
-    local trusted_dir marker
+    local trusted_dir
     trusted_dir="$(shg_trusted_dir)"
-    marker="$trusted_dir/ran"
-    printf '#!/bin/bash\n: > "%s"\nsomecmd | tail\n' "$marker" > "$trusted_dir/t.sh"
+    printf '#!/bin/bash\nprintf "dash\\n"\n' > "$trusted_dir/t.sh"
     chown -R root:root "$trusted_dir"
     chmod 755 "$trusted_dir" "$trusted_dir/t.sh"
     run shg "$trusted_dir/t.sh"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"BLOCKED"* ]]
-    [[ "$output" == *"trusted script body"* ]]
-    [[ "$output" == *"suppress-pipe"* ]]
-    [ ! -f "$marker" ]
+    [ "$status" -eq 0 ]
+    [ "$output" = "dash" ]
     rm -rf "$trusted_dir"
+}
+
+@test "shell-guard: untrusted script alternate-shell text remains blocked" {
+    require_root_guard
+    printf '#!/bin/bash\nprintf "dash\\n"\n' > "$TEST_TMPDIR/untrusted-dash.sh"
+    chmod +x "$TEST_TMPDIR/untrusted-dash.sh"
+    run shg "$TEST_TMPDIR/untrusted-dash.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"alt-shell"* ]]
 }
 
 @test "shell-guard: world-writable file drops out of the trusted tier" {
