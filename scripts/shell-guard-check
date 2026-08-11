@@ -66,10 +66,7 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 GUARD_BIN="${SHG_GUARD_BIN:-$REPO_ROOT/target/release/workspace-shell-guard}"
 if [[ -z "${SHG_GUARD_BIN:-}" ]] \
-    && [[ -x "$REPO_ROOT/target/agent/release/workspace-shell-guard" ]] \
-    && { [[ ! -e "$REPO_ROOT/target/release/workspace-shell-guard" ]] \
-        || "$REPO_ROOT/target/agent/release/workspace-shell-guard" -nt \
-        "$REPO_ROOT/target/release/workspace-shell-guard"; }; then
+    && [[ -x "$REPO_ROOT/target/agent/release/workspace-shell-guard" ]]; then
     GUARD_BIN="$REPO_ROOT/target/agent/release/workspace-shell-guard"
 fi
 
