@@ -10,12 +10,8 @@ project:
   description: 'Rust SUID git-guard; boot-layout inherits from CI'
   # Boot-layout inheritance: project-root paths whose $CI_BOOT_NAME/bin
   # should be prepended to PATH via ci_resolve_boot_path(). Entries are
-  # project roots (e.g. '../CI'), NOT boot-dir paths. The resolver
   # appends /$CI_BOOT_NAME/bin at runtime → platform-aware.
   # GUARD inherits CI's boot dir for gitleaks and other tools.
-  inherited_boot_dirs:
-    - '../CI'
-
 language: 'rust'
 layer: 'library'
 

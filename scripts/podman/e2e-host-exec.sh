@@ -13,7 +13,7 @@ _SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 # shellcheck source=scripts/podman/lib/host-provision-e2e.sh
 source "$_SCRIPT_DIR/lib/host-provision-e2e.sh" || exit 1
 
-_CI_ROOT="${CI_ROOT:-/projects/CI}"
+_CI_ROOT="${CI_ROOT:-/projects/WORKSPACE-CI}"
 _GUARD_ROOT="${GUARD_ROOT:-$(hp_e2e_guard_root)}"
 _TEST_HOST="workspace-guard-test"
 

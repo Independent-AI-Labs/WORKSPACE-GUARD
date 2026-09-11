@@ -1,1 +1,16 @@
-exceptions: []
+exceptions:
+  - path: ^tests/shell/lib/fake_repo\.bash$
+    rationale: Test fixture builder for guard integration tests; copier diagnostics intentionally discarded when staging policy fixtures.
+    owner: workspace-guard
+    review_date: '2026-09-10'
+    removal: Remove when the fixture surfaces copier diagnostics instead of discarding them.
+  - path: ^tests/shell/lib/harness\.bash$
+    rationale: Test harness command-existence probes; probe output is intentionally discarded, only the exit status is consumed.
+    owner: workspace-guard
+    review_date: '2026-09-10'
+    removal: Remove when the probes log instead of discarding output.
+  - path: ^tests/shell/stubs/dpkg-divert$
+    rationale: Test stub mirroring dpkg-divert move semantics; mv diagnostics intentionally discarded on exercised paths.
+    owner: workspace-guard
+    review_date: '2026-09-10'
+    removal: Remove when the stub surfaces mv diagnostics.

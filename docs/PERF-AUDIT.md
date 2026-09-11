@@ -37,9 +37,7 @@ not a mutex. It is a recursive ownership and mode sweep:
    `exemption_files.yaml`), so the worktree is walked up to 7 more
    times. Each candidate file is checked against the unseal list with a
    linear `Vec::contains` (src/gitdir.rs:203).
-4. Walks the worktree again for the `.boot*` directory glob
-   (src/gitdir.rs:228-255).
-5. Stats and locks `.gitmodules` (src/gitdir.rs:118-124).
+4. Stats and locks `.gitmodules` (src/gitdir.rs:118-124).
 
 ### 1.2 It runs TWICE per invocation
 
@@ -56,8 +54,8 @@ under `.git/`:
 - 2 spawned `git rev-parse` processes.
 - 2 full `.git/` recursive walks (2G stats, plus chown/chmod per
   drifted file).
-- Up to 16 full worktree walks (2 passes x (7 glob patterns + 1 tree
-  glob)), each `O(F)` with a `symlink_metadata` per entry.
+- Up to 14 full worktree walks (2 passes x 7 glob patterns), each
+  `O(F)` with a `symlink_metadata` per entry.
 
 `git status` itself is one process. The wrapper adds up to 18 tree
 traversals around it.
@@ -194,11 +192,11 @@ F11. Redundant git subprocesses in block checks: `rev-parse
     branch, toplevel, and remotes once per invocation and share.
 
 F12. CI silent-swallow checker spawns one Python interpreter per
-    tracked file. projects/CI/lib/checks_silent.sh:107-166. Fix: batch
+    tracked file. /opt/workspace-ci/lib/checks_silent.sh:107-166. Fix: batch
     N files per Python invocation; keep the per-file AST semantics.
 
 F13. CI secrets scan invokes `gitleaks` once per file via xargs -P4.
-    projects/CI/lib/checks_secrets.sh:52-54. Fix: one `gitleaks dir`
+    /opt/workspace-ci/lib/checks_secrets.sh:52-54. Fix: one `gitleaks dir`
     run per repo (or per top-level directory).
 
 F14. Regex reject rules are recompiled with `regex::Regex::new` on
@@ -233,10 +231,10 @@ F20. build.rs deserializes all YAML configs every build, including the
     `format!` in loops. build.rs:163-169, 244-254, 404-481. Fix: single
     buffered writer; parse cost is build-time only, low priority.
 
-F21. Release profile uses `opt-level = "z"` + LTO + codegen-units=1.
-    Cargo.toml:7-12. The guard runs per git call; size optimization can
-    cost runtime speed. Fix: benchmark `opt-level = 3` for the wrapper
-    crate; keep LTO.
+F21. Release profile is normatively fixed at `opt-level = "z"` + LTO +
+    codegen-units=1 by REQ-GGUARD-120/171. Runtime optimization experiments
+    must not silently change the privileged build profile; a future profile
+    change requires an explicit requirement/security review.
 
 F22. (HISTORICAL: `config-lock.sh` has since been deleted and replaced
 by the sudo-gated `workspace-yaml-edit` binary; see SPEC-YAML-EDIT.)
@@ -374,9 +372,9 @@ F20/F21/F26/F27/F28 implementation notes:
   String buffer per generated file and does a single fs::write per
   file; the per-emit format! temporaries are build-time-only
   allocations and the audit itself ranks this low priority. No change.
-- F21: release profile switched from opt-level = "z" to opt-level = 3
-  (LTO kept). Measured: 321 ms vs 342 ms for 500 guard invocations
-  (~6% faster per call), binary grows 505 KB -> 558 KB.
+- F21: the historical `opt-level = 3` experiment measured 321 ms versus 342 ms
+  for 500 guard invocations (~6% faster; 558 KB versus 505 KB), but is superseded
+  by REQ-GGUARD-120/171's reviewed `opt-level = "z"` privileged profile.
 - F26: install-lock-runtime batches lock-surface metadata (one stat /
   grep -l / sha256sum / lsattr / dpkg-divert --list spawn each for the
   whole surface instead of per-binary probes) and runs ONE warm exec

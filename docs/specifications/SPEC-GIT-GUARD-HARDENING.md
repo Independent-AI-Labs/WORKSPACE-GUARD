@@ -1,4 +1,10 @@
-# Specification: Git Guard System Hardening
+# Specification: Git Guard System Hardening (Superseded Installation Sections)
+
+**Status note:** Sections describing `pre-req`, SUID installation, or legacy
+PATH-wrapper migration are superseded by
+[SPEC-GIT-GUARD-DEPLOYMENT](SPEC-GIT-GUARD-DEPLOYMENT.md). The capability flow
+and policy-file hardening sections remain applicable. Superseded installation
+text is retained only as historical design context and is not normative.
 
 **Date:** 2026-05-18
 **Status:** DRAFT
@@ -22,7 +28,7 @@ pre-req.sh main flow:
          ├── Notify user about capability installation
          ├── Build Rust binary
          ├── Relocate real git
-         ├── Install capability guard (setcap: cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep)
+         ├── Install capability guard (setcap: cap_setpcap,cap_chown,cap_dac_override,cap_fowner+ep)
          └── Verify + rollback on failure
 ```
 
@@ -181,21 +187,17 @@ done
 
 ### 11.6 Audit Trail Setup
 
-The installation creates a system-wide audit trail:
+The installation creates the non-agent-writable audit directory:
 
 ```bash
-# Create audit log directory (owned by root, writable by all users)
-mkdir -p /var/log/workspace-guard
-chmod 1777 /var/log/workspace-guard
-
-# Configure rsyslog to forward guard logs
-cat > /etc/rsyslog.d/99-workspace-guard.conf << 'EOF'
-if $programname == 'workspace-guard' then /var/log/workspace-guard/audit.log
-& stop
-EOF
-
-systemctl restart rsyslog
+install -d -o root -g root -m 0750 /var/log/workspace-guard
 ```
+
+Guards append only to verified root-owned per-UID files within this directory
+(`git-<uid>.log`, `shell-<uid>.log`, and other guard-specific names). No audit
+file, mirror, rsyslog target, or staging path is placed in a user-writable
+directory. Per-file creation and verification follow the owning guard's audit
+contract.
 
 ### 11.7 `.git` Ownership Lock (Capability Mode)
 
@@ -235,7 +237,7 @@ hardcoded in Rust. The YAML declares four categories:
 | Category | Description | Examples |
 |----------|-------------|---------|
 | `recursive_tree_paths` | Entire directory trees locked recursively. Dirs → 0o755, files → 0o644, hooks → 0o755 | `.git` |
-| `recursive_tree_glob_patterns` | Directory-name glob patterns; every matching directory in the repo tree is recursively locked (dirs → 0o755, files → 0o644) | `.boot*` |
+| `recursive_tree_glob_patterns` | Directory-name glob patterns; every matching directory in the repo tree is recursively locked (dirs → 0o755, files → 0o644) | None currently configured |
 | `individual_file_paths` | Individual files locked with an explicit octal mode | `.gitmodules` (0o644) |
 | `glob_patterns` | Filename-only globs; every matching file in the repo tree is locked with the given mode | `*_exceptions.yaml` (0o644) |
 
@@ -254,12 +256,13 @@ and does not block the git invocation.
 
 The glob lock is unconditional: there is no unseal state file and no
 skip list. Legitimate edits to locked policy YAMLs go through the
-root-gated `workspace-yaml-edit` binary (`sudo make yaml-add` /
-`yaml-remove`), which manipulates YAML contents directly while
-the files stay `root:root` at all times. See
+root-gated `workspace-yaml-edit` binary, including field unset,
+literal full-line comment removal, and digest-guarded deletion. The
+tool manipulates source YAML directly while files stay `root:root`;
+mutations under `/opt` are forbidden. See
 [SPEC-YAML-EDIT](SPEC-YAML-EDIT.md).
 
-The installer must `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep' /usr/bin/git`
+The installer must `setcap 'cap_setpcap,cap_chown,cap_dac_override,cap_fowner+ep' /usr/bin/git`
 (CAP_SETPCAP is needed so the forked child can raise CAP_DAC_OVERRIDE into
 its Ambient set before exec'ing git.original; the other caps are needed
 for the guard's own chown/chmod of the `.git/` tree).
@@ -274,19 +277,21 @@ so the hooks it writes are owned `root:root` with the exec bit set.
 
 #### Capability flow
 
-The guard binary has 5 file caps:
-`cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid+ep`.
+The guard binary has 4 file caps:
+`cap_setpcap,cap_chown,cap_dac_override,cap_fowner+ep`.
 
-At startup, `raise_ambient_caps()` raises all 5 into the **Inheritable** set
+At startup, `raise_ambient_caps()` raises all 4 into the **Inheritable** set
 but does NOT raise anything into **Ambient**. This means:
 - Policy-check sub-calls (block.rs `git_cmd()`): fork+exec git.original from
   the parent) get **no caps** (ambient empty → least-privilege read-only).
-- The main exec path (`execve_real_git`) forks → child calls
-  `raise_child_dac_override()` which clears Ambient, then raises
-  `CAP_DAC_OVERRIDE` into Ambient → execs git.original.
-  git.original (a non-privileged binary with no file caps) inherits
-  `CAP_DAC_OVERRIDE` in effective+permitted+ambient → can write to
-  root-owned `.git/` files. When git.original exits, the cap dies with it.
+- The main exec path clears Ambient for every child. Only an exact subcommand
+  in the compiled `capability_loan` category calls
+  `raise_child_dac_override()` before exec. That child inherits
+  `CAP_DAC_OVERRIDE` in Effective, Permitted, and Ambient and can access
+  root-owned repository state; the capability dies with the child.
+- Unknown, external, alias, no-subcommand, and terminal-query invocations exec
+  `git.original` with Ambient empty. The guard's Effective capability permits
+  the exec permission check, but no capability survives into real Git.
 
 ---
 

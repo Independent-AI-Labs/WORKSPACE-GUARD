@@ -8,7 +8,9 @@ use std::process;
 use crate::yaml_edit_diff as diff;
 use crate::yaml_edit_engine as engine;
 use crate::yaml_edit_schema as schema;
+use crate::yaml_edit_shape as shape;
 use crate::yaml_edit_splice as splice;
+use crate::yaml_edit_target::{normalize_terminal, Target};
 
 pub const LOG_FILE_NAME: &str = ".workspace-guard.log";
 const LOCK_PATH: &str = "/var/lib/workspace-guard/yaml-edit.lock";
@@ -19,9 +21,14 @@ pub enum Intent {
     Remove,
     Set,
     Bootstrap,
+    Unset,
+    RemoveComment,
+    Delete,
     Get,
     List,
     Validate,
+    Check,
+    Format,
 }
 
 pub struct Cli {
@@ -33,6 +40,8 @@ pub struct Cli {
     pub dry_run: bool,
     pub allow_no_match: bool,
     pub force_string: bool,
+    pub create: bool,
+    pub expected_sha256: Option<String>,
 }
 
 pub fn fail(code: i32, msg: &str) -> ! {
@@ -46,32 +55,78 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         Some("remove") => Intent::Remove,
         Some("set") => Intent::Set,
         Some("bootstrap") => Intent::Bootstrap,
+        Some("unset") => Intent::Unset,
+        Some("remove-comment") => Intent::RemoveComment,
+        Some("delete") => Intent::Delete,
         Some("get") => Intent::Get,
         Some("list") => Intent::List,
         Some("validate") => Intent::Validate,
+        Some("check") => Intent::Check,
+        Some("format") => Intent::Format,
         _ => return Err("unknown intent".to_string()),
     };
     let mut positional: Vec<String> = Vec::new();
     let mut dry_run = false;
     let mut allow_no_match = false;
     let mut force_string = false;
-    for a in &args[1..] {
-        match a.as_str() {
+    let mut create = false;
+    let mut expected_sha256 = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
             "--dry-run" => dry_run = true,
             "--allow-no-match" => allow_no_match = true,
             "--string" => force_string = true,
-            _ => positional.push(a.clone()),
+            "--create" => create = true,
+            "--expected-sha256" => {
+                i += 1;
+                expected_sha256 = args.get(i).cloned();
+                if expected_sha256.is_none() {
+                    return Err("missing digest".to_string());
+                }
+            }
+            _ => positional.push(args[i].clone()),
         }
+        i += 1;
     }
     let need = match intent {
         Intent::Add | Intent::Remove => 3,
         Intent::Set | Intent::Bootstrap => 3,
+        Intent::Unset | Intent::RemoveComment => 2,
+        Intent::Delete => 1,
         Intent::Get => 2,
         Intent::List => 1,
         Intent::Validate => 1,
+        Intent::Check => 1,
+        Intent::Format => 1,
     };
     if positional.len() < need {
         return Err("missing arguments".to_string());
+    }
+    let valid_len = match intent {
+        Intent::Add | Intent::Remove => positional.len() >= 3,
+        Intent::List => positional.len() <= 2,
+        Intent::Set | Intent::Bootstrap => positional.len() == 3,
+        Intent::Unset | Intent::RemoveComment | Intent::Get => positional.len() == 2,
+        Intent::Delete | Intent::Validate | Intent::Check | Intent::Format => positional.len() == 1,
+    };
+    if !valid_len || (intent == Intent::Delete && expected_sha256.is_none()) {
+        return Err("wrong arguments".to_string());
+    }
+    if intent != Intent::Delete && expected_sha256.is_some() {
+        return Err("--expected-sha256 is only valid for delete".to_string());
+    }
+    if intent == Intent::Delete && (dry_run || allow_no_match || force_string) {
+        return Err("unsupported delete flag".to_string());
+    }
+    if create && intent != Intent::Set {
+        return Err("--create is only valid for set".to_string());
+    }
+    if intent == Intent::Check && (dry_run || allow_no_match || force_string) {
+        return Err("check is read-only; flags are not supported".to_string());
+    }
+    if intent == Intent::Format && (allow_no_match || force_string || create) {
+        return Err("format supports only --dry-run".to_string());
     }
     let file = PathBuf::from(&positional[0]);
     let (key, specs, value) = match intent {
@@ -83,9 +138,13 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
             Vec::new(),
             Some(positional[2].clone()),
         ),
+        Intent::Unset => (Some(positional[1].clone()), Vec::new(), None),
+        Intent::RemoveComment => (None, Vec::new(), Some(positional[1].clone())),
+        Intent::Delete => (None, Vec::new(), None),
         Intent::Get => (Some(positional[1].clone()), Vec::new(), None),
         Intent::List => (positional.get(1).cloned(), Vec::new(), None),
         Intent::Validate => (None, Vec::new(), None),
+        Intent::Check | Intent::Format => (None, Vec::new(), None),
     };
     Ok(Cli {
         intent,
@@ -96,10 +155,12 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         dry_run,
         allow_no_match,
         force_string,
+        create,
+        expected_sha256,
     })
 }
 
-fn require_root() {
+pub(crate) fn require_root() {
     if !nix::unistd::geteuid().is_root() {
         fail(
             2,
@@ -108,79 +169,11 @@ fn require_root() {
     }
 }
 
-fn normalize(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn is_deployed_ci_path(path: &Path) -> bool {
-    let components: Vec<_> = path.components().map(|c| c.as_os_str()).collect();
-    components.windows(2).any(|pair| {
-        pair[0] == std::ffi::OsStr::new("projects")
-            && matches!(
-                pair[1].to_str(),
-                Some("CI") | Some("CI.releases") | Some("CI.backup") | Some("CI.previous")
-            )
-    })
-}
-
-fn preflight(path: &Path, mutation: bool) {
-    let md = std::fs::symlink_metadata(path)
-        .unwrap_or_else(|_| fail(2, &format!("file not found: {}", path.display())));
-    if md.file_type().is_symlink() {
-        fail(2, &format!("refusing symlink: {}", path.display()));
-    }
-    if !md.is_file() {
-        fail(2, &format!("not a regular file: {}", path.display()));
-    }
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| fail(1, "cannot read current directory"))
-            .join(path)
-    };
-    let canon = std::fs::canonicalize(&abs)
-        .unwrap_or_else(|_| fail(2, &format!("cannot resolve: {}", path.display())));
-    if canon != normalize(&abs) {
-        fail(2, &format!("refusing symlinked path: {}", path.display()));
-    }
-    if mutation && is_deployed_ci_path(&canon) {
-        fail(
-            2,
-            &format!(
-                "refusing deployed CI artifact path: {}; use the release control plane",
-                path.display()
-            ),
-        );
-    }
-    if mutation && (md.uid() != 0 || md.gid() != 0) {
-        fail(
-            2,
-            &format!(
-                "refusing non-root-owned file ({}:{}): {}",
-                md.uid(),
-                md.gid(),
-                path.display()
-            ),
-        );
-    }
-}
-
-struct LockGuard {
+pub(crate) struct LockGuard {
     _flock: nix::fcntl::Flock<std::fs::File>,
 }
 
-fn acquire_lock() -> LockGuard {
+pub(crate) fn acquire_lock() -> LockGuard {
     let dir = Path::new("/var/lib/workspace-guard");
     if !dir.exists() {
         std::fs::create_dir_all(dir)
@@ -204,7 +197,7 @@ fn acquire_lock() -> LockGuard {
     LockGuard { _flock: flock }
 }
 
-fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
+pub(crate) fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
     let uid = std::env::var("SUDO_UID")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
@@ -227,8 +220,13 @@ fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
             }
         })?;
     let key = cli.key.clone().unwrap_or_default();
-    let fields = if matches!(cli.intent, Intent::Set | Intent::Bootstrap) {
+    let fields = if matches!(
+        cli.intent,
+        Intent::Set | Intent::Bootstrap | Intent::RemoveComment
+    ) {
         format!("value={}", cli.value.clone().unwrap_or_default())
+    } else if cli.intent == Intent::Delete {
+        format!("sha256={}", cli.expected_sha256.clone().unwrap_or_default())
     } else {
         cli.specs.join(";")
     };
@@ -246,12 +244,12 @@ fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
         .map_err(|e| format!("audit log write failed: {e}"))
 }
 
-fn parse_doc(raw: &str, path: &Path) -> Value {
+pub(crate) fn parse_doc(raw: &str, path: &Path) -> Value {
     serde_yaml::from_str(raw)
         .unwrap_or_else(|e| fail(1, &format!("{}: not valid YAML: {e}", path.display())))
 }
 
-fn key_err(e: engine::KeyError, key: &str) -> ! {
+pub(crate) fn key_err(e: engine::KeyError, key: &str) -> ! {
     match e {
         engine::KeyError::Missing => fail(2, &format!("key not found: {key}")),
         engine::KeyError::NotAList => fail(2, &format!("key is not a list: {key}")),
@@ -275,7 +273,7 @@ fn set_node(doc: &mut Value, segs: &[String], val: Value) {
     *node = val;
 }
 
-fn verify(new_content: &str, expected: &Value, path: &Path) {
+pub(crate) fn verify(new_content: &str, expected: &Value, path: &Path) {
     let parsed = parse_doc(new_content, path);
     if &parsed != expected {
         fail(
@@ -289,13 +287,13 @@ fn verify(new_content: &str, expected: &Value, path: &Path) {
     }
 }
 
-fn basename(path: &Path) -> &str {
+pub(crate) fn basename(path: &Path) -> &str {
     path.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default()
 }
 
-fn check_override_owner(path: &Path) {
+pub(crate) fn check_override_owner(path: &Path) {
     let Some(dir) = path.parent() else { return };
     let reg = dir.join("yaml_edit_schemas.yaml");
     let Ok(md) = std::fs::symlink_metadata(&reg) else {
@@ -309,7 +307,7 @@ fn check_override_owner(path: &Path) {
     }
 }
 
-fn check_schema(path: &Path, doc: &Value) {
+pub(crate) fn check_schema(path: &Path, doc: &Value) {
     let reg = schema::registry_for(path).unwrap_or_else(|e| fail(2, &e));
     schema::validate_document(basename(path), doc, &reg).unwrap_or_else(|e| fail(1, &e));
 }
@@ -364,9 +362,13 @@ pub fn run_set(cli: &Cli) {
     let dotted = cli.key.as_deref().unwrap_or_default();
     let raw_value = cli.value.clone().unwrap_or_default();
     mutate(cli, &mut |doc, original| {
-        let segs = engine::resolve_segments(doc, dotted)
-            .ok_or(())
-            .unwrap_or_else(|_| fail(1, &format!("key not found: {dotted}")));
+        let segs = match engine::resolve_segments(doc, dotted) {
+            Some(s) => s,
+            None if cli.create => {
+                return create_node(doc, original, dotted, &raw_value, cli.force_string);
+            }
+            None => fail(1, &format!("key not found: {dotted}")),
+        };
         let node = engine::scalar_at(doc, &segs).unwrap_or_else(|e| key_err(e, dotted));
         if matches!(node, Value::Mapping(_) | Value::Sequence(_)) {
             fail(2, &format!("refusing set on block/list key: {dotted}"));
@@ -379,50 +381,79 @@ pub fn run_set(cli: &Cli) {
     });
 }
 
-pub fn run_bootstrap(cli: &Cli) {
-    let key = cli.key.as_deref().unwrap_or_default();
-    if key.is_empty() || key.contains('.') {
-        fail(2, "bootstrap requires a non-empty top-level key");
+/// Insert a previously absent leaf key under an existing mapping
+/// (`set --create`). The parent path must resolve to a block
+/// mapping; anything else fails closed.
+fn create_node(
+    doc: &Value,
+    original: &str,
+    dotted: &str,
+    raw_value: &str,
+    force_string: bool,
+) -> Transform {
+    let value = engine::typed_value(raw_value, force_string)?;
+    let (parent_dotted, leaf) = dotted
+        .rsplit_once('.')
+        .ok_or_else(|| format!("key not found: {dotted} (use bootstrap for top-level keys)"))?;
+    let parent_segs = engine::resolve_segments(doc, parent_dotted)
+        .ok_or_else(|| format!("parent key not found: {parent_dotted}"))?;
+    let parent = engine::scalar_at(doc, &parent_segs)
+        .map_err(|_| format!("parent key not found: {parent_dotted}"))?;
+    if parent.as_mapping().is_none() {
+        return Err(format!("parent is not a mapping: {parent_dotted}"));
     }
-    let raw_value = cli.value.clone().unwrap_or_default();
-    mutate(cli, &mut |doc, original| {
-        let root = doc
-            .as_mapping()
-            .ok_or(())
-            .unwrap_or_else(|_| fail(1, "document root is not a mapping"));
-        if root.contains_key(key) {
-            fail(2, &format!("key already exists: {key}"));
-        }
-        let value =
-            engine::typed_value(&raw_value, cli.force_string).unwrap_or_else(|e| fail(2, &e));
-        let mut expected = doc.clone();
-        expected
+    let mut expected = doc.clone();
+    let mut node = &mut expected;
+    for seg in &parent_segs {
+        node = node
             .as_mapping_mut()
-            .expect("root checked")
-            .insert(Value::String(key.to_string()), value.clone());
-        splice::splice_insert_top_level(original, key, &value).map(|out| (out, expected))
-    });
+            .and_then(|m| m.get_mut(seg.as_str()))
+            .ok_or_else(|| format!("parent key not found: {parent_dotted}"))?;
+    }
+    node.as_mapping_mut()
+        .expect("parent checked")
+        .insert(Value::String(leaf.to_string()), value.clone());
+    splice::splice_insert_map_key(original, &parent_segs, leaf, &value).map(|out| (out, expected))
 }
-type Transform = Result<(String, Value), String>;
 
-fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
+pub(crate) type Transform = Result<(String, Value), String>;
+
+pub(crate) fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
     if !cli.dry_run {
         require_root();
         check_override_owner(&cli.file);
     }
-    preflight(&cli.file, !cli.dry_run);
     let _lock = if cli.dry_run {
         None
     } else {
         Some(acquire_lock())
     };
-    let original = std::fs::read_to_string(&cli.file)
-        .unwrap_or_else(|e| fail(1, &format!("cannot read {}: {e}", cli.file.display())));
+    let target = Target::open(&cli.file, !cli.dry_run).unwrap_or_else(|e| fail(2, &e));
+    let original = target.read_string().unwrap_or_else(|e| fail(1, &e));
     let doc = parse_doc(&original, &cli.file);
+    // Operator ruling 2026-09-06: syntax + format are separate
+    // pre-mutation steps. Indentless block sequences are not
+    // splice-editable (SPEC-YAML-EDIT 4.1); mutations refuse such
+    // targets instead of failing cryptically mid-splice. Formatting is
+    // its own audited command: workspace-yaml-edit format <file>.
+    let violations = shape::indentless_lists(&original);
+    if !violations.is_empty() {
+        for v in &violations {
+            eprintln!(
+                "yaml-edit: ERROR: {}",
+                v.message(&cli.file.display().to_string())
+            );
+        }
+        fail(
+            2,
+            "target is not splice-editable; run: workspace-yaml-edit format <file>",
+        );
+    }
     let (new_content, expected) = match op(&doc, &original) {
         Ok(v) => v,
         Err(e) => fail(1, &format!("{}: {e}", cli.file.display())),
     };
+    let new_content = normalize_terminal(&new_content);
     if new_content == original {
         eprintln!("yaml-edit: unchanged");
         process::exit(0);
@@ -441,68 +472,12 @@ fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
         Intent::Remove => "remove",
         Intent::Set => "set",
         Intent::Bootstrap => "bootstrap",
+        Intent::Unset => "unset",
+        Intent::RemoveComment => "remove-comment",
+        Intent::Delete => "delete",
         _ => "?",
     };
     audit(cli, intent).unwrap_or_else(|e| fail(1, &e));
-    install(&cli.file, &new_content);
+    install(&target, &new_content);
     println!("yaml-edit: ok: {} {}", intent, cli.file.display());
 }
-
-pub fn run_get(cli: &Cli) {
-    preflight(&cli.file, false);
-    let raw = std::fs::read_to_string(&cli.file)
-        .unwrap_or_else(|e| fail(1, &format!("cannot read {}: {e}", cli.file.display())));
-    let doc = parse_doc(&raw, &cli.file);
-    let dotted = cli.key.as_deref().unwrap_or_default();
-    let segs = engine::resolve_segments(&doc, dotted)
-        .unwrap_or_else(|| fail(1, &format!("key not found: {dotted}")));
-    let node = engine::scalar_at(&doc, &segs).unwrap_or_else(|e| key_err(e, dotted));
-    match node {
-        Value::String(s) => println!("{s}"),
-        Value::Number(_) | Value::Bool(_) => {
-            println!(
-                "{}",
-                serde_yaml::to_string(node)
-                    .unwrap_or_else(|e| fail(1, &format!("cannot render value: {e}")))
-                    .trim()
-            )
-        }
-        _ => fail(2, &format!("key is not a scalar: {dotted}")),
-    }
-}
-
-pub fn run_list(cli: &Cli) {
-    preflight(&cli.file, false);
-    let raw = std::fs::read_to_string(&cli.file)
-        .unwrap_or_else(|e| fail(1, &format!("cannot read {}: {e}", cli.file.display())));
-    match &cli.key {
-        None => print!("{raw}"),
-        Some(key) => {
-            let doc = parse_doc(&raw, &cli.file);
-            engine::list_items(&doc, key).unwrap_or_else(|e| key_err(e, key));
-            let block = splice::key_block(&raw, key).unwrap_or_else(|e| fail(1, &e));
-            print!("{block}");
-        }
-    }
-}
-
-pub fn run_validate(cli: &Cli) {
-    preflight(&cli.file, false);
-    let raw = std::fs::read_to_string(&cli.file)
-        .unwrap_or_else(|e| fail(1, &format!("cannot read {}: {e}", cli.file.display())));
-    let doc = parse_doc(&raw, &cli.file);
-    let reg = schema::registry_for(&cli.file).unwrap_or_else(|e| fail(1, &e));
-    match schema::validate_document(basename(&cli.file), &doc, &reg) {
-        Ok(()) => println!("yaml-edit: ok: {}", cli.file.display()),
-        Err(errors) => {
-            for e in errors.lines() {
-                eprintln!("yaml-edit: ERROR: {e}");
-            }
-            process::exit(1);
-        }
-    }
-}
-
-#[cfg(test)]
-#[path = "yaml_edit_ops_tests.rs"]
-mod tests;

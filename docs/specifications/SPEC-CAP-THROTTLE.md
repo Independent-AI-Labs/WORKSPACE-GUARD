@@ -45,7 +45,7 @@ output format is:
 ```
 /usr/bin/ping = cap_net_raw=ep
 /usr/bin/mtr-packet = cap_net_raw=ep
-/usr/bin/git = cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_setpcap=ep
+/usr/bin/git = cap_chown,cap_dac_override,cap_fowner,cap_setpcap=ep
 /usr/bin/true = cap_dac_override=ep
 ```
 
@@ -58,7 +58,7 @@ allowlist in `config/cap-allowlist.yaml`.
 
 | Path | Live caps | Recommended action | Reason |
 |------|-----------|-------------------|--------|
-| `/usr/bin/git` | `cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_setpcap` | throttle to `cap_dac_override` | Guard needs dac_override for root-owned `.git/`. chown, fowner, fsetid, setpcap are not needed. |
+| `/usr/bin/git` | `cap_chown,cap_dac_override,cap_fowner,cap_setpcap` | keep | Guard needs setpcap for the controlled child loan, chown/fowner for protected-path reconciliation, and dac_override for the sealed real Git and root-owned Git paths. Only dac_override is loaned to git.original. |
 | `/usr/bin/true` | `cap_dac_override` | strip | `true` is a no-op binary; having `cap_dac_override` is a BUG (possibly from a mistaken `setcap` during testing). |
 | `/usr/bin/ping` | `cap_net_raw` | keep | ICMP echo; expected. |
 | `/usr/bin/mtr-packet` | `cap_net_raw` | keep | MTR traceroute; expected. |
@@ -88,8 +88,8 @@ capability and records the pre-strip state in the baseline for audit.
 
 allowlist:
   /usr/bin/git:
-    allowed: [cap_dac_override]
-    reason: "Guard reads root-owned .git/ directory entries"
+    allowed: [cap_setpcap, cap_chown, cap_dac_override, cap_fowner]
+    reason: "Guard capability loan plus protected-path ownership and mode reconciliation"
 
   /usr/bin/sudo:
     allowed: [cap_setuid, cap_setpcap, cap_dac_override]

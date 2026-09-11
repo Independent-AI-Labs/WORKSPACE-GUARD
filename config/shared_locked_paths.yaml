@@ -40,9 +40,7 @@ version: 1
 recursive_tree_paths:
   - .git
 
-recursive_tree_glob_patterns:
-  - ".boot*"
-
+recursive_tree_glob_patterns: []
 individual_file_paths:
   ".gitmodules": 0o644
 

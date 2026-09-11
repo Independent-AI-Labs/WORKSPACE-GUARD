@@ -269,12 +269,44 @@ EOF
     assert_output --partial "key not found"
 }
 
+@test "dry-run set --create inserts an absent leaf under an existing map" {
+    local f="$TEST_TMPDIR/unknown_policy.yaml"
+    printf 'labels:\n  a: 1\nother: 2\n' > "$f"
+    run "$(_ye)" set "$f" labels.b 3 --create --dry-run
+    assert_success
+    assert_output --partial "+  b: 3"
+}
+
+@test "dry-run set --create refuses a missing parent" {
+    local f="$TEST_TMPDIR/unknown_policy.yaml"
+    printf 'labels:\n  a: 1\n' > "$f"
+    run "$(_ye)" set "$f" nope.b 3 --create --dry-run
+    assert_equal "$status" 1
+    assert_output --partial "parent key not found"
+}
+
 @test "bootstrap creates a missing top-level scalar" {
     local f="$TEST_TMPDIR/bootstrap.yaml"
     printf 'version: 1\n' > "$f"
     run "$(_ye)" bootstrap "$f" max_file_bytes 262144 --dry-run
     assert_success
     assert_output --partial "+max_file_bytes: 262144"
+}
+
+@test "bootstrap creates a missing empty top-level list via []" {
+    local f="$TEST_TMPDIR/bootstrap-list.yaml"
+    printf 'version: 1\n' > "$f"
+    run "$(_ye)" bootstrap "$f" module_overrides '[]' --dry-run
+    assert_success
+    assert_output --partial "+module_overrides: []"
+}
+
+@test "bootstrap still rejects non-empty sequence values" {
+    local f="$TEST_TMPDIR/bootstrap-seq.yaml"
+    printf 'version: 1\n' > "$f"
+    run "$(_ye)" bootstrap "$f" module_overrides '[a, b]' --dry-run
+    assert_equal "$status" 2
+    assert_output --partial "parses as YAML sequence"
 }
 
 @test "bootstrap rejects an existing key" {
@@ -310,4 +342,77 @@ EOF
     assert_success
     assert_output --partial "+    reason: waiver for src/a,b.py, ticket 7"
     assert_output --partial "+      - src/a.py"
+}
+
+@test "dry-run unset removes every wildcard field" {
+    local f="$TEST_TMPDIR/hooks.yaml"
+    printf 'hooks:\n  - id: one\n    safety: true\n  - id: two\n    safety: false\n' > "$f"
+    run "$(_ye)" unset "$f" 'hooks[].safety' --dry-run
+    assert_success
+    assert_output --partial "-    safety: true"
+    assert_output --partial "-    safety: false"
+    assert_output --partial "removed 2 fields"
+}
+
+@test "dry-run unset supports dotted maps and rejects missing paths" {
+    local f="$TEST_TMPDIR/nested.yaml"
+    printf 'outer:\n  remove: true\n  keep: 1\n' > "$f"
+    run "$(_ye)" unset "$f" outer.remove --dry-run
+    assert_success
+    assert_output --partial "-  remove: true"
+    run "$(_ye)" unset "$f" outer.missing --dry-run
+    assert_failure
+    assert_output --partial "path not found"
+}
+
+@test "wildcard partial failure leaves the original bytes unchanged" {
+    local f="$TEST_TMPDIR/partial.yaml"
+    printf 'hooks:\n  - id: one\n    safety: true\n  - id: two\n' > "$f"
+    local before; before="$(cat "$f")"
+    run "$(_ye)" unset "$f" 'hooks[].safety' --dry-run
+    assert_failure
+    assert_equal "$(cat "$f")" "$before"
+}
+
+@test "remove-comment is literal and ignores scalars and similar text" {
+    local f="$TEST_TMPDIR/comments.yaml"
+    printf '# Retired term\nvalue: Retired term\n  # Retired term\n# Retired terms\n' > "$f"
+    run "$(_ye)" remove-comment "$f" 'Retired term' --dry-run
+    assert_success
+    assert_output --partial "removed 2 comments"
+    refute_output --partial "-value: Retired term"
+    refute_output --partial "-# Retired terms"
+}
+
+@test "remove-comment missing text fails" {
+    local f="$TEST_TMPDIR/comments.yaml"
+    printf '# present\nvalue: 1\n' > "$f"
+    run "$(_ye)" remove-comment "$f" missing --dry-run
+    assert_failure
+    assert_output --partial "no exact comment matched"
+}
+
+@test "delete requires a digest and root" {
+    local f="$TEST_TMPDIR/delete.yaml"
+    printf 'value: 1\n' > "$f"
+    run "$(_ye)" delete "$f"
+    assert_failure
+    assert_output --partial "usage:"
+    [ "$(id -u)" -eq 0 ] && skip "non-root refusal untestable as root"
+    run "$(_ye)" delete "$f" --expected-sha256 0000000000000000000000000000000000000000000000000000000000000000
+    assert_equal "$status" 2
+    assert_output --partial "needs root"
+}
+
+@test "new Make mutation targets propagate root-gate failures" {
+    [ "$(id -u)" -eq 0 ] && skip "non-root refusal untestable as root"
+    run make -C "$GUARD_ROOT" yaml-unset FILE=nope.yaml KEY='hooks[].safety'
+    assert_failure
+    assert_output --partial "yaml-unset needs root"
+    run make -C "$GUARD_ROOT" yaml-remove-comment FILE=nope.yaml VALUE=text
+    assert_failure
+    assert_output --partial "yaml-remove-comment needs root"
+    run make -C "$GUARD_ROOT" yaml-delete FILE=nope.yaml EXPECT_SHA256=00
+    assert_failure
+    assert_output --partial "yaml-delete needs root"
 }

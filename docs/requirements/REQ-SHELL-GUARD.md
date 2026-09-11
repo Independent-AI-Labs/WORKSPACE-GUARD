@@ -162,7 +162,7 @@ handled by `make install-shell-guard`.
   comments: a pattern match inside quoted text or a comment blocks
   identically (e.g. `echo "use | tail"` is blocked). These false
   positives are accepted and documented (SPEC-SHELL-GUARD §16);
-  root's channel for them is `<path>.real` directly.
+  automation shall avoid ambiguous raw text.
 
 - **REQ-SHG-208**: Known evasion classes of raw-text matching:
   quote-splitting (`pki''ll`), variable indirection (`$X` holding a
@@ -195,11 +195,10 @@ handled by `make install-shell-guard`.
     an agent-owned parent leaves open.
      Direct trusted scripts are executed by path without raw-text body
      scanning. The trusted tier is a provenance-based execution exemption:
-     the agent cannot author or modify the file, and the real shell still
-     mediates nested `bash`/`sh` command-string invocations. Untrusted
-     scripts and all command strings remain fully scanned. Root maintenance
-     that needs an unmediated interpreter or shell must invoke `/bin/bash.real`
-     directly.
+     the agent cannot author or modify the file, and the guard still mediates
+     nested `bash`/`sh` command-string invocations. Untrusted scripts and all
+     command strings remain fully scanned. Automation shall not invoke the
+     backing real interpreter directly.
   - **Untrusted tier**: anything else. The full block policy applies
     to all users including root.
   Invocation context (`-c` vs script vs TTY vs parent process) shall
@@ -239,11 +238,9 @@ handled by `make install-shell-guard`.
 
   - **REQ-SHG-300**: The following commands shall be unconditionally
   blocked anywhere in the command text (word-boundary pattern match),
-  for ALL users including root
-  (exit 1). Root's operator channel is invoking `<path>.real`
-  directly, which only root can do. Trusted-tier script bodies per
-  REQ-SHG-211 are scanned with the same rules; they are NOT exempt.
-  `-c` strings and untrusted script bodies are never exempt.
+  for ALL users including root (exit 1). Direct trusted-tier scripts per
+  REQ-SHG-211 are exempt from body scanning. `-c` strings and untrusted script
+  bodies are never exempt.
   Interactive shells are pass-through per REQ-SHG-200: typed REPL
   input is unscanned.)
   - Process signalling by name: `pkill`, `killall`, `skill`, `snice`
@@ -325,11 +322,9 @@ handled by `make install-shell-guard`.
   This covers `> /dev/null`, `>> /dev/null`, `2> /dev/null`,
   `&> /dev/null`, and combined forms such as `>/dev/null 2>&1`.
   Rationale: discarding stdout/stderr is the same audit-trail
-  destruction as REQ-SHG-308 by a different spelling. Trusted-tier
-  scripts (REQ-SHG-211) are subject to the same block policy; root
-  maintenance that legitimately needs suppressed output must invoke
-  `/bin/bash.real` directly. The set shall be data-driven from the
-  `suppression_redirect_targets` block.
+  destruction as REQ-SHG-308 by a different spelling. Direct trusted-tier
+  scripts are exempt from body scanning per REQ-SHG-211. The set shall be
+  data-driven from the `suppression_redirect_targets` block.
 
 - **REQ-SHG-310**: Command text containing `||`, `|`, or `|&`
   followed by a member of `suppression_null_commands` (`true`, `:`)
@@ -429,20 +424,23 @@ handled by `make install-shell-guard`.
 
 ## 6. Audit Logging, Exit Codes, Error Output (REQ-SHG-500 series)
 
-- **REQ-SHG-500**: Every blocked invocation shall be appended to
-  `${HOME}/.workspace-guard.log` (real user's home, resolved via
-  `getpwuid_r(getuid())`) in pipe-delimited form:
-  `timestamp|cwd|cmd|reason|uid=<uid>`, matching the git guard log
-  format.
+- **REQ-SHG-500**: Every blocked invocation shall be appended only to the
+  verified root-owned `/var/log/workspace-guard/shell-<real-uid>.log`; no audit
+  log or mirror may exist under a user-writable directory. Directory/file
+  ownership, mode, no-follow opening, locking, syncing, and surfaced-failure
+  requirements match REQ-GGUARD-090. Records use the canonical versioned byte
+  encoding and boundary-preserving argv fields from REQ-GGUARD-091.
 
-- **REQ-SHG-501**: Logged command strings shall be truncated to 200
-  bytes and shall have single quotes neutralised, so log parsing
-  cannot be confused by crafted content. Potential secret material
-  after `=` in assignments shall be redacted.
+- **REQ-SHG-501**: Audit argv shall never be space-joined, truncated, redacted,
+  masked, hashed, or omitted. Assignment values and all other input remain
+  forensic evidence under the reversible canonical percent encoding; control and
+  non-UTF-8 bytes preserve exact argument boundaries.
 
 - **REQ-SHG-502**: If the log file cannot be opened, the block shall
-  still be enforced: logging failure shall never bypass blocking.
-  The log file shall be opened `O_NOFOLLOW | O_APPEND`.
+  still be enforced: logging failure shall never bypass blocking. Every failure
+  shall use REQ-GGUARD-092's typed, non-recursive stderr/distinct-tty diagnostic;
+  no user-writable or unverified fallback is allowed. The log file shall be
+  opened under the verified directory fd with no-follow append semantics.
 
 - **REQ-SHG-503**: The log file shall be opened and written only
   after a block decision is made, never on the pass-through path.
@@ -496,14 +494,15 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-605**: Post-install verification is split between the
   installer and the real-Linux guest e2e. The installer shall confirm:
   correct modes/owners/caps, divert registered, apt hook present,
-  guard hash matches the release build, root `-c` exits 3
-  (fail-closed), and non-root benign `-c` exits 0. The QEMU guest
+  guard hash matches the release build, and benign root and non-root `-c`
+  invocations exit 0. The QEMU guest
   guest e2e shall additionally
   confirm: `bash -c 'pkill x'` blocked with exit 1 as non-root;
   `bash -c 'ls | tail'` and `bash -c 'ls 2>/dev/null'` blocked with
-  exit 1 as non-root and fail-closed exit 3 as root; a trusted-tier
+  exit 1 as both non-root and root; a trusted-tier
   fixture script (root-owned, mode 0755, under a root-owned
-  directory) containing `2>/dev/null` is blocked; `bash --version`
+  directory) containing `2>/dev/null` executes without body scanning;
+  `bash --version`
   works; interactive/login `bash -l` works.
 
 - **REQ-SHG-606**: Because `/bin/sh` and `/bin/bash` are on the
@@ -521,7 +520,10 @@ handled by `make install-shell-guard`.
 ## 8. Security Hardening and Performance (REQ-SHG-700 series)
 
 - **REQ-SHG-700**: The binary shall be compiled with
-  `panic = "abort"`, full RELRO, stack protector, and `strip`. Binary
+  `panic = "abort"`, release overflow checks, static PIE, full RELRO,
+  non-executable stack, stack protection, and `strip`; the exact built and
+  installed ELF shall pass REQ-GGUARD-120-equivalent property/digest
+  verification before privilege labeling. Binary
   size target: under 500KB stripped. Guard logic on the pass-through
   path shall complete in under 5ms.
 
@@ -530,7 +532,8 @@ handled by `make install-shell-guard`.
   `MFD_EXEC`, which nix 0.29 does not expose), and the `regex`
   crate (already a workspace dependency; used with
   `regex::bytes::Regex` for byte-exact matching). No `clap`.
-  `shell_guard.rs` shall contain no `unsafe` blocks: `AT_SECURE`
+  `shell_guard.rs` shall contain no `unsafe` blocks: shared immutable-flag reads
+  use REQ-GGUARD-121's centralized reviewed wrapper, `geteuid` uses `nix`, and `AT_SECURE`
   from `/proc/self/auxv`, metadata via `std::fs::symlink_metadata`,
   memfd via `rustix`.
 

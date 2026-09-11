@@ -184,49 +184,10 @@ fn glob_files_deeply_nested() {
     assert!(deep_file.exists());
 }
 
-// --- lock_glob_trees tests ---
-
 #[test]
 fn glob_trees_no_crash_on_nonexistent() {
     lock_worktree_globs(Path::new("/nonexistent-path-1234"));
     lock_worktree_globs(tempfile::tempdir().unwrap().path());
-}
-
-#[test]
-fn glob_trees_finds_boot_dirs() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-
-    let boot_dir = root.join(".boot");
-    fs::create_dir_all(&boot_dir).unwrap();
-    fs::write(boot_dir.join("vmlinuz"), b"x").unwrap();
-
-    let bootloader_dir = root.join(".bootloader");
-    fs::create_dir_all(&bootloader_dir).unwrap();
-    fs::write(bootloader_dir.join("stage1.bin"), b"x").unwrap();
-
-    let other = root.join("other");
-    fs::create_dir_all(&other).unwrap();
-
-    lock_worktree_globs(root);
-
-    assert!(boot_dir.join("vmlinuz").exists());
-    assert!(bootloader_dir.join("stage1.bin").exists());
-    assert!(other.exists());
-}
-
-#[test]
-fn glob_trees_finds_nested_boot_dirs() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-
-    let nested = root.join("vendor").join(".boot-artifacts");
-    fs::create_dir_all(&nested).unwrap();
-    fs::write(nested.join("kernel.img"), b"x").unwrap();
-
-    lock_worktree_globs(root);
-
-    assert!(nested.join("kernel.img").exists());
 }
 
 #[test]
@@ -238,13 +199,8 @@ fn glob_trees_skips_dotgit() {
     fs::create_dir_all(&git_dir).unwrap();
     fs::write(git_dir.join("config"), b"[core]").unwrap();
 
-    let boot_dir = root.join(".boot");
-    fs::create_dir_all(&boot_dir).unwrap();
-    fs::write(boot_dir.join("initrd"), b"x").unwrap();
-
     lock_worktree_globs(root);
 
-    assert!(boot_dir.join("initrd").exists());
     assert!(git_dir.join("config").exists());
 }
 
@@ -260,35 +216,6 @@ fn glob_trees_does_not_lock_plain_dirs() {
     lock_worktree_globs(root);
 
     assert!(normal.join("main.rs").exists());
-}
-
-#[test]
-fn glob_trees_handles_symlink_dir() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-
-    let real = root.join("real_boot");
-    fs::create_dir_all(&real).unwrap();
-    fs::write(real.join("file"), b"x").unwrap();
-
-    let link = root.join(".boot-link");
-    std::os::unix::fs::symlink(&real, &link).unwrap();
-
-    lock_worktree_globs(root);
-
-    assert!(real.join("file").exists());
-    assert!(link.exists());
-}
-
-#[test]
-fn glob_trees_handles_broken_symlink() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-
-    let link = root.join(".boot-broken");
-    std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
-
-    lock_worktree_globs(root);
 }
 
 // --- glob_match tests ---

@@ -10,8 +10,8 @@ _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 
 resolve_podman() {
-    if [[ -x "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]]; then
-        echo "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman"
+    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
+        echo "/opt/workspace-ci/.boot-linux/bin/podman"
         return 0
     fi
     if _podman_probe="$(command -v real-podman 2>&1)"; then

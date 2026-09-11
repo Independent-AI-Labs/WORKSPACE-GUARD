@@ -44,7 +44,41 @@ fn needs_quotes(s: &str) -> bool {
     if looks_like_number(&lower) {
         return true;
     }
+    if looks_like_timestamp(s) {
+        return true;
+    }
     false
+}
+
+/// YAML 1.1 timestamp shapes PyYAML's SafeLoader resolves implicitly:
+/// `YYYY-M-D` dates (month/day may be single-digit) and the same with
+/// a `[T ]hh:mm:ss...` time suffix.
+fn looks_like_timestamp(s: &str) -> bool {
+    let b = s.as_bytes();
+    let digit = |i: usize| i < b.len() && b[i].is_ascii_digit();
+    if !(digit(0) && digit(1) && digit(2) && digit(3) && b.get(4) == Some(&b'-')) {
+        return false;
+    }
+    let mut i = 5;
+    if !digit(i) {
+        return false;
+    }
+    i += 1;
+    if digit(i) {
+        i += 1;
+    }
+    if b.get(i) != Some(&b'-') {
+        return false;
+    }
+    i += 1;
+    if !digit(i) {
+        return false;
+    }
+    i += 1;
+    if digit(i) {
+        i += 1;
+    }
+    i == b.len() || matches!(b[i], b'T' | b't' | b' ')
 }
 
 /// YAML 1.1 numeric shapes: ints (dec/oct/hex, underscores), floats

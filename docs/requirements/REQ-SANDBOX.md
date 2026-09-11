@@ -167,8 +167,12 @@ The threat model and CVE catalog that these requirements defend against are in
     `chattr +i`; no runtime binary should carry it).
 - **REQ-CAP-061**: The following capabilities are **allowed** only for the
   listed binary paths:
-  - `cap_dac_override` for `/usr/bin/git` (the guard, for reading
-    root-owned `.git/` directory entries).
+  - `cap_setpcap`, `cap_chown`, `cap_dac_override`, and `cap_fowner` for
+    `/usr/bin/git`: `cap_setpcap` establishes the inheritable set needed for
+    the controlled child capability loan, `cap_chown` and `cap_fowner`
+    reconcile protected path ownership and modes, and `cap_dac_override`
+    accesses the sealed real Git and root-owned Git paths. Only
+    `cap_dac_override` may be loaned to `/usr/bin/git.original`.
   - `cap_net_raw` for `/usr/bin/ping` and `/usr/bin/mtr-packet` (ICMP
     echo, expected).
   - `cap_setuid` for `/usr/bin/sudo`, `/usr/bin/su`, `/usr/bin/passwd`

@@ -7,8 +7,8 @@
 //!   1. Consumer side: the repo being committed to has pre-commit,
 //!      commit-msg and pre-push hooks that exist, are executable, and
 //!      carry the generate-hooks AUTO-GENERATED marker.
-//!   2. Deployment side: the projects/CI checkout the hooks source
-//!      live is root-owned, has exec bits matching the git index, and
+//!   2. Deployment side: `/opt/workspace-ci`, where the hooks source
+//!      lives, is root-owned, has exec bits matching the git index, and
 //!      is not ahead of the last-seen origin/main (behind only warns:
 //!      use the installed release control plane to activate a verified release).
 //!
@@ -24,9 +24,6 @@ use std::process::Command;
 
 use crate::GuardError;
 
-#[path = "ci_release_integrity.rs"]
-mod ci_release_integrity;
-use ci_release_integrity::active_release_violations;
 #[path = "ci_hook_identity.rs"]
 mod ci_hook_identity;
 
@@ -38,7 +35,7 @@ const GIT_BIN: &str = "git";
 pub(super) const REQUIRED_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
 const HOOK_MARKER_NEEDLES: [&str; 2] = ["AUTO-GENERATED", "generate-hooks"];
 const MAX_LISTED_VIOLATIONS: usize = 10;
-const CI_DEPLOY_REL: &str = "projects/CI";
+const CI_DEPLOY_PATH: &str = "/opt/workspace-ci";
 const UNTRACKED_ALLOWLIST: [&str; 5] = [
     ".venv/",
     "node_modules/",
@@ -250,7 +247,7 @@ fn divergence_violation(ci_path: &Path, head: &str, upstream: &str, ahead: u64) 
         ));
     }
     eprintln!(
-        "[workspace-guard] WARN: {} is behind origin/main; activate a verified release with workspace-ci-control",
+        "[workspace-guard] WARN: {} is behind origin/main; deploy a reviewed WORKSPACE-CI revision",
         ci_path.display()
     );
     None
@@ -363,30 +360,19 @@ fn deployment_violations(
 
 pub fn check_ci_integrity(toplevel: &str, wsroot: &str) -> Result<(), GuardError> {
     check_consumer_hooks(toplevel)?;
-    let wsroot_path = Path::new(wsroot);
-    let ci_path = wsroot_path.join(CI_DEPLOY_REL);
-    let violations = if fs::symlink_metadata(&ci_path)
-        .map(|meta| meta.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        active_release_violations(wsroot_path)
-    } else {
-        deployment_violations(&ci_path, 0, 0, true)
-    };
-    if violations.is_empty()
-        && fs::symlink_metadata(&ci_path)
-            .map(|meta| meta.file_type().is_symlink())
-            .unwrap_or(false)
-    {
-        ci_hook_identity::check_consumer_hook_identity(toplevel, wsroot_path)?;
+    let _ = wsroot;
+    let ci_path = Path::new(CI_DEPLOY_PATH);
+    let violations = deployment_violations(ci_path, 0, 0, true);
+    if violations.is_empty() {
+        ci_hook_identity::check_consumer_hook_identity(toplevel)?;
     }
     if violations.is_empty() {
         return Ok(());
     }
     Err(GuardError::ContractFailed(format!(
         "CI integrity: deployment {} failed verification:\n  {}\n\
-         Fix: freeze deployment and run sudo /usr/libexec/workspace-ci-control recover;\
-         do not edit projects/CI in place",
+         Fix: run make deploy-ci from reviewed WORKSPACE-CI source;\
+         do not edit /opt/workspace-ci in place",
         ci_path.display(),
         violations.join("\n  ")
     )))

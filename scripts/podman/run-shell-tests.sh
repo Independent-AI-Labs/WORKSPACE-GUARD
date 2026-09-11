@@ -7,10 +7,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECTS_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
-if [ -x "$PROJECTS_ROOT/CI/.boot-linux/bin/real-podman" ]; then
-    PODMAN="$PROJECTS_ROOT/CI/.boot-linux/bin/real-podman"
-elif [ -x "$PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]; then
-    PODMAN="$PROJECTS_ROOT/CI/.boot-linux/bin/podman"
+if [ -x "/opt/workspace-ci/.boot-linux/bin/real-podman" ]; then
+    PODMAN="/opt/workspace-ci/.boot-linux/bin/real-podman"
+elif [ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]; then
+    PODMAN="/opt/workspace-ci/.boot-linux/bin/podman"
 elif command -v real-podman; then
     PODMAN=real-podman
 elif command -v podman; then

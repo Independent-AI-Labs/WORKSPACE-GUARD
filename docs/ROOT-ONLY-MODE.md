@@ -59,10 +59,16 @@ environments where `setcap`, `chattr +i`, and `dpkg-divert` are unavailable:
 
 ```bash
 # Root-only mode (default features disabled)
-cargo build --release --no-default-features --features root-only
+cargo build --config git-guard/.cargo/config.toml \
+  --manifest-path git-guard/Cargo.toml --package workspace-guard \
+  --bin workspace-guard --locked --frozen --offline --release \
+  --target x86_64-unknown-linux-musl --no-default-features --features root-only
 
-# Capability mode (default)
-cargo build --release
+# Capability mode
+cargo build --config git-guard/.cargo/config.toml \
+  --manifest-path git-guard/Cargo.toml --package workspace-guard \
+  --bin workspace-guard --locked --frozen --offline --release \
+  --target x86_64-unknown-linux-musl --no-default-features --features capability-mode
 ```
 
 ## Installation in Root-Only Mode
@@ -72,10 +78,13 @@ no `dpkg-divert`:
 
 ```bash
 # Build
-cargo build --release --no-default-features --features root-only
+cargo build --config git-guard/.cargo/config.toml \
+  --manifest-path git-guard/Cargo.toml --package workspace-guard \
+  --bin workspace-guard --locked --frozen --offline --release \
+  --target x86_64-unknown-linux-musl --no-default-features --features root-only
 
 # Install (as root)
-cp target/release/workspace-guard /usr/bin/git.guard
+cp git-guard/target/x86_64-unknown-linux-musl/release/workspace-guard /usr/bin/git.guard
 mv /usr/bin/git /usr/bin/git.original
 ln -s /usr/bin/git.guard /usr/bin/git
 chmod 0755 /usr/bin/git.guard /usr/bin/git.original
@@ -103,7 +112,8 @@ When built with `root-only`, the guard:
      See docs/ROOT-ONLY-MODE.md for threat model and limitations.
    ```
 3. Applies the full 17-rule policy engine (same as capability mode)
-4. Writes audit logs to `~/.workspace-guard.log` (same as capability mode)
+4. Writes audit logs only to root-owned per-UID files under
+   `/var/log/workspace-guard/` (same as capability mode)
 5. Enforces WORKSPACE-CI contracts (same as capability mode)
 
 ## When to Use Root-Only Mode

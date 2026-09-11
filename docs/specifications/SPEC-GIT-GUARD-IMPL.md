@@ -1,4 +1,4 @@
-# Specification: AMI Git Guard Implementation Details
+# Specification: WORKSPACE Git Guard Implementation Details
 
 **Date:** 2026-05-18
 **Status:** DRAFT
@@ -11,86 +11,113 @@
 
 ### 8.1 Crate Structure
 
-```
-workspace-guard/
-├── Cargo.toml
-├── Cargo.lock
-├── .cargo/
-│   └── config.toml          # target = x86_64-unknown-linux-musl
-└── src/
-    └── main.rs              # multi-module binary (~500 LOC)
+```text
+WORKSPACE-GUARD/
+├── Cargo.toml               # unrelated guard/tool packages only
+├── git-guard/               # standalone privileged package; not a workspace member
+│   ├── Cargo.toml
+│   ├── Cargo.lock
+│   ├── build.rs
+│   ├── .cargo/config.toml   # trusted x86_64-unknown-linux-musl flags/source
+│   └── src/
+│       ├── main.rs
+│       └── linux_ffi.rs
+└── src/                     # shell/binary/SSH/YAML-editor package sources
 ```
 
-A single package is preferred over multiple crates for a single guard binary.
+The privileged Git guard is a standalone package with its own lockfile and no
+path dependency on the broader repository package. This prevents dependencies
+needed by shell guard, binary guard, SSH, YAML editing, or their tests from
+entering Git guard resolution through workspace feature unification. Source files
+shared today are moved or minimally duplicated; no shared local crate is added to
+the privileged closure.
 
 ### 8.2 Dependencies
 
 ```toml
 [dependencies]
-libc = "0.2"    # irreducible FFI: getauxval, fork, _exit, lchown (no nix wrappers)
-nix = "0.29"    # safe wrappers for everything else (user/process/signal/resource/fs)
+libc = "0.2"    # four centralized irreducible Linux FFI operations
+nix = { version = "0.29", default-features = false, features = ["user", "process", "signal", "resource", "fs"] }
+caps = { version = "0.5", optional = true }
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+regex = "1"
 ```
 
 `nix` is an always-on dependency (not feature-gated) with `default-features = false`
 and features `["user", "process", "signal", "resource", "fs"]`. Argument parsing
 is manual. No `clap`, no `thiserror`, no `anyhow`. The standard library is
 sufficient. `libc` is kept ONLY for the four irreducible FFI calls that have no
-safe `nix` substitute (see §8.3).
+safe `nix` substitute (see §8.3). `caps` is present only in the capability-mode
+normal closure. Root-only and capability-mode are mutually exclusive and exactly
+one is selected.
+
+Build dependencies are a distinct reviewed boundary: `serde`, `serde_yaml`, and
+`regex` are used only by the policy compiler. Their complete normal/build/
+proc-macro closure, including `serde_derive` and `unsafe-libyaml`, is recorded in
+a versioned machine-readable closure manifest with exact versions, sources,
+checksums, features, edge kinds, build scripts, and proc-macro status. No runtime
+serialization, regex, YAML, hashing, or tooling crate enters the normal Git-guard
+closure. `serde_json` is not used and is forbidden rather than justified.
+
+The package uses resolver 2 and its own `Cargo.lock`. Builds select the exact
+manifest, package, binary, target, and one deployment feature with
+`--locked --frozen --offline`. A pre-build metadata gate compares normal, build,
+and proc-macro edges against the approved closure for that mode and rejects Git/
+path/alternate-registry sources, duplicate crate versions, checksum/source drift,
+unexpected build scripts/proc macros, and feature drift. Sources come only from a
+trusted read-only store whose Cargo checksums are verified. Third-party build
+code runs as an unprivileged build identity without network or writes outside the
+isolated build/target directory. Root verifies the closure manifest/artifact
+binding and installs; it does not execute dependency build code.
 
 ### 8.3 Unsafe Blocks
 
-Only **four** FFI sites in production code require the `unsafe` gate. Every
-other syscall goes through a safe `nix` wrapper or `std`. Each unsafe block
-carries a `// SAFETY:` comment explaining why it cannot be made safe.
+Production code has one reviewed `src/linux_ffi.rs` boundary. Crate roots use
+`#![deny(unsafe_code)]`; only that module receives the narrow lint allowance.
+The module contains exactly four direct libc operations:
 
-| # | File | Call | Why irreducible |
-|---|------|------|-----------------|
-| 1 | `src/main.rs` | `libc::getauxval(AT_SECURE)` | No `nix` wrapper; only correct SUID-context detection primitive |
-| 2 | `src/exec.rs` | `libc::fork` | Async-signal-safety hazard; no safe substitute preserves fork-without-atfork-handler semantics |
-| 3 | `src/exec.rs` | `libc::_exit` | Only async-signal-safe exit path; `std::process::exit` and Drop runtimes are forbidden post-fork; no `nix` wrapper |
-| 4 | `src/gitdir.rs` | `libc::lchown` | `nix::unistd::chown` follows symlinks (would chown the wrong file); no `nix::lchown` wrapper as of 0.29 |
+| # | Operation | Safe wrapper contract | Why irreducible |
+|---|-----------|-----------------------|-----------------|
+| 1 | `getauxval(AT_SECURE)` | Returns the kernel auxiliary-vector value as typed data | No safe approved wrapper exposes this process-start value |
+| 2 | `fork` | Unsafe wrapper whose caller must satisfy the documented post-fork contract | Forking a potentially multithreaded Rust process requires caller invariants |
+| 3 | `_exit` | Diverging child-only wrapper accepting the fixed internal status | Rust process exit and destructors are forbidden after fork |
+| 4 | `ioctl(FS_IOC_GETFLAGS)` | Accepts a borrowed open regular-file descriptor and returns typed flags/error | No approved safe wrapper exposes this inode-flag operation |
 
-The test module `src/exec_tests.rs` keeps raw `libc::fork` + `libc::_exit` so
-the suite exercises the exact FFI the production path uses (decision: tests
-mirror prod FFI, not nix wrappers).
+Every unsafe block is minimal and immediately preceded by a `// SAFETY:`
+contract proving pointer validity, alignment, lifetime, accepted command/value,
+return/error interpretation, and post-fork restrictions as applicable. The
+module exposes no general ioctl, arbitrary fork callback, arbitrary `_exit`
+status, raw pointer, or raw-fd API.
 
-The call-site snippets (without the gating blocks):
+All other operations use safe APIs. `nix::unistd::geteuid` supplies effective
+UID. The safe `nix` prctl wrapper returns the exact `NoNewPrivileges` state and
+error. `nix::unistd::fchownat` with no-follow semantics replaces `lchown`.
+`nix::unistd::write` over a pre-created owned pipe supplies the fixed child-status
+protocol. Exec, wait, signals, and resource limits remain safe wrappers.
 
-1. **`getauxval(AT_SECURE)`** in `src/main.rs`:
-   ```rust
-   // SAFETY: getauxval(3) reads the process auxiliary vector, a
-   // kernel-populated in-memory array available at process start and never
-   // mutated thereafter. AT_SECURE is a libc integer constant naming a
-   // well-known key. This is the only correct secure-execution detection
-   // primitive; the dynamic linker uses the same call internally.
-   unsafe { libc::getauxval(libc::AT_SECURE) as usize }
-   ```
+Before fork, the parent constructs all argv/environment/C strings and creates a
+close-on-exec status pipe. The child performs only the reviewed capability
+syscalls, a safe allocation-free write of a fixed typed status on setup/exec
+failure, `execve`, and `_exit`. It performs no allocation, formatting, environment
+lookup, logging, locking, panic, unwinding, heap deallocation, or user-facing
+diagnostic. Successful exec closes the pipe by close-on-exec; the parent reads
+the typed status and owns all formatting/reporting. The post-fork call graph is
+enumerated and mechanically checked rather than assumed safe because a function
+ultimately invokes a syscall.
 
-2. **`fork()`** in `src/exec.rs`:
-   ```rust
-   // SAFETY: libc::fork is an irreducible async-signal-safe primitive with
-   // no safe nix substitute. No allocations or lock acquisitions occur
-   // between fork and exec; the only calls in the child are
-   // raise_child_dac_override() (caps syscalls), nix::execve (execve(2)),
-   // and libc::_exit, all async-signal-safe.
-   let pid = unsafe { libc::fork() };
-   ```
+One dedicated test module may directly exercise raw `libc::fork` and
+`libc::_exit` under equivalent adjacent safety contracts. No other production,
+integration, unit, build-script, example, or benchmark code receives an unsafe
+exception. Tests use safe UID and syscall wrappers otherwise.
 
-3. **`_exit()`** in `src/exec.rs`:
-   ```rust
-   // SAFETY: libc::_exit is the only async-signal-safe exit path;
-   // std::process::exit and Drop runtimes are forbidden in the post-fork
-   // child. nix has no _exit wrapper.
-   unsafe { libc::_exit(3); }
-   ```
-
-4. **`lchown()`** in `src/gitdir.rs`:
-   ```rust
-   // SAFETY: libc::lchown(3) takes a NUL-terminated path string and two
-   // numeric ids. `c` is a valid CString from the OsStr bytes of `path`.
-   // lchown does not follow symlinks, so there is no dereference hazard.
-   let rc = unsafe { libc::lchown(c.as_ptr(), 0, 0) };
-   ```
+The build gate parses/scans all Rust targets and rejects unsafe blocks/functions/
+traits, inline assembly, direct `libc::*` calls, lint allowances, or approved-call
+count/location drift outside the exact module/test allow-list. The policy YAML
+exception lists only those exact files and is changed solely through the
+sudo-gated YAML editor.
 
 ### 8.4 Cargo.toml
 
@@ -104,8 +131,13 @@ edition = "2021"
 opt-level = "z"        # optimise for size
 lto = true             # link-time optimisation
 codegen-units = 1      # single codegen unit for better optimisation
-panic = "abort"        # no unwinding in SUID binary
+panic = "abort"        # no unwinding in privileged guard binary
+overflow-checks = true # checked integer arithmetic in release
 strip = true           # strip symbols
+
+[profile.dev]
+panic = "abort"
+overflow-checks = true
 
 [dependencies]
 libc = "0.2"
@@ -120,11 +152,30 @@ Static linking eliminates shared library injection vectors: there are no `.so` f
 
 The musl toolchain is a hard prerequisite, provisioned by the host bootstrap. If the musl target is not installed, the build aborts with a provisioning error directing the operator to install the toolchain; a dynamically-linked gnu build is never produced.
 
+Committed trusted target configuration supplies the pinned linker and hardening
+flags needed for static PIE, full RELRO, non-executable stack, and stack
+protection. The build entry point starts from a controlled build environment and
+rejects inherited `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, rustc wrappers, linker
+overrides, target overrides, and other compiler/linker controls rather than
+silently combining them with trusted flags. It builds with the pinned toolchain,
+explicit target, release profile, selected guard feature, and locked dependency
+graph.
+
+An independent verifier inspects the resulting ELF rather than trusting Cargo
+configuration. It requires static PIE, `GNU_RELRO`, non-executable `GNU_STACK`,
+the pinned stack-protection evidence, no `PT_INTERP`, no dynamic dependencies,
+and the expected stripped release artifact. It also verifies the pinned target/
+architecture and records a cryptographic digest. Installation copies those exact
+bytes, checks destination inode type/ownership/mode and digest, reruns the ELF
+verifier against the destination, and only then applies file capabilities. Any
+unsupported flag, missing verifier/tool, ambiguous output, property mismatch,
+copy race, or digest mismatch aborts before capability labeling.
+
 ### 8.6 Resource Limits
 
 Before `execve()`, the guard sets:
 - `RLIMIT_NOFILE` to 256: limits open file descriptors
-- `RLIMIT_CORE` to 0: disables core dumps (prevents memory disclosure from SUID context)
+- `RLIMIT_CORE` to 0: disables core dumps from the capability-enabled process
 
 Set via `nix::sys::resource::setrlimit()` (safe wrapper over `setrlimit(2)`).
 
@@ -134,16 +185,79 @@ The guard uses a simple `Result` type with explicit exit codes:
 
 ```rust
 enum GuardError {
-    NotSuid,              // exit 3
-    GitOriginalMissing,   // exit 3
-    GitOriginalBadPerms,  // exit 3
-    NullByteInArg,        // exit 2
-    Blocked { reason: String, hint: String },  // exit 1
-    ContractFailed,       // exit 4
+    GuardUnavailable { stage, cause, os_status }, // exit 3
+    InvalidInvocation { kind, evidence }, // exit 2; caller-caused validation
+    PolicyDenied { reason, hint },        // exit 1
+    ContractRejected { child_code },      // exit 4
+    ContractUnavailable { stage, cause, os_status }, // exit 4
+    ContractRequiredOutsideWorkspace { destination }, // exit 4
 }
 ```
 
-No panics. `panic = "abort"` in release mode. Any unexpected condition is treated as a block (fail-closed) rather than a crash.
+Capability-set/query, deployment-class, `NoNewPrivileges`, resource-limit, and
+root-only effective-UID failures map to `GuardUnavailable`. They exit 3 before
+argument policy evaluation. Inspection errors remain distinct evidence and
+cannot pass as an acceptable value. Exit 2 remains reserved for malformed
+arguments.
+
+Every typed contract variant maps to exit 4 and prevents requested Git from
+starting. Normal runner rejection, unavailable scope/integrity/execution, and
+outside-workspace protected or indeterminate destination remain distinct through
+stderr, tty, and audit dispatch. Helper failure never becomes an empty successful
+result. A propagated real-Git exit 4 is not a `GuardError` and emits no contract
+diagnostic.
+
+The exhaustive outcome dispatcher formats each guard-enforced failure once and
+passes immutable bytes to one delivery function. That function returns typed
+stderr, controlling-tty open/identity, and tty-write results; it never exits or
+silently discards an I/O error. Safe terminal APIs compare terminal/session
+identity rather than filesystem identity so `/dev/tty` and its aliased
+`/dev/pts/N` are not double-written. Warnings and real-Git streams bypass this
+dual-destination function.
+
+Runtime warnings are a closed `WarningKind` enum with typed raw-byte fields.
+Their formatter emits §5.6's single ASCII line through one checked stderr-only
+writer and performs no audit or tty operation. The writer returns
+`GuardUnavailable { stage: WarningStderr, ... }` on short/non-retryable writes;
+before Git this prevents execution, while post-Git reconcile reporting states
+that the operation may already stand. Environment values and reconcile paths
+remain `OsStr` bytes rather than `String`/`Path::display()` output.
+
+Stream ownership follows §5.7. Real Git inherits stdout/stderr directly and no
+guard-generated text reaches stdout. Policy helpers pipe stdout only for typed
+protocol parsing and encode stderr incrementally as contiguous
+`HELPER-STDERR` chunks; reader/join failure is typed and never
+`unwrap_or_default()`. Contract streams retain their separate concurrent
+byte-streaming path. Trace enablement is one startup-snapshot boolean; trace uses
+closed phase tokens, nanosecond decimal duration, and checked stderr writes.
+Pre/post-Git diagnostic write failures map to the corresponding
+`GuardUnavailable` stage, while contract stream failure remains exit 4.
+
+Real-Git missing/bad identity also maps to `GuardUnavailable`. Its verifier uses
+no-follow metadata, requires a regular `root:root` file with `st_mode & 07777`
+equal to `0700`, and rejects the running guard's own device/inode pair.
+
+Argument conversion uses raw Unix `OsStr` bytes. Non-UTF-8 is valid and remains
+byte-identical except in fields with an explicit ASCII inspection contract.
+Internal/test NUL, missing recognized global operands, indeterminate unknown
+global-option arity, uninspectable safety-critical config keys, and `CString`
+conversion failure map to `InvalidInvocation` and exit 2. Conversion never
+inserts a replacement argument or drops an argument. Reliably classifiable Git
+syntax errors are forwarded unchanged.
+
+Parser state stores byte ranges/indexes into the original `Vec<OsString>` and
+compares policy syntax with ASCII byte constants; it never calls `trim`,
+`to_string_lossy`, `from_utf8_lossy`, or `from_utf8(...).unwrap_or("")` on
+caller-controlled data. Paths remain `PathBuf`/`OsString`, helper protocols parse
+exact byte grammars, and environment catalog matching uses name bytes. One
+pre-fork conversion pass builds argv/environment `CString` vectors or returns a
+typed error. Caller argv failure maps to exit 2; guard-owned construction failure
+maps to exit 3. Accepted `argv[0]` and every remaining argument are forwarded
+without substitution, omission, normalization, or reordering.
+
+No panics. `panic = "abort"` in release mode. Unexpected internal conditions use
+typed exit-3 failures rather than masquerading as invocation validation or policy
+denial.
 
 ---
 
@@ -158,21 +272,21 @@ No panics. `panic = "abort"` in release mode. Any unexpected condition is treate
 | User runs `git push --force` | Flag deny-list (§4, check 3c) |
 | User bypasses pre-commit hooks via `SKIP=1` | Env var sanitisation (§5.1) |
 | User sets `-c core.hooksPath=/tmp/evil` | Config key block list (§4, check 3) |
-| User puts malicious binary in PATH | PATH reset (§5.2) |
-| User compiles own git wrapper and runs it | AT_SECURE check (§2.2) |
+| User tries to redirect a guard-owned child through PATH | Fixed absolute verified child paths (§5.2) |
+| User compiles own git wrapper and runs it | Required kernel capability-set and deployment-class checks (§2.2) |
 | User reads guard binary to find git.original path | git.original is 0700 root-only (§2.1) |
 | User tries to exec git.original directly | Permission denied (0700 root:root) |
 | User uses `LD_PRELOAD` to inject code | Env var unset (§5.1) + static linking |
 | User pushes from CI script to bypass hooks | Background push detection (§4, check 4d) |
-| User amends a pushed commit | Ancestor check via merge-base (§4, check 4e) |
-| User reverts un-pushed work | Ancestor check (§4, check 4f) |
+| User amends a commit | Non-root amend sudo gate (§4, check 4d) |
+| User reverts a local or pushed commit | Allowed forward operation; hooks and reconciliation apply |
 | User creates merge commit on main | Protected branch rule (§4, check 5) |
 | User deletes .pre-commit-config.yaml then pushes | P3 contract check (§6.2) |
 | User installs alternate git via apt | dpkg-divert prevents overwrite (§5.2 in SPEC-GIT-GUARD-INSTALL) |
 | User accesses git via snap/flatpak | Snap/flatpak git binaries restricted to 000 (§12.1 in SPEC-GIT-GUARD-INSTALL) |
-| User downloads git binary from upstream | PATH controlled; git at `/usr/bin` is the only canonical path. Pre-commit hooks detect unapproved git usage |
-| User modifies .bashrc to add PATH bypass | PATH is reset by the guard before execve (§5.2). The guard does not trust the invoking environment |
-| User replaces guard binary with own version | SUID bit set by root only; immutable attribute `chattr +i` prevents modification (§12.3 in SPEC-GIT-GUARD-INSTALL) |
+| User downloads git binary from upstream | Installation/permission controls protect canonical `/usr/bin/git`; child PATH is not this boundary |
+| User modifies PATH | Guard-owned children remain fixed absolute paths; caller tools retain intended PATH behavior (§5.2) |
+| User replaces guard binary with own version | Root ownership and immutable attribute `chattr +i` prevent modification |
 | User modifies dpkg to remove diversion | Apt post-invoke hook detects and warns (§5.6 in SPEC-GIT-GUARD-INSTALL). Divert is root-only operation |
 | User compiles git from source | Source compile goes to `/usr/local/bin/git` which is restricted to 000 (§12.1 in SPEC-GIT-GUARD-INSTALL) |
 
@@ -180,7 +294,7 @@ No panics. `panic = "abort"` in release mode. Any unexpected condition is treate
 
 | Threat | Reason |
 |--------|--------|
-| User has root access | Root can remove SUID bit, reinstall git, remove diversion, etc. The guard protects against workspace users, not root. Root access IS a security boundary violation: all root actions are audited. |
+| User has root access | Root can remove file capabilities, reinstall git, remove diversion, etc. The guard protects against workspace users, not root. Root access is a security boundary violation and root actions are audited. |
 | Kernel exploit | Out of scope. If the kernel is compromised, no user-space mechanism helps. |
 | Hardware-level attack | Out of scope. |
 
@@ -188,10 +302,10 @@ No panics. `panic = "abort"` in release mode. Any unexpected condition is treate
 
 The guard implements multiple independent layers of defense:
 
-1. **SUID Root**: Only the guard can invoke real git; real git is 0700 root:root
+1. **Capability Boundary**: Only the four-capability guard can invoke real Git; real Git is 0700 root:root
 2. **Argument Validation**: All args parsed and validated before execve
 3. **Environment Sanitisation**: Allow-list approach; no dangerous env vars passed through
-4. **PATH Reset**: Known-safe PATH prevents PATH injection
+4. **Absolute Child Selection**: Caller PATH is preserved but never locates guard-owned executables
 5. **dpkg-divert**: Prevents apt from overwriting the guard
 6. **Immutable Attribute**: `chattr +i` prevents filesystem-level tampering
 7. **Apt Hook**: Detects git package changes and warns
@@ -202,7 +316,7 @@ The guard implements multiple independent layers of defense:
 
 ### 9.4 Blast Radius
 
-If the guard binary has a bug that allows arbitrary code execution with root privileges:
+If the guard binary has a bug that allows arbitrary code execution with its four capabilities:
 - The binary is ~500 LOC: small audit surface
 - Static linking removes shared library attack vectors
 - No network I/O, no file parsing, no deserialisation
@@ -211,7 +325,9 @@ If the guard binary has a bug that allows arbitrary code execution with root pri
 - `RLIMIT_NOFILE=256` limits file descriptor exhaustion
 - The only privileged operation is `execve()` of a known-good binary
 
-The worst-case RCE allows the attacker to run arbitrary commands as root: which they could already do if they compromised the real git binary. The guard doesn't increase the blast radius beyond what the existing SUID model already allows.
+The worst-case guard RCE receives `CAP_SETPCAP`, `CAP_CHOWN`,
+`CAP_DAC_OVERRIDE`, and `CAP_FOWNER`, not UID 0. This remains a severe local
+privilege boundary failure, but its authority is bounded by the capability set.
 
 ---
 
@@ -219,12 +335,13 @@ The worst-case RCE allows the attacker to run arbitrary commands as root: which 
 
 | Path | Purpose |
 |------|---------|
-| `/usr/bin/git` | workspace-guard SUID binary (installed) |
+| `/usr/bin/git` | workspace-guard capability-enabled binary (installed) |
 | `/usr/bin/git.original` | real git binary (relocated, 0700 root:root) |
 | `projects/WORKSPACE-GUARD/` | Rust source code repository |
-| `projects/WORKSPACE-GUARD/src/main.rs` | Multi-module Rust implementation |
-| `projects/WORKSPACE-GUARD/Cargo.toml` | Package manifest |
-| `projects/WORKSPACE-GUARD/Cargo.lock` | Locked dependencies |
+| `projects/WORKSPACE-GUARD/git-guard/src/main.rs` | Privileged multi-module Rust implementation |
+| `projects/WORKSPACE-GUARD/git-guard/Cargo.toml` | Isolated package manifest |
+| `projects/WORKSPACE-GUARD/git-guard/Cargo.lock` | Isolated locked dependencies |
+| `projects/WORKSPACE-GUARD/git-guard/dependency-closure.json` | Approved normal/build/proc-macro closures |
 
 ---
 
@@ -240,61 +357,61 @@ The worst-case RCE allows the attacker to run arbitrary commands as root: which 
 | REQ-GGUARD-006 | §2.3 | Covered |
 | REQ-GGUARD-007 | §8.3 | Covered |
 | REQ-GGUARD-010 | §3.3 | Covered |
-| REQ-GGUARD-011 | §3.1 | Covered |
-| REQ-GGUARD-012 | §3.2 | Covered |
-| REQ-GGUARD-013 | §3.2 | Covered |
+| REQ-GGUARD-011 | §3.1 | Specified; implementation update tracked |
+| REQ-GGUARD-012 | §3.4 | Specified; implementation update tracked |
+| REQ-GGUARD-013 | §3.5 | Specified; implementation update tracked |
 | REQ-GGUARD-014 | §3.1 | Covered |
-| REQ-GGUARD-020 | §4, check 1 | Covered |
-| REQ-GGUARD-021 | §4.1 | Covered |
-| REQ-GGUARD-030 | §4, check 2 | Covered |
-| REQ-GGUARD-031 | §4, check 3 | Covered |
-| REQ-GGUARD-040 | §4, check 3 | Covered |
-| REQ-GGUARD-041 | §3.1 Phase 2 | Covered |
-| REQ-GGUARD-042 | §4, check 3 | Covered |
-| REQ-GGUARD-050 | §4, check 4a | Covered |
-| REQ-GGUARD-051 | §4, check 4b | Covered |
-| REQ-GGUARD-052 | §4, check 4c | Covered |
-| REQ-GGUARD-053 | §4, check 4d | Covered |
-| REQ-GGUARD-054 | §4, check 4e | Covered |
-| REQ-GGUARD-055 | §4, check 4f | Covered |
-| REQ-GGUARD-060 | §4, check 5 | Covered |
-| REQ-GGUARD-061 | §4, check 5a | Covered |
-| REQ-GGUARD-062 | §4, check 5b | Covered |
-| REQ-GGUARD-063 | §4, check 5 | Covered |
-| REQ-GGUARD-070 | §5.1 | Covered |
-| REQ-GGUARD-071 | §5.1 | Covered |
-| REQ-GGUARD-072 | §5.2 | Covered |
-| REQ-GGUARD-073 | §5.3 | Covered |
-| REQ-GGUARD-074 | §2.2, §5.4 | Covered |
-| REQ-GGUARD-080 | §6.2 | Covered |
-| REQ-GGUARD-081 | §6.1 | Covered |
-| REQ-GGUARD-082 | §6.1 | Covered |
-| REQ-GGUARD-083 | §6.2 | Covered |
-| REQ-GGUARD-084 | §6.2 | Covered |
-| REQ-GGUARD-085 | §6.2 | Covered |
-| REQ-GGUARD-086 | §6.4 | Covered |
-| REQ-GGUARD-090 | §7.1 | Covered |
-| REQ-GGUARD-091 | §7.1 | Covered |
-| REQ-GGUARD-092 | §7.4 | Covered |
-| REQ-GGUARD-093 | §7.3 | Covered |
-| REQ-GGUARD-100 | §8.7 | Covered |
-| REQ-GGUARD-101 | §8.7 | Covered |
-| REQ-GGUARD-102 | §8.7 | Covered |
-| REQ-GGUARD-103 | §8.7 | Covered |
-| REQ-GGUARD-104 | §8.7 | Covered |
-| REQ-GGUARD-110 | §4.1 | Covered |
-| REQ-GGUARD-111 | §4.1 | Covered |
-| REQ-GGUARD-112 | §6.4 | Covered |
-| REQ-GGUARD-113 | §4.1 | Covered |
-| REQ-GGUARD-120 | §8.4 | Covered |
-| REQ-GGUARD-121 | §8.3 | Covered |
-| REQ-GGUARD-122 | §8.2 | Covered |
-| REQ-GGUARD-123 | §3.1 | Covered |
+| REQ-GGUARD-020/020a/020b | §4, check 1 | Specified; matrix validation tracked |
+| REQ-GGUARD-021 | §4.1 | Specified; formatter and delivery updates tracked |
+| REQ-GGUARD-030 | §3.1 phase 3, §4 check 2 | Specified; command-option parser update tracked |
+| REQ-GGUARD-031 | §3.3 | Specified; config-option parser update tracked |
+| REQ-GGUARD-040 | §3.3, §4 check 3 | Specified; catalog hardening tracked |
+| REQ-GGUARD-041 | §3.3 | Specified; key parser hardening tracked |
+| REQ-GGUARD-042 | §3.3, §4 check 3 | Specified; passthrough verification tracked |
+| REQ-GGUARD-050 | §3.4, §4 check 1 | Enforced; cleanup and coverage tracked |
+| REQ-GGUARD-051 | §3.2, §4 branch policy | Critical parser/enforcement work tracked |
+| REQ-GGUARD-052 | §3.2, §4 push policy | Critical parser/config work tracked |
+| REQ-GGUARD-053 | §4 push foreground check | Critical parser fix tracked |
+| REQ-GGUARD-054 | §3.2, §4 check 4d | Enforced; parser coverage tracked |
+| REQ-GGUARD-055 | §3.2, §7 reconciliation | Obsolete ancestry policy removal tracked |
+| REQ-GGUARD-060 | §4 protected catalog/check 5 | Enforced; validation and coverage tracked |
+| REQ-GGUARD-061 | §3.2, §4 check 5a | Critical effective-mode parser work tracked |
+| REQ-GGUARD-062 | §3.2, §4 check 5b | Critical effective-mode parser work tracked |
+| REQ-GGUARD-063 | §4 check 5, §4.3 | Critical context/error handling work tracked |
+| REQ-GGUARD-070 | §5.1 | Critical allow-list implementation work tracked |
+| REQ-GGUARD-071 | §4 check 6, §5.1 | Enforced; byte-safe/catalog coverage tracked |
+| REQ-GGUARD-072 | §5.2 | Preservation/config migration tracked |
+| REQ-GGUARD-073 | §5.1, §5.3 | Catalog migration and trust-boundary tests tracked |
+| REQ-GGUARD-074 | §2.2, §5.4-5.5 | Universal secure_getenv retired; snapshot/diagnostics tracked |
+| REQ-GGUARD-080 | §6, §6.2 | Policy catalog correction and coverage tracked |
+| REQ-GGUARD-081 | §4.3, §6.1 | Critical trusted-registry replacement tracked |
+| REQ-GGUARD-082 | §6.1 | Critical protected-destination resolution work tracked |
+| REQ-GGUARD-083 | §6.2-6.4 | Critical fixed-runner implementation work tracked |
+| REQ-GGUARD-084 | §6.2 | Naming, byte safety, and spoofing coverage tracked |
+| REQ-GGUARD-085 | §4.1, §6.2 | Typed streaming/failure reporting tracked |
+| REQ-GGUARD-086 | §6.2, §6.4 | Typed unavailable-deployment coverage tracked |
+| REQ-GGUARD-090 | §7.1-7.4 | Critical root-owned audit sink work tracked |
+| REQ-GGUARD-091 | §7.1-7.3 | Canonical byte-record implementation tracked |
+| REQ-GGUARD-092 | §7.1-7.4 | Typed non-recursive failure handling tracked |
+| REQ-GGUARD-093 | §4.1, §7.1-7.3 | Complete forensic evidence work tracked |
+| REQ-GGUARD-100 | §8.5 | Exit/signal propagation and typed failures tracked |
+| REQ-GGUARD-101 | §4.1-4.2 | Typed policy-denial dispatcher work tracked |
+| REQ-GGUARD-102 | §3.1, §8.7 | Typed validation/parser work tracked |
+| REQ-GGUARD-103 | §2.2-2.3, §8.6 | Critical exit-3 verification/supervision work tracked |
+| REQ-GGUARD-104 | §6.1-6.4, §7.1-7.4, §8.7 | Critical typed exit-4 dispatch and fail-closed helper work tracked |
+| REQ-GGUARD-110 | §4.1, §8.7 | Critical shared delivery and terminal-identity work tracked |
+| REQ-GGUARD-111 | §4.1, §7.1 | Critical canonical formatter/evidence-object work tracked |
+| REQ-GGUARD-112 | §4.1, §5.6, §7.1-7.2, §8.7 | Critical typed warning/write-failure work tracked |
+| REQ-GGUARD-113 | §4.1, §5.5, §5.7, §6.2, §8.5-8.7 | Critical stream ownership/framing/write-failure work tracked |
+| REQ-GGUARD-120 | §8.4-8.5 | Critical profile/linker/final-ELF/install verification work tracked |
+| REQ-GGUARD-121 | §8.3 | Critical centralized FFI/post-fork/build-gate work tracked |
+| REQ-GGUARD-122 | §8.1-8.2, §8.4-8.5 | Critical package split/closure/offline-build work tracked |
+| REQ-GGUARD-123 | §3.1, §3.3-3.6, §5.1-5.5 | Critical byte-parser/path/helper/conversion work tracked |
 | REQ-GGUARD-124 | §8.6 | Covered |
 | REQ-GGUARD-125 | §7.4 | Covered |
-| REQ-GGUARD-130 | §4.2 | Covered |
-| REQ-GGUARD-131 | §4.2 | Covered |
-| REQ-GGUARD-132 | §4.2 | Covered |
+| REQ-GGUARD-130 | §4.3 | Covered |
+| REQ-GGUARD-131 | §4.3 | Covered |
+| REQ-GGUARD-132 | §4.3 | Covered |
 | REQ-GGUARD-140 | SPEC-GIT-GUARD-INSTALL §1, §9 | Covered |
 | REQ-GGUARD-141 | SPEC-GIT-GUARD-INSTALL §2 | Covered |
 | REQ-GGUARD-142 | SPEC-GIT-GUARD-INSTALL §4.1-4.2 | Covered |

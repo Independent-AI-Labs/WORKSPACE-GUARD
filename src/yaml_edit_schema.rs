@@ -61,15 +61,29 @@ pub fn builtins() -> Vec<Schema> {
             basename: s("banned_words_exceptions.yaml"),
             key: s("exceptions"),
             kind: Kind::ListOfMaps,
-            required: vec![s("pattern")],
-            required_lists: vec![s("paths")],
+            required: vec![
+                s("rule"),
+                s("path"),
+                s("rationale"),
+                s("owner"),
+                s("review_date"),
+                s("removal"),
+            ],
+            min_length: vec![(s("rationale"), 20), (s("removal"), 8)],
             ..Default::default()
         },
         Schema {
             basename: s("silent_swallow_exceptions.yaml"),
             key: s("exceptions"),
             kind: Kind::ListOfMaps,
-            list_fields: vec![s("paths")],
+            required: vec![
+                s("path"),
+                s("rationale"),
+                s("owner"),
+                s("review_date"),
+                s("removal"),
+            ],
+            min_length: vec![(s("rationale"), 20), (s("removal"), 8)],
             ..Default::default()
         },
         Schema {

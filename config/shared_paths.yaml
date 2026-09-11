@@ -17,9 +17,8 @@ version: 1
 
 log_file: .workspace-guard.log
 child_path: /usr/local/bin:/usr/bin:/bin
-contract_script: projects/CI/lib/checks_quality.sh
+contract_script: /opt/workspace-ci/lib/checks_quality.sh
 enforcement_config: workspace/config/project_enforcement.yaml
 workspace_markers:
   - .boot-linux
-  - projects/CI
   - workspace/scripts/utils/git-guard

@@ -3,8 +3,8 @@
 //!
 //! Before delegating to the real git binary, the guard claims ownership
 //! of every path declared in the config: the `.git/` tree MINUS its
-//! object stores (see GITDIR_PRUNE_DIR_NAMES), recursive directory
-//! trees matching glob patterns (e.g. `.boot*`), individual files
+//! object stores (see GITDIR_PRUNE_DIR_NAMES), configured recursive
+//! directory-tree glob patterns, individual files
 //! (e.g. `.gitmodules`), and files matching filename glob patterns
 //! (e.g. `*_exceptions.yaml`).  Every matched path is `chown`'d to
 //! `root:root` at the mode specified in the config.  Files that
@@ -71,8 +71,6 @@
 //! All locked paths are defined in `config/shared_locked_paths.yaml` --
 //! NOT hardcoded in Rust.  Edit the YAML and rebuild; no code changes
 //! needed to add or remove a locked path.
-
-#![cfg(feature = "capability-mode")]
 
 use std::ffi::{CString, OsString};
 use std::fs;
@@ -145,7 +143,7 @@ pub fn lock(git_dir: &Path) {
         }
     }
 
-    // 3+4. Tree glob patterns (e.g. .boot*) and filename glob patterns
+    // 3+4. Configured tree glob patterns and filename glob patterns
     // (e.g. *_exceptions.yaml) in ONE recursive worktree walk. The lock
     // is unconditional: edits to locked policy files go through the
     // root-gated workspace-yaml-edit binary (SPEC-YAML-EDIT); there is
@@ -177,7 +175,7 @@ fn is_pruned_dir(name: &str) -> bool {
 /// Single recursive worktree walk that evaluates BOTH glob pattern
 /// classes in one pass:
 ///   - directory names matching LOCKED_RECURSIVE_TREE_GLOB_PATTERNS
-///     (e.g. `.boot*`) have their whole tree locked via lock_tree()
+///     have their whole tree locked via lock_tree()
 ///   - file names matching LOCKED_GLOB_PATTERNS (e.g.
 ///     `*_exceptions.yaml`) are locked with the pattern's mode
 ///

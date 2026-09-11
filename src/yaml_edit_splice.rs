@@ -29,7 +29,7 @@ pub struct KeyLine {
     pub comment: String,
 }
 
-fn leading_spaces(s: &str) -> usize {
+pub(crate) fn leading_spaces(s: &str) -> usize {
     s.len() - s.trim_start_matches(' ').len()
 }
 
@@ -114,13 +114,13 @@ pub fn parse_key_line(line: &str) -> Option<KeyLine> {
     None
 }
 
-fn is_content(line: &str) -> bool {
+pub(crate) fn is_content(line: &str) -> bool {
     let t = line.trim_start_matches(' ');
     !t.is_empty() && !t.starts_with('#')
 }
 
 /// Exclusive end of the block region under a key line.
-fn region_end(lines: &[&str], key_line: usize, indent: usize) -> usize {
+pub(crate) fn region_end(lines: &[&str], key_line: usize, indent: usize) -> usize {
     let mut i = key_line + 1;
     while i < lines.len() {
         if is_content(lines[i]) && leading_spaces(lines[i]) <= indent {
@@ -433,6 +433,38 @@ pub fn splice_set(original: &str, segments: &[String], value: &Value) -> Result<
     out.extend(lines[..line].iter().map(|s| s.to_string()));
     out.extend(emit_kv(key, value, indent));
     out.extend(lines[end + 1..].iter().map(|s| s.to_string()));
+    Ok(join_lines(&out, original))
+}
+
+/// Append a previously absent scalar key under an existing block
+/// mapping addressed by `parent_segments`. Fails closed when the
+/// parent is flow style or otherwise not a plain block map.
+pub fn splice_insert_map_key(
+    original: &str,
+    parent_segments: &[String],
+    leaf: &str,
+    value: &Value,
+) -> Result<String, String> {
+    let lines: Vec<&str> = original.lines().collect();
+    let (line, _end, indent) = find_node(&lines, parent_segments)?;
+    let kl = parse_key_line(lines[line]).ok_or("cannot locate parent key line")?;
+    if !kl.rest.is_empty() {
+        return Err(format!(
+            "cannot insert into non-block mapping: {}",
+            parent_segments.join(".")
+        ));
+    }
+    let rend = region_end(&lines, line, indent);
+    let mut lastc = line;
+    for (i, l) in lines.iter().enumerate().take(rend).skip(line + 1) {
+        if is_content(l) {
+            lastc = i;
+        }
+    }
+    let mut out: Vec<String> = Vec::new();
+    out.extend(lines[..=lastc].iter().map(|s| s.to_string()));
+    out.extend(emit_kv(leaf, value, indent + 2));
+    out.extend(lines[lastc + 1..].iter().map(|s| s.to_string()));
     Ok(join_lines(&out, original))
 }
 

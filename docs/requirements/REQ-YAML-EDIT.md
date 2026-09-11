@@ -48,13 +48,19 @@ splitting). The replacement:
   path given to it (repo-agnostic), not on a hardcoded repo or
   directory glob.
 
-- **REQ-YE-002**: The tool shall support six intents:
+- **REQ-YE-002**: The tool shall support these intents:
   - `add <file> <list-key> <field-spec>...`: append one map entry to
     a list-of-maps key, or one item to a scalar-list key.
   - `remove <file> <list-key> <field-spec>...`: delete every list
     entry matching ALL given field specs.
   - `set <file> <dotted.key> <value>`: set a scalar key, top-level or
     nested.
+  - `unset <file> <path>`: remove a mapping field addressed by an
+    ordinary dotted path or a dotted path containing list wildcards.
+  - `remove-comment <file> <text>`: remove every standalone YAML
+    comment line whose comment text exactly equals `text`.
+  - `delete <file> --expected-sha256 <digest>`: delete one policy file
+    only when its current SHA-256 equals the reviewed digest.
   - `get <file> <dotted.key>`: print a scalar value. Read-only.
   - `list <file> [list-key]`: print the file or one key's block.
     Read-only.
@@ -80,6 +86,27 @@ splitting). The replacement:
   YAML parse of the document. Line-oriented scanning may only locate
   byte ranges to splice; it shall never decide meaning.
 
+- **REQ-YE-007**: `unset` path syntax shall consist only of non-empty
+  mapping segments separated by dots, with `[]` permitted only as a
+  suffix on a non-final segment. A wildcard applies the remaining path
+  to every sequence item. Unsupported brackets, indexes, empty
+  segments, and a terminal wildcard shall be rejected before mutation.
+
+- **REQ-YE-008**: `unset` shall validate the complete path expansion
+  before producing output. Every traversed mapping field and sequence
+  shall exist, every wildcard sequence shall be non-empty, every
+  wildcard item shall be a mapping, and every expanded path shall end
+  at an existing field. Missing, zero-match, malformed, or partially
+  valid expansions shall fail without changing the file. Success shall
+  report the number of removed fields.
+
+- **REQ-YE-009**: `remove-comment` shall match only full comment lines
+  after removing indentation, the leading `#`, and indentation spaces
+  immediately following `#`. Matching shall then be byte-literal, never
+  regular-expression based. It shall remove every exact match, report
+  the count, fail when the count is zero, and leave scalar values,
+  inline comments, similar comments, and unrelated bytes unchanged.
+
 ---
 
 ## 2. Atomicity and Fail-Closed Writes (REQ-YE-100 series)
@@ -89,15 +116,19 @@ splitting). The replacement:
   atomically rename it over the target. A failed transform or
   validation shall leave the target byte-identical.
 
-- **REQ-YE-101**: The installed file shall be owned `root:root` with
-  mode 0644 regardless of umask.
+- **REQ-YE-101**: The replacement file shall preserve the target's
+  owner uid, group gid, and permission mode regardless of umask. The
+  mutation preflight still requires the existing `root:root` ownership
+  policy of REQ-YE-102.
 
 - **REQ-YE-102**: The tool shall refuse to operate on:
   - a non-existent file (exit 2; it never creates policy files),
   - a symlink (canonical path must equal the given path),
+  - a path containing a parent-directory (`..`) traversal component,
   - a file not owned by `root:root` for mutations (the tool exists to
     edit guard-locked policy files, not user-owned YAML),
   - a symlink for reads as well (`list`/`get`/`validate`),
+  - any mutation target whose canonical path is `/opt` or below `/opt`,
   - input it cannot parse (exit 1 with a diagnostic).
 
 - **REQ-YE-103**: Header comments, unrelated keys, and their
@@ -111,6 +142,32 @@ splitting). The replacement:
 - **REQ-YE-105**: `--dry-run` shall print the would-be result as a
   unified diff and shall not modify anything. Dry runs are read-only
   and not root-gated.
+
+- **REQ-YE-106**: Every replacement shall flush the completed temp
+  file before publication and flush the parent directory after atomic
+  rename. A successful deletion shall flush its parent directory after
+  unlink.
+
+- **REQ-YE-107**: Every mutating text operation shall produce exactly
+  one terminal newline, shall not introduce a blank or whitespace-only
+  line at EOF, and shall not emit trailing whitespace on changed lines.
+  Interior unrelated lines and formatting shall remain byte-identical.
+
+- **REQ-YE-108**: Target files shall be opened without following
+  symlinks and identified by device and inode. The tool shall recheck
+  the path identity immediately before rename or deletion and fail if
+  the opened file was replaced. No failed operation may partially
+  mutate the target.
+
+- **REQ-YE-109**: `delete` shall require an existing regular file and a
+  syntactically valid expected SHA-256 digest. It shall hash the
+  no-follow open file, verify identity and metadata stability after
+  hashing, reject malformed YAML, compare the digest immediately before
+  unlink, and delete
+  only the verified path through its already-open parent directory.
+  Symlinks, directories, non-regular files, globs, recursive deletion,
+  digest mismatch, and concurrent replacement shall be rejected. On
+  success it shall print the deleted path and verified digest.
 
 ---
 
@@ -147,6 +204,12 @@ splitting). The replacement:
   path segments. `set` on a key that opens a block (list, map, or
   block scalar) shall be refused with exit 2.
 
+- **REQ-YE-205**: `set --create` shall insert a previously absent
+  leaf key under a parent path that resolves to an existing block
+  mapping; without `--create`, or when the parent is missing, flow
+  style, or not a mapping, the mutation shall fail closed. Creating
+  top-level keys remains the job of `bootstrap`.
+
 ---
 
 ## 4. Schema Registry and Validation (REQ-YE-300 series)
@@ -157,6 +220,12 @@ splitting). The replacement:
   count +1 and new entry deep-equals the spec; remove: no entry
   matches; set: key equals the new value). Verification shall never
   reuse the transform's own intermediate representation.
+
+- **REQ-YE-304**: `unset` verification shall reparse the transformed
+  bytes and deep-compare them with a separately constructed expected
+  document containing exactly the validated field removals.
+  `remove-comment` verification shall reparse the transformed bytes and
+  require semantic equality with the original document.
 
 - **REQ-YE-301**: A schema registry shall validate known files by
   basename. The registry shall consist of a compiled-in table for the
@@ -179,14 +248,16 @@ splitting). The replacement:
 
 ## 5. Sudo Gating (REQ-YE-400 series)
 
-- **REQ-YE-400**: `add`, `remove`, and `set` shall refuse to run as
-  non-root (exit 2). `list`, `get`, `validate`, and `--dry-run` shall
-  run as any user.
+- **REQ-YE-400**: `add`, `remove`, `set`, `bootstrap`, `unset`,
+  `remove-comment`, and `delete` shall refuse to mutate as non-root
+  (exit 2). `list`, `get`, `validate`, and supported `--dry-run`
+  transforms shall run as any user.
 
 - **REQ-YE-401**: Make targets shall be provided:
   `yaml-add FILE=.. KEY=.. FIELDS="a=b;c=[x,y]"`,
-  `yaml-remove`, `yaml-set`, `yaml-get`, `yaml-list`,
-  `yaml-validate`. `FIELDS` shall be split on `;` (never on spaces)
+  `yaml-remove`, `yaml-set`, `yaml-unset`, `yaml-remove-comment`,
+  `yaml-delete`, `yaml-get`, `yaml-list`, `yaml-validate`. `FIELDS`
+  shall be split on `;` (never on spaces)
   so multi-word values work. Non-root invocation of a mutating target
   shall print `ERROR: <target> needs root: sudo make <target>` and
   exit 1.
@@ -213,16 +284,22 @@ splitting). The replacement:
 ## 7. Audit (REQ-YE-600 series)
 
 - **REQ-YE-600**: Every mutation shall append one audit line to the
-  guard log file, recording: UTC timestamp, invoking user, intent,
-  target file, key, and the field set. The log file name is a
-  compiled-in constant that a unit test keeps identical to `log_file`
-  in `config/shared_paths.yaml`. The log path shall be joined onto the
-  invoking operator's home resolved via `SUDO_UID`/`getpwuid`, never
-  via `$HOME` (which is root's home under sudo).
+  verified root-owned
+  `/var/log/workspace-guard/yaml-edit-<invoking-uid>.log`, recording: UTC
+  timestamp, invoking user, intent, target file, key, and the field set. No audit
+  file or mirror may be created in the invoking operator's home or another
+  user-writable directory. Directory/file ownership, mode, no-follow opening,
+  locking, syncing, and surfaced-failure requirements match REQ-GGUARD-090.
 
 - **REQ-YE-601**: Audit write failure shall abort the mutation before
-  install (fail-closed): the target stays untouched and the error is
-  reported on stderr.
+  install (fail-closed): the target stays untouched and the typed failure is
+  reported non-recursively on stderr and distinct tty under REQ-GGUARD-092. No
+  user-writable or unverified fallback is allowed.
+
+- **REQ-YE-602**: Audit records for `unset`, `remove-comment`, and
+  `delete` shall identify the intent and target. Delete records shall
+  include the verified SHA-256; comment records shall not interpret or
+  execute the supplied text.
 
 ---
 
@@ -241,6 +318,15 @@ splitting). The replacement:
   the suite 16/17 pattern (PATH interception cannot fake `geteuid()`
   for a compiled binary).
 
+- **REQ-YE-702**: Regression coverage shall include wildcard and
+  ordinary mapping unsets, missing and zero-match paths, malformed list
+  entries, all-or-nothing partial wildcard failure, exact indented
+  comment matching, scalar/comment non-matches, digest-required
+  deletion, mismatch preservation, symlink and directory rejection,
+  concurrent replacement detection, owner/group/mode preservation,
+  valid resulting YAML, exact terminal newline behavior, removal of a
+  final list entry, and CLI/Make failure propagation.
+
 ---
 
 ## 9. Immutability (REQ-YE-800 series)
@@ -254,7 +340,7 @@ splitting). The replacement:
   used instead of ioctl FFI so the crate contains no `unsafe` code.
 
 - **REQ-YE-801**: This transient clear is not an unseal window: the
-  file stays `root:root` mode 0644 throughout, the flag is down only
+  file stays `root:root` with its preserved mode throughout, the flag is down only
   for the rename syscall inside an exclusive flock held by a root
   process, and no non-root process can write the file at any point.
 
@@ -263,7 +349,8 @@ splitting). The replacement:
 ## 10. Non-Goals
 
 - **REQ-YE-NG-01**: The tool is NOT a general YAML query engine (no
-  yq-style path expressions beyond dotted keys) and NOT a
+  yq-style path expressions beyond dotted keys plus `unset` list
+  wildcards) and NOT a
   pretty-printer; untouched regions are preserved byte-for-byte
   rather than re-emitted.
 - **REQ-YE-NG-02**: The tool does NOT validate consumer-side

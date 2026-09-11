@@ -522,8 +522,11 @@ only, with no binary-guard target and no new deps.
 ### 5.3 Hardening
 
 The guard binary reuses the git-guard's security hardening (REQ-GGUARD-120
-through REQ-GGUARD-125): `panic = "abort"`, full RELRO, stack protector,
-no `unsafe` outside documented FFI, no network I/O, no dynamic loading.
+through REQ-GGUARD-125): `panic = "abort"`, release overflow checks, static PIE,
+full RELRO, non-executable stack, stack protection, no `unsafe` outside
+documented FFI, no network I/O, and no dynamic loading. Its exact built and
+installed artifact receives the same final-ELF and digest verification; shared
+Cargo settings alone are not proof.
 
 ---
 
@@ -559,8 +562,9 @@ with:
 ```
 
 The log is written only after the block decision is made. If the log file
-cannot be opened, the block is still enforced. Argument values that may
-contain secrets are replaced with `...`.
+cannot be opened, the block is still enforced. Argument values remain complete
+forensic evidence under reversible canonical encoding; inline credentials are
+prohibited and must use sanctioned secret-store paths.
 
 ---
 

@@ -22,12 +22,6 @@ fields:
     default: /usr/local/bin:/usr/bin:/bin
     description: "PATH value passed to child git and bash processes. Centralized to eliminate duplication across call sites."
 
-  - path: contract_script
-    type: string
-    required: true
-    default: projects/CI/lib/checks_quality.sh
-    description: "WORKSPACE-CI quality gate script path, relative to the workspace root."
-
   - path: enforcement_config
     type: string
     required: true
@@ -38,3 +32,8 @@ fields:
     type: list<string>
     required: true
     description: "Paths checked to identify the workspace root. All must exist for a directory to be recognized as the workspace root."
+  - path: contract_script
+    type: string
+    required: true
+    default: /opt/workspace-ci/lib/checks_quality.sh
+    description: Immutable WORKSPACE-CI quality gate script path.

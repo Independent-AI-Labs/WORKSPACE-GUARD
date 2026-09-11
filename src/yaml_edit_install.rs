@@ -7,12 +7,14 @@
 // chattr/lsattr go through the e2fsprogs binaries so this crate
 // needs no unsafe ioctl FFI.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process;
 
 use crate::yaml_edit_ops::fail;
+use crate::yaml_edit_target::Target;
 
 const LSATTR: &str = "/usr/bin/lsattr";
 const CHATTR: &str = "/usr/bin/chattr";
@@ -50,9 +52,11 @@ pub fn set_immutable(path: &Path, on: bool) -> Result<(), String> {
     }
 }
 
-pub fn install(path: &Path, content: &str) {
+pub fn install(target: &Target, content: &str) {
+    let path = &target.path;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let tmp = dir.join(format!(".yaml-edit.{}.tmp", process::id()));
+    let tmp_name = OsString::from(format!(".yaml-edit.{}.tmp", process::id()));
+    let tmp = dir.join(&tmp_name);
     let was_immutable = is_immutable(path);
     if was_immutable {
         set_immutable(path, false).unwrap_or_else(|e| fail(1, &e));
@@ -70,30 +74,29 @@ pub fn install(path: &Path, content: &str) {
         cleanup(&tmp, path, was_immutable);
         fail(1, &format!("temp write failed: {e}"))
     });
-    drop(f);
-    nix::unistd::chown(
-        &tmp,
-        Some(nix::unistd::Uid::from_raw(0)),
-        Some(nix::unistd::Gid::from_raw(0)),
+    rustix::fs::fchown(
+        &f,
+        Some(rustix::fs::Uid::from_raw(target.identity.uid)),
+        Some(rustix::fs::Gid::from_raw(target.identity.gid)),
     )
     .unwrap_or_else(|e| {
         cleanup(&tmp, path, was_immutable);
         fail(1, &format!("temp chown failed: {e}"))
     });
-    let mut perms = std::fs::metadata(&tmp)
-        .unwrap_or_else(|e| {
+    rustix::fs::fchmod(&f, rustix::fs::Mode::from_raw_mode(target.identity.mode)).unwrap_or_else(
+        |e| {
             cleanup(&tmp, path, was_immutable);
-            fail(1, &format!("temp stat failed: {e}"))
-        })
-        .permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o644);
-    std::fs::set_permissions(&tmp, perms).unwrap_or_else(|e| {
+            fail(1, &format!("temp chmod failed: {e}"))
+        },
+    );
+    f.sync_all().unwrap_or_else(|e| {
         cleanup(&tmp, path, was_immutable);
-        fail(1, &format!("temp chmod failed: {e}"))
+        fail(1, &format!("temp fsync failed: {e}"))
     });
-    std::fs::rename(&tmp, path).unwrap_or_else(|e| {
+    drop(f);
+    target.rename_from(&tmp_name).unwrap_or_else(|e| {
         cleanup(&tmp, path, was_immutable);
-        fail(1, &format!("rename failed: {e}"))
+        fail(1, &e)
     });
     if was_immutable {
         set_immutable(path, true).unwrap_or_else(|e| {

@@ -7,53 +7,7 @@ use crate::GuardError;
 
 use super::{git_output, REQUIRED_HOOKS};
 
-pub(super) fn check_consumer_hook_identity(
-    toplevel: &str,
-    wsroot: &Path,
-) -> Result<(), GuardError> {
-    let active = fs::canonicalize(wsroot.join("projects/CI")).map_err(|error| {
-        GuardError::ContractFailed(format!("CI integrity: cannot resolve active CI: {error}"))
-    })?;
-    let manifest: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(active.join("generation.json")).map_err(|error| {
-            GuardError::ContractFailed(format!(
-                "CI integrity: cannot read active manifest: {error}"
-            ))
-        })?,
-    )
-    .map_err(|error| {
-        GuardError::ContractFailed(format!("CI integrity: invalid active manifest: {error}"))
-    })?;
-    let expected = [
-        (
-            "CI_DEPLOY_GENERATION",
-            manifest
-                .get("generation_id")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned),
-        ),
-        (
-            "CI_DEPLOY_MANIFEST_SHA256",
-            manifest
-                .get("manifest_digest")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned),
-        ),
-        (
-            "CI_REQUIRED_HOOKS_SHA256",
-            manifest
-                .get("required_hooks_digest")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned),
-        ),
-        (
-            "CI_HOOK_ABI",
-            manifest
-                .get("hook_abi")
-                .and_then(|v| v.as_u64())
-                .map(|v| v.to_string()),
-        ),
-    ];
+pub(super) fn check_consumer_hook_identity(toplevel: &str) -> Result<(), GuardError> {
     let hooks_dir = git_output(Path::new(toplevel), &["rev-parse", "--git-path", "hooks"])
         .map(PathBuf::from)
         .map(|path| {
@@ -111,26 +65,11 @@ pub(super) fn check_consumer_hook_identity(
                 path.display()
             )));
         }
-        if text.contains("WORKSPACE-CI/lib/") {
+        if !text.contains("source /opt/workspace-ci/lib/ci.sh") {
             return Err(GuardError::ContractFailed(format!(
-                "CI integrity: hook {} sources agent-writable WORKSPACE-CI",
+                "CI integrity: hook {} does not source deployed WORKSPACE-CI",
                 path.display()
             )));
-        }
-        for (name, value) in &expected {
-            let Some(value) = value else {
-                return Err(GuardError::ContractFailed(
-                    "CI integrity: active manifest lacks hook identity".into(),
-                ));
-            };
-            if !text.contains(&format!("{name}: {value}"))
-                && !text.contains(&format!("{name}={value}"))
-            {
-                return Err(GuardError::ContractFailed(format!(
-                    "CI integrity: hook {} has mismatched {name}",
-                    path.display()
-                )));
-            }
         }
     }
     Ok(())

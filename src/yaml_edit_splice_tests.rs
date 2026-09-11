@@ -122,6 +122,9 @@ fn remove_last_item_collapses_to_empty_flow() {
     let seq = seq_of(&out, "exceptions");
     assert!(seq.is_empty());
     assert_eq!(parse(&out).get("next"), Some(&Value::from(2)));
+    let normalized = super::yaml_edit_target::normalize_terminal(&out);
+    assert!(normalized.ends_with("next: 2\n"));
+    assert!(!normalized.ends_with("\n\n"));
 }
 
 #[test]
@@ -194,6 +197,54 @@ fn set_replaces_block_scalar_wholesale() {
 fn set_on_missing_key_fails_closed() {
     let segs = vec!["nope".to_string()];
     assert!(splice::splice_set("a: 1\n", &segs, &Value::from(2)).is_err());
+}
+
+#[test]
+fn insert_map_key_appends_under_parent() {
+    let base =
+        "config_categories:\n  pre_commit: 'Git Hooks'\n  modules: 'Project Structure'\nother: 1\n";
+    let segs = vec!["config_categories".to_string()];
+    let out = splice::splice_insert_map_key(
+        base,
+        &segs,
+        "wiki_labels",
+        &Value::String("Project Structure".into()),
+    )
+    .expect("insert");
+    assert!(out.contains("  wiki_labels: Project Structure\n"));
+    let parsed = parse(&out);
+    assert_eq!(
+        parsed
+            .get("config_categories")
+            .and_then(|m| m.get("wiki_labels"))
+            .and_then(Value::as_str),
+        Some("Project Structure")
+    );
+    assert_eq!(parsed.get("other"), Some(&Value::from(1)));
+}
+
+#[test]
+fn insert_map_key_keeps_region_comments() {
+    let base = "parent:\n  a: 1\n  # keep me\nnext: 2\n";
+    let segs = vec!["parent".to_string()];
+    let out = splice::splice_insert_map_key(base, &segs, "b", &Value::from(3)).expect("insert");
+    assert!(out.contains("  # keep me\n"));
+    let b_line = out.lines().position(|l| l.trim_start().starts_with("b:"));
+    let c_line = out.lines().position(|l| l.trim() == "# keep me");
+    assert!(b_line < c_line, "new key lands before trailing comment");
+}
+
+#[test]
+fn insert_map_key_refuses_flow_parent() {
+    let base = "parent: {a: 1}\n";
+    let segs = vec!["parent".to_string()];
+    assert!(splice::splice_insert_map_key(base, &segs, "b", &Value::from(2)).is_err());
+}
+
+#[test]
+fn insert_map_key_missing_parent_fails_closed() {
+    let segs = vec!["nope".to_string()];
+    assert!(splice::splice_insert_map_key("a: 1\n", &segs, "b", &Value::from(2)).is_err());
 }
 
 #[test]

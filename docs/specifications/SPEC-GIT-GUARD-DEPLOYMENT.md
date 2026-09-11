@@ -12,6 +12,13 @@
 | sandbox-service | `make install-sandbox` | systemd `AmbientCapabilities` |
 
 One host runs one git class. Two git classes on one host is forbidden.
+Both classes provide exactly `cap_setpcap`, `cap_chown`, `cap_dac_override`,
+and `cap_fowner`. Host-exec requires those capabilities in Effective and
+Permitted with `NoNewPrivileges=0`. Sandbox-service supplies them in Ambient
+and Permitted; the guard promotes them to Effective after verification. Only
+`cap_dac_override` is loaned to `git.original`, and only for exact subcommands
+in the compiled capability-loan category. Unknown and no-subcommand
+invocations are capless after exec.
 
 ## Host binding
 
@@ -29,7 +36,7 @@ unknown hosts and class mismatches. No env override.
 2. Refuse if `deployment-class` differs without uninstall
 3. Refuse legacy `delivery.mode=pam` without uninstall
 4. Scrub pam artifacts (`capability.conf` block, pam_cap auth lines)
-5. `setcap cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid=ep /usr/bin/git`
+5. `setcap cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep /usr/bin/git`
 6. Write `deployment-class=host-exec`
 7. Verify `runuser -u <agent> -- git --version`
 

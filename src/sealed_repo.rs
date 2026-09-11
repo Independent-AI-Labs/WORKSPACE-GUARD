@@ -49,7 +49,7 @@ pub fn sealed_repo_violation(
 }
 
 /// Block non-root git write operations against a sealed repository
-/// (immutable .git, e.g. the projects/CI deployment mirror). Root-owned
+/// (immutable .git, e.g. the /opt/workspace-ci deployment). Root-owned
 /// alone is not the discriminator: capability-mode locking root-owns
 /// .git metadata in every repo. The immutable flag is set only by
 /// lock-repo sealing, so it precisely marks no-agent-write repos.

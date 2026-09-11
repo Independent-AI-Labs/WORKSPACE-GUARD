@@ -13,11 +13,10 @@ teardown() { guard_teardown; }
     ! grep -q "guard-operator.sh \$@" "$mk"
 }
 
-@test "root recipes never invoke the guarded bash directly" {
+@test "all recipes use the guarded bash" {
     local mk="$GUARD_ROOT/Makefile"
-    grep -q '^SCRIPT_BASH := /bin/bash.real$' "$mk"
-    ! grep -q 'if \$(wildcard' "$mk"
-    ! grep -qE '^\s+([A-Z_]+=[^ ]* +)?(\$\(SUDO\) +)?bash ' "$mk"
+    grep -q '^SCRIPT_BASH := bash$' "$mk"
+    ! grep -qE '^(SHELL|SCRIPT_BASH) := /bin/bash\.real$' "$mk"
 }
 
 @test "guard Makefile does not declare empty phony guard-refresh" {
@@ -30,6 +29,26 @@ teardown() { guard_teardown; }
     run make -n guard-refresh
     assert_success
     assert_output --partial "guard-operator.sh 'refresh'"
+}
+
+@test "guard build removes stale binaries before invoking the deployment helper" {
+    local recipe
+    recipe="$(make -n build-guard 2>&1)"
+    [[ "$recipe" == *'rm -f '*'/target/release/workspace-guard'* ]]
+    [[ "$recipe" == *'bootstrap-workspace-guard" build-only'* ]]
+    [[ "${recipe%%bootstrap-workspace-guard*}" == *'rm -f '* ]]
+}
+
+@test "guard install verifies deployed bytes after the deployment helper" {
+    local recipe
+    recipe="$(make -n GUARD_SKIP_BUILD=1 install-guard-host-exec 2>&1)"
+    [[ "$recipe" == *'bootstrap-workspace-guard" install-host-exec'* ]]
+    [[ "$recipe" == *'scripts/check-guard-host-exec-readonly'* ]]
+    [[ "${recipe#*install-host-exec}" == *'scripts/check-guard-host-exec-readonly'* ]]
+}
+
+@test "guard-operator does not trigger the alternate rc shell rule" {
+    ! grep -qE '(^|[[:space:]])rc(=|[[:space:]])' "$GUARD_ROOT/scripts/guard-operator.sh"
 }
 
 @test "guard-operator wires shell guard into up/refresh/down/check" {
@@ -112,35 +131,26 @@ teardown() { guard_teardown; }
     ! grep -qE '2>[[:space:]]*/dev/null|>[[:space:]]*/dev/null' "$checker"
 }
 
-@test "guard Makefile shell-guard-check routes root through bash.real" {
+@test "guard Makefile shell-guard-check uses guarded bash" {
     run make -n shell-guard-check
     assert_success
-    assert_output --partial 'id -u'
-    assert_output --partial "/bin/bash.real scripts/shell-guard-check"
+    assert_output --partial "bash scripts/shell-guard-check"
+    refute_output --partial "/bin/bash.real"
 }
 
-@test "guard Makefile detects root before assigning the guarded SHELL" {
+@test "guard Makefile does not select an interpreter by uid" {
     local mk="$GUARD_ROOT/Makefile"
-    local id_line shell_line
-    id_line="$(grep -n -m1 '^ifeq ($(shell id -u),0)' "$mk" | cut -d: -f1)"
-    shell_line="$(grep -n -m1 '^SHELL := ' "$mk" | cut -d: -f1)"
-    [ -n "$id_line" ]
-    [ -n "$shell_line" ]
-    # make's $(shell) honors the makefile's SHELL variable; if the
-    # euid probe ran after SHELL pointed at the guarded bash, root
-    # runs would fail closed during the probe itself.
-    [ "$id_line" -lt "$shell_line" ]
+    ! grep -q '^ifeq ($(shell id -u),0)' "$mk"
 }
 
-@test "guard-operator shell check uses bash.real as root and passes repo root" {
+@test "guard-operator shell check uses guarded bash and passes repo root" {
     local op="$GUARD_ROOT/scripts/guard-operator.sh"
-    grep -q '/bin/bash.real "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT"' "$op"
     grep -q 'bash "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT"' "$op"
+    ! grep -q '/bin/bash.real' "$op"
 }
 
-@test "guard test-shell target uses only the sealed real bash for root orchestration" {
+@test "guard test-shell target uses the isolated test harness" {
     local mk="$GUARD_ROOT/Makefile"
-    grep -q '/bin/bash.real "$$(command -v bats)"' "$mk"
-    grep -q '_shim/bash' "$mk"
-    grep -q 'PATH="\$\$_shim:\$\$PATH"' "$mk"
+    grep -q 'scripts/podman/run-shell-tests.sh' "$mk"
+    ! grep -q '#!/bin/bash.real' "$mk"
 }

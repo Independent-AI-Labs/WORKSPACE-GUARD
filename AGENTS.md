@@ -44,7 +44,14 @@ mutated ONLY through the sudo-gated secure editor:
 sudo make yaml-add    FILE=config/<file>.yaml KEY=<key> FIELDS="<spec>"
 sudo make yaml-remove FILE=config/<file>.yaml KEY=<key> FIELDS="<spec>"
 sudo make yaml-set    FILE=config/<file>.yaml KEY=<key> VALUE=<value>
+sudo make yaml-unset  FILE=config/<file>.yaml KEY='hooks[].field'
+sudo make yaml-remove-comment FILE=config/<file>.yaml VALUE='<exact comment text>'
+sudo make yaml-delete FILE=config/<file>.yaml EXPECT_SHA256=<reviewed-digest>
 ```
+
+All YAML mutations under `/opt` are forbidden. `yaml-delete` is single-file,
+non-recursive, and requires a digest obtained and reviewed immediately before
+the operation.
 
 Field-spec grammar (SPEC-YAML-EDIT): `name=value`, `name=[v1,v2]`,
 bare `value` for scalar-list keys. The editor preserves root ownership

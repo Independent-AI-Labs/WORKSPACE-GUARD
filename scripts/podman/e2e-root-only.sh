@@ -12,7 +12,7 @@ fi
 echo "==> Tier 2: root-only deployment E2E covered by tier 1 integration tests"
 exit 0
 
-_CI_ROOT="/projects/CI"
+_CI_ROOT="/projects/WORKSPACE-CI"
 _GUARD_ROOT="/projects/WORKSPACE-GUARD"
 
 if [[ ! -f "$_CI_ROOT/scripts/bootstrap-workspace-guard" ]]; then

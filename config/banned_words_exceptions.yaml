@@ -107,3 +107,15 @@ exceptions:
   - pattern: unsafe\s*\{
     paths:
       - src/shell_guard.rs
+  - pattern: (?<![^\s&|(`$])(?<!run )(?<!uv )(?<!UV )(?<!\) )(?<!env )(?<!no-sync )python3?(?:\.\d+)?(?![^\s])
+    paths:
+      - config/shell_guard_policy_matrix\.yaml$
+  - pattern: (?<![^\s&|(`$])(?<!run )(?<!uv )(?<!UV )(?<!\) )(?<!env )(?<!no-sync )python3?(?:\.\d+)?(?![^\s])
+    paths:
+      - docs/requirements/REQ-SHELL-GUARD\.md$
+  - pattern: (?<![^\s&|(`$])(?<!run )(?<!uv )(?<!UV )(?<!\) )(?<!env )(?<!no-sync )python3?(?:\.\d+)?(?![^\s])
+    paths:
+      - docs/specifications/SPEC-SHELL-GUARD\.md$
+  - pattern: (?<![^\s&|(`$])(?<!run )(?<!uv )(?<!UV )(?<!\) )(?<!env )(?<!no-sync )python3?(?:\.\d+)?(?![^\s])
+    paths:
+      - docs/audits/AUDIT-SHELL-EXECUTION-SURFACE-2026-08\.md$

@@ -188,3 +188,92 @@ fn set_typed_value_rules() {
     assert!(engine::typed_value(" x", true).is_err());
     assert!(engine::typed_value("a\nb", false).is_err());
 }
+
+#[test]
+fn unset_wildcard_removes_every_field() {
+    let doc: Value = serde_yaml::from_str(
+        "hooks:\n  - id: one\n    safety: true\n  - id: two\n    safety: false\n",
+    )
+    .expect("parse");
+    let (expected, concrete) = engine::unset_fields(&doc, "hooks[].safety").expect("unset");
+    assert_eq!(concrete.len(), 2);
+    for hook in expected["hooks"].as_sequence().expect("hooks") {
+        assert!(hook.get("safety").is_none());
+    }
+}
+
+#[test]
+fn unset_supports_ordinary_dotted_maps() {
+    let doc: Value = serde_yaml::from_str("outer:\n  remove: true\n  keep: 1\n").expect("parse");
+    let (expected, concrete) = engine::unset_fields(&doc, "outer.remove").expect("unset");
+    assert_eq!(concrete.len(), 1);
+    assert!(expected["outer"].get("remove").is_none());
+    assert_eq!(expected["outer"]["keep"], Value::from(1));
+}
+
+#[test]
+fn unset_failures_leave_the_input_unchanged() {
+    let cases = [
+        ("hooks: []\n", "hooks[].safety"),
+        ("hooks:\n  - id: one\n  - scalar\n", "hooks[].id"),
+        (
+            "hooks:\n  - id: one\n    safety: true\n  - id: two\n",
+            "hooks[].safety",
+        ),
+        ("outer:\n  keep: 1\n", "outer.missing"),
+    ];
+    for (raw, path) in cases {
+        let doc: Value = serde_yaml::from_str(raw).expect("parse");
+        let before = doc.clone();
+        assert!(
+            engine::unset_fields(&doc, path).is_err(),
+            "{path} must fail"
+        );
+        assert_eq!(doc, before);
+    }
+}
+
+#[test]
+fn unset_rejects_unsupported_path_syntax() {
+    for path in ["", ".a", "a.", "a[0].b", "a[].", "a[]", "a..b", "a[*].b"] {
+        assert!(engine::parse_unset_path(path).is_err(), "{path} must fail");
+    }
+}
+
+#[test]
+fn unset_resolves_file_path_keys_literal_first() {
+    // 2026-09-06: map keys named after file paths (classification
+    // manifest entries) contain dots and slashes; unset must resolve
+    // the longest literal join, not split blindly.
+    let raw = "files:\n  config/banned_words.yaml:\n    class: policy-definition\n  keep: 1\n";
+    let doc: Value = serde_yaml::from_str(raw).expect("parse");
+    let keep = doc.get("files").and_then(|f| f.get("keep")).cloned();
+    let (expected, concrete) =
+        engine::unset_fields(&doc, "files.config/banned_words.yaml").expect("literal-first unset");
+    assert_eq!(
+        concrete,
+        vec![vec![
+            engine::Access::Key("files".into()),
+            engine::Access::Key("config/banned_words.yaml".into()),
+        ]]
+    );
+    assert_eq!(
+        expected.get("files").and_then(|f| f.get("keep")),
+        keep.as_ref()
+    );
+    assert!(expected
+        .get("files")
+        .and_then(|f| f.get("config/banned_words.yaml"))
+        .is_none());
+}
+
+#[test]
+fn unset_prefers_whole_literal_over_split_when_both_exist() {
+    let raw = "a:\n  b: 1\na.b: 2\n";
+    let doc: Value = serde_yaml::from_str(raw).expect("parse");
+    let nested = doc.get("a").and_then(|a| a.get("b")).cloned();
+    let (expected, _) = engine::unset_fields(&doc, "a.b").expect("unset");
+    // The literal key "a.b" wins (REQ-YE-204); nested a.b remains.
+    assert_eq!(expected.get("a").and_then(|a| a.get("b")), nested.as_ref());
+    assert!(expected.get("a.b").is_none());
+}

@@ -19,10 +19,8 @@ cd "$_GUARD_ROOT"
 export PATH="/root/.cargo/bin:$PATH"
 
 YE="$_GUARD_ROOT/target/debug/workspace-yaml-edit"
-if [[ ! -x "$YE" ]]; then
-    echo "==> Tier 2b: building workspace-yaml-edit (debug)"
-    CARGO_TARGET_DIR="$_GUARD_ROOT/target" cargo build --bin workspace-yaml-edit
-fi
+echo "==> Tier 2b: building current workspace-yaml-edit (debug)"
+CARGO_TARGET_DIR="$_GUARD_ROOT/target" cargo build --bin workspace-yaml-edit
 if [[ ! -x "$YE" ]]; then
     echo "ERROR: workspace-yaml-edit binary not found at $YE" >&2
     exit 1
@@ -104,6 +102,46 @@ expect_rc 0 "$YE" set "$COV" coverage_thresholds.min_coverage 95
     || die "get disagrees after set"
 expect_rc 1 "$YE" set "$COV" coverage_thresholds.min_coverage 95 --string
 pass "set/get with numeric schema ok, string typing refused"
+
+echo "==> Tier 2b: unset and exact comment removal"
+HOOKS="$TMP/hooks.yaml"
+cat > "$HOOKS" <<'EOF'
+# Retired tier
+hooks:
+  - id: one
+    safety: true
+    mandatory: true
+  - id: two
+    safety: false
+    mandatory: false
+EOF
+chmod 0600 "$HOOKS"
+expect_rc 0 "$YE" unset "$HOOKS" 'hooks[].safety'
+grep -q 'safety:' "$HOOKS" && die "unset field remains"
+[[ "$(stat -c '%u:%g:%a' "$HOOKS")" == "0:0:600" ]] \
+    || die "owner/group/mode changed after unset"
+expect_rc 0 "$YE" remove-comment "$HOOKS" 'Retired tier'
+grep -q 'Retired tier' "$HOOKS" && die "exact comment remains"
+[[ "$(tail -c 1 "$HOOKS" | od -An -t x1 | tr -d ' ')" == "0a" ]] \
+    || die "mutation lacks one terminal newline"
+[[ "$(tail -c 2 "$HOOKS" | od -An -t x1 | tr -d ' \n')" != "0a0a" ]] \
+    || die "mutation introduced a blank EOF line"
+pass "unset/comment preserve metadata and terminal newline"
+
+echo "==> Tier 2b: guarded deletion"
+DEL="$TMP/delete.yaml"
+printf 'value: 1\n' > "$DEL"
+digest="$(sha256sum "$DEL" | cut -d' ' -f1)"
+expect_rc 1 "$YE" delete "$DEL" --expected-sha256 \
+    0000000000000000000000000000000000000000000000000000000000000000
+[[ -f "$DEL" ]] || die "digest mismatch deleted file"
+mkdir "$TMP/delete-dir"
+expect_rc 2 "$YE" delete "$TMP/delete-dir" --expected-sha256 "$digest"
+ln -s "$DEL" "$TMP/delete-link.yaml"
+expect_rc 2 "$YE" delete "$TMP/delete-link.yaml" --expected-sha256 "$digest"
+expect_rc 0 "$YE" delete "$DEL" --expected-sha256 "$digest"
+[[ ! -e "$DEL" ]] || die "verified file was not deleted"
+pass "guarded deletion rejects mismatch/symlink/directory and accepts digest"
 
 echo "==> Tier 2b: symlink and ownership refusals"
 ln -s "$Q" "$TMP/link.yaml"

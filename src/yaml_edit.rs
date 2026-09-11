@@ -12,6 +12,12 @@
 
 use std::process;
 
+#[path = "yaml_edit_admin.rs"]
+mod yaml_edit_admin;
+#[path = "yaml_edit_comment.rs"]
+mod yaml_edit_comment;
+#[path = "yaml_edit_delete.rs"]
+mod yaml_edit_delete;
 #[path = "yaml_edit_diff.rs"]
 mod yaml_edit_diff;
 #[path = "yaml_edit_emit.rs"]
@@ -22,23 +28,38 @@ mod yaml_edit_engine;
 mod yaml_edit_install;
 #[path = "yaml_edit_ops.rs"]
 mod yaml_edit_ops;
+#[path = "yaml_edit_query.rs"]
+mod yaml_edit_query;
 #[path = "yaml_edit_schema.rs"]
 mod yaml_edit_schema;
+#[path = "yaml_edit_shape.rs"]
+mod yaml_edit_shape;
 #[path = "yaml_edit_splice.rs"]
 mod yaml_edit_splice;
+#[path = "yaml_edit_target.rs"]
+mod yaml_edit_target;
+#[path = "yaml_edit_unset.rs"]
+mod yaml_edit_unset;
 
+use yaml_edit_admin as admin;
 use yaml_edit_ops as ops;
+use yaml_edit_query as query;
 
 fn usage() -> ! {
     eprintln!(
         "usage:\n  \
          workspace-yaml-edit add      <file> <list-key> <field-spec>... [--dry-run]\n  \
          workspace-yaml-edit remove   <file> <list-key> <field-spec>... [--dry-run] [--allow-no-match]\n  \
-         workspace-yaml-edit set      <file> <dotted.key> <value> [--string] [--dry-run]\n  \
+         workspace-yaml-edit set      <file> <dotted.key> <value> [--string] [--create] [--dry-run]\n  \
          workspace-yaml-edit bootstrap <file> <top-level-key> <value> [--string] [--dry-run]\n  \
+         workspace-yaml-edit unset    <file> <dotted.path> [--dry-run]\n  \
+         workspace-yaml-edit remove-comment <file> <exact-comment-text> [--dry-run]\n  \
+         workspace-yaml-edit delete   <file> --expected-sha256 <digest>\n  \
          workspace-yaml-edit get      <file> <dotted.key>\n  \
          workspace-yaml-edit list     <file> [<list-key>]\n  \
-         workspace-yaml-edit validate <file>\n\
+         workspace-yaml-edit validate <file>\n  \
+         workspace-yaml-edit check    <file>\n  \
+         workspace-yaml-edit format   <file> [--dry-run]\n\
          field-spec: name=value | name=[v1,v2] | bare-value"
     );
     process::exit(1);
@@ -51,10 +72,15 @@ fn main() {
         ops::Intent::Add => ops::run_add(&cli),
         ops::Intent::Remove => ops::run_remove(&cli),
         ops::Intent::Set => ops::run_set(&cli),
-        ops::Intent::Bootstrap => ops::run_bootstrap(&cli),
-        ops::Intent::Get => ops::run_get(&cli),
-        ops::Intent::List => ops::run_list(&cli),
-        ops::Intent::Validate => ops::run_validate(&cli),
+        ops::Intent::Bootstrap => admin::run_bootstrap(&cli),
+        ops::Intent::Unset => admin::run_unset(&cli),
+        ops::Intent::RemoveComment => admin::run_remove_comment(&cli),
+        ops::Intent::Delete => admin::run_delete(&cli),
+        ops::Intent::Get => query::run_get(&cli),
+        ops::Intent::List => query::run_list(&cli),
+        ops::Intent::Validate => query::run_validate(&cli),
+        ops::Intent::Check => query::run_check(&cli),
+        ops::Intent::Format => query::run_format(&cli),
     }
 }
 
@@ -65,8 +91,14 @@ mod emit_tests;
 #[path = "yaml_edit_engine_tests.rs"]
 mod engine_tests;
 #[cfg(test)]
+#[path = "yaml_edit_ops_tests.rs"]
+mod ops_tests;
+#[cfg(test)]
 #[path = "yaml_edit_schema_tests.rs"]
 mod schema_tests;
+#[cfg(test)]
+#[path = "yaml_edit_shape_tests.rs"]
+mod shape_tests;
 #[cfg(test)]
 #[path = "yaml_edit_splice_tests.rs"]
 mod splice_tests;

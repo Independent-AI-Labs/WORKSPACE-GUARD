@@ -222,7 +222,7 @@ fn full_markers_find_workspace_root() {
     use crate::wsroot::find_workspace_root;
     let dir = tempfile::tempdir().unwrap();
     make_workspace_markers(dir.path(), WORKSPACE_MARKERS);
-    let top = format!("{}/projects/CI", dir.path().to_string_lossy());
+    let top = format!("{}/projects/repo", dir.path().to_string_lossy());
     assert_eq!(
         find_workspace_root(&top),
         Some(dir.path().to_string_lossy().to_string())
@@ -235,7 +235,7 @@ fn partial_markers_miss_full_but_hit_partial() {
     let dir = tempfile::tempdir().unwrap();
     let some: Vec<&str> = WORKSPACE_MARKERS.iter().take(1).cloned().collect();
     make_workspace_markers(dir.path(), &some);
-    let top = format!("{}/projects/CI", dir.path().to_string_lossy());
+    let top = format!("{}/projects/repo", dir.path().to_string_lossy());
     assert_eq!(find_workspace_root(&top), None);
     assert_eq!(
         find_partial_workspace_root(&top),
@@ -250,4 +250,13 @@ fn no_markers_hit_neither() {
     let top = dir.path().to_string_lossy().to_string();
     assert_eq!(find_workspace_root(&top), None);
     assert_eq!(find_partial_workspace_root(&top), None);
+}
+
+#[test]
+fn workspace_contract_uses_only_live_paths() {
+    assert_eq!(
+        WORKSPACE_MARKERS,
+        &[".boot-linux", "workspace/scripts/utils/git-guard"]
+    );
+    assert_eq!(CONTRACT_SCRIPT, "/opt/workspace-ci/lib/checks_quality.sh");
 }

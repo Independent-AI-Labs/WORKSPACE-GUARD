@@ -2,9 +2,11 @@
 # guard-operator.sh - canonical guard operator intents (safe by design).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+case "$SCRIPT_SOURCE" in /proc/self/fd/*) SCRIPT_SOURCE="${SHG_SCRIPT_PATH:-$SCRIPT_SOURCE}" ;; esac
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CI_ROOT="$(cd "$REPO_ROOT/../CI" && pwd)"
+CI_ROOT=/opt/workspace-ci
 
 MODE="${1:-}"
 MARKER="${WORKSPACE_GUARD_STATE_DIR:-/usr/lib/workspace-guard}/host-provision.ok"
@@ -12,14 +14,11 @@ SYSTEM_CFG="/etc/workspace-guard/host-provision.yaml"
 REPO_CFG="$REPO_ROOT/config/host-provision.yaml"
 
 usage() {
-    cat <<EOF
-Usage: $0 <up|refresh|check|down|reset>
-  up      Idempotent bring-up (provision + git guard + shell guard as needed)
-  refresh Rebuild and force reinstall git guard + shell guard after code changes
-  check   Read-only health check (git guard + shell guard)
-  down    Remove shell guard + git guard; preserve provision state
-  reset   Purge all guard state then bring-up (requires GUARD_PURGE_CONFIRM=1)
-EOF
+    printf 'Usage: %s <up|refresh|check|down>\n' "$0"
+    printf '  up      Idempotent bring-up (provision + git guard + shell guard as needed)\n'
+    printf '  refresh Rebuild and force reinstall git guard + shell guard after code changes\n'
+    printf '  check   Read-only health check (git guard + shell guard)\n'
+    printf '  down    Remove shell guard + git guard; preserve provision state\n'
 }
 
 require_root() {
@@ -61,9 +60,9 @@ _guard_check_status() {
 }
 
 _guard_needs_install() {
-    local out rc=0
-    out="$(_guard_check_status)" || rc=$?
-    if [[ $rc -ne 0 ]]; then
+    local out status=0
+    out="$(_guard_check_status)" || status=$?
+    if [[ $status -ne 0 ]]; then
         return 0
     fi
     if grep -q 'NOT INSTALLED\|DRIFTED' <<<"$out"; then
@@ -77,21 +76,13 @@ _shell_guard_available() {
 }
 
 _shell_guard_check_status() {
-    # Root fails closed through the guarded /bin/bash (AT_SECURE == 0),
-    # so root runs the check through the sealed operator shell. The
-    # repo-root argument survives the guard's env scrub and sealed
-    # memfd staging for the non-root path.
-    if [[ "$(id -u)" -eq 0 && -x /bin/bash.real ]]; then
-        /bin/bash.real "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT" 2>&1
-    else
-        bash "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT" 2>&1
-    fi
+    bash "$REPO_ROOT/scripts/shell-guard-check" "$REPO_ROOT" 2>&1
 }
 
 _shell_guard_needs_install() {
-    local out rc=0
-    out="$(_shell_guard_check_status)" || rc=$?
-    if [[ $rc -ne 0 ]]; then
+    local out status=0
+    out="$(_shell_guard_check_status)" || status=$?
+    if [[ $status -ne 0 ]]; then
         return 0
     fi
     if grep -q 'NOT INSTALLED\|DRIFTED' <<<"$out"; then
@@ -144,12 +135,12 @@ guard_refresh() {
 }
 
 guard_check() {
-    local rc=0
-    _guard_check_status || rc=$?
+    local status=0
+    _guard_check_status || status=$?
     if _shell_guard_available; then
-        _shell_guard_check_status || rc=$?
+        _shell_guard_check_status || status=$?
     fi
-    return "$rc"
+    return "$status"
 }
 
 guard_down() {
@@ -162,12 +153,6 @@ guard_down() {
     make -C "$REPO_ROOT" uninstall-guard
 }
 
-guard_reset() {
-    require_root
-    make -C "$REPO_ROOT" purge-guard-state
-    guard_up
-}
-
 [[ -n "$MODE" ]] || { usage >&2; exit 2; }
 
 case "$MODE" in
@@ -175,7 +160,6 @@ case "$MODE" in
     refresh) guard_refresh ;;
     check) guard_check ;;
     down) guard_down ;;
-    reset) guard_reset ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown mode: $MODE" >&2; usage >&2; exit 2 ;;
 esac

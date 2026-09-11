@@ -1,4 +1,4 @@
-# Specification: WORKSPACE-GUARD: SUID Guard Framework (Git PoC)
+# Specification: WORKSPACE-GUARD Capability Guard Framework (Git PoC)
 
 **Date:** 2026-05-18
 **Status:** DRAFT
@@ -14,7 +14,7 @@
 User invokes: git <subcommand> [args...]
                     │
                     ▼
-        /usr/bin/git (SUID root, 4555)
+        /usr/bin/git (root-owned 0755, four file capabilities)
         workspace-guard Rust binary
                     │
         ┌───────────┼────────────────┐
@@ -35,7 +35,8 @@ User invokes: git <subcommand> [args...]
             + log   (real git, mode 0700 root:root)
 ```
 
-The guard is a **thin SUID-root wrapper**. Its sole purpose is to:
+The guard is a **thin capability-enabled wrapper**. Its sole purpose is to:
+
 1. Validate the argument vector for destructive patterns.
 2. Sanitise the execution environment.
 3. If safe, `execve()` the real git binary.
@@ -51,34 +52,68 @@ It does NOT re-implement git logic. It does NOT re-implement WORKSPACE-CI contra
 
 ## 2. Privileged Execution
 
-### 2.1 SUID Model
+### 2.1 Capability Model
 
-The binary is installed at `/usr/bin/git` with `chown root:root` and `chmod 4555`. When any user invokes `git`, the kernel runs the binary with:
-- **Real UID**: the invoking user
-- **Effective UID**: 0 (root)
-- **Saved set-UID**: 0
+The host-exec binary is installed at `/usr/bin/git` with owner `root:root`,
+mode `0755`, and file capabilities
+`cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep`. It is not SUID-root.
+The process keeps the invoking user's real and effective UID.
 
-The real git binary is at `/usr/bin/git.original` with `chown root:root` and `chmod 0700`. Only root can read or execute it. A non-root user who tries to run it directly gets `Permission denied`.
+The real Git binary is at `/usr/bin/git.original` with owner `root:root` and
+mode `0700`. A non-root user cannot execute it directly. The guard loans only
+`CAP_DAC_OVERRIDE` to the authorized `git.original` child. `CAP_SETPCAP`,
+`CAP_CHOWN`, and `CAP_FOWNER` remain guard-only.
+
+The sandbox-service deployment class receives the same four capabilities from
+the systemd service's ambient capability set instead of file capabilities. One
+host uses exactly one deployment class.
 
 ### 2.2 Privileged Execution Detection
 
-The binary detects SUID context via `libc::getauxval(libc::AT_SECURE)`. This is superior to comparing real/effective UID because:
+Capability mode treats kernel capability sets, not UID differences or
+`AT_SECURE`, as the privilege authority:
 
-| Method | Handles SUID | Handles file capabilities | Handles NO_NEW_PRIVS reset |
-|--------|-------------|--------------------------|---------------------------|
-| `geteuid() != getuid()` | Yes | No | No |
-| `getauxval(AT_SECURE)` | Yes | Yes | Yes |
+- `host-exec` requires all four approved capabilities in Effective and
+  Permitted and requires `PR_GET_NO_NEW_PRIVS == 0`;
+- `sandbox-service` requires all four in Ambient and Permitted, then promotes
+  them to Effective;
+- a missing, non-regular, non-root-owned, or unknown deployment-class record
+  fails closed.
 
-If `AT_SECURE` returns 0, the binary refuses to operate (exit code 3). This prevents an attacker from compiling their own copy of the guard and running it without SUID privileges.
+Checking every capability prevents an unprivileged copy of the guard from
+running and prevents a partially provisioned installation from proceeding.
+`AT_SECURE` may inform behavior that depends on secure execution, but it is not
+the capability-mode privilege check.
+
+Root-only builds do not use process capabilities. They require effective UID 0
+and remain an explicitly documented soft barrier.
+
+Any failure in this section exits 3 before argument policy evaluation or real
+Git execution. Exit 2 is reserved for malformed invocation arguments.
+
+Privilege/deployment inspection returns typed outcomes. A `PR_GET_NO_NEW_PRIVS`
+syscall error is failure, never equivalent to value 0. Capability-query errors
+are distinct from a verified missing capability, though both exit 3. Root-only
+effective-UID failure, deployment-class trust/parse failure, and capability
+promotion failure use the same guard-unavailable class and preserve their stage
+and OS status.
 
 ### 2.3 Real Git Verification
 
 Before `execve()`, the binary verifies `/usr/bin/git.original`:
-1. `stat()` the path: must exist and be a regular file (`S_IFREG`).
-2. Owner UID must be 0.
-3. Mode bits must be exactly `0700` (owner rwx only).
 
-If any check fails, exit code 3. This prevents an attacker from replacing git.original with a malicious binary or relaxing its permissions.
+1. Inspect the path with no-follow metadata; a symlink is rejected even when
+   its target is otherwise valid.
+2. The path must exist and be a regular file (`S_IFREG`).
+3. Owner UID and GID must both be 0.
+4. `st_mode & 07777` must equal exactly `0700`, rejecting setuid, setgid, and
+   sticky bits as well as relaxed permissions.
+5. Device and inode must differ from `/proc/self/exe`, preventing a copied or
+   recursively installed guard from serving as real Git.
+
+If any check fails, exit code 3 before executing real Git. `/usr/bin` is
+root-controlled, so a non-root caller cannot replace the directory entry
+between verification and the absolute-path `execve()`.
 
 ---
 
@@ -88,142 +123,231 @@ If any check fails, exit code 3. This prevents an attacker from replacing git.or
 
 Parsing is a multi-pass process over the argv array. Each phase operates on the result of the previous phase.
 
-**Phase 1: Null-byte scan:** Every argument byte is checked for `0x00`. If found, exit 2 immediately.
+**Phase 1: Byte-preserving argv conversion:** Linux `execve()` cannot deliver
+an embedded null inside argv. The guard nevertheless treats `CString`
+construction as fallible for internally constructed/test inputs. Every raw
+`OsStr` byte is copied unchanged, including non-UTF-8 bytes. An embedded-null
+conversion failure exits 2; no placeholder, truncation, lossy conversion, or
+argument omission is permitted.
 
-**Phase 2: Subcommand identification:** Scan argv left-to-right, maintaining state:
+Exit 2 is a typed invocation-validation class, not a generic fail-closed status.
+It also covers a missing operand for a recognized value-taking global option
+when subcommand discovery cannot continue and an unknown leading option whose
+unknown arity makes the subcommand indeterminate. Empty or uninspectable
+safety-critical config keys follow §3.3. Other malformed command-specific syntax
+is forwarded unchanged once the guard can reliably identify and apply policy;
+real Git remains syntax authority. Non-UTF-8 bytes outside explicitly ASCII
+inspected fields are valid. Terminal-query and no-subcommand forms are valid.
+Git's own exit 2 is an ordinary propagated Git outcome, while internal,
+privilege, integrity, exec, and supervision failures use guard exit 3.
 
-```
-state = scanning_flags
-subcommand = None
-has_amend = False
-has_force_flag = False
-has_hard_flag = False
-has_no_verify_flag = False
-has_force_with_lease_flag = False
-dangerous_config_keys = []
-stash_subcmd = False
-branch_subcmd = False
-has_branch_D = False
-has_stash_drop = False
-has_stash_clear = False
+There is no whole-argument UTF-8 conversion. Parser state retains indexes/ranges
+into the original byte arguments. ASCII option names, separators, subcommands,
+and policy prefixes are compared directly as bytes. A failed `from_utf8` shall
+never become `""`, a non-match, or a shortened token. Opaque option values,
+operands, pathspecs, refs, remote names/URLs, and everything after the applicable
+`--` remain bytes. If an ASCII policy prefix applies independently of an opaque
+attached value, the prefix is still classified and only the value remains
+opaque. A non-ASCII positional subcommand candidate matches no compiled ASCII
+category and follows the capless unknown-command path. A non-ASCII leading option
+uses the same arity rule as any unknown option and exits 2 only when reliable
+subcommand discovery is impossible.
 
-for each arg in argv[1..]:
-    if state == past_separator:
-        break  # arg is a pathspec, ignore
+All accepted arguments, including caller `argv[0]`, are converted exactly once
+with fallible `CString::new` before fork and retain order, count, and empty
+arguments. The fixed `execve` pathname is separate from `argv[0]`. Conversion
+failure for caller argv is `InvalidInvocation` exit 2. Conversion failure for a
+guard-owned argument, environment entry, binding, or path is
+`GuardUnavailable` exit 3. No placeholder, replacement character, truncation,
+drop, `filter_map(...ok())`, or reconstructed forwarding vector is permitted.
 
-    if arg == "--":
-        state = past_separator
-        continue
+Security and evidence paths never use `to_string_lossy`, `from_utf8_lossy`,
+`Path::display`, or UTF-8-dependent containment. Repository/workspace identities
+remain `PathBuf`/`OsString` and path-component comparisons. Environment names are
+matched against ASCII catalogs as bytes; admitted values remain raw. A helper
+protocol field becomes text only after its complete bytes satisfy that field's
+exact ASCII grammar. Opaque helper streams use the reversible framing in §5.5.
 
-    if state == expecting_config_value:
-        # Previous arg was -c or -C, this arg is key=value
-        if '=' in arg:
-            key = arg.split('=')[0]
-            if key in DANGEROUS_CONFIG_KEYS:
-                dangerous_config_keys.push(key)
-        else:
-            # -c or -C without value: git will error, but check anyway
-            if arg in DANGEROUS_CONFIG_KEYS:
-                dangerous_config_keys.push(arg)
-        state = scanning_flags
-        continue
+**Phase 2: Subcommand identification:** Walk leading arguments with a compiled
+global-option arity table:
 
-    if arg == "-c" or arg == "-C":
-        state = expecting_config_value
-        continue
+1. Terminal query options (`--version`, `--help`, bare `--exec-path`,
+   `--html-path`, `--man-path`, `--info-path`) terminate subcommand discovery;
+   the complete invocation passes through unchanged.
+2. Modifier options without operands are consumed as modifiers.
+3. Value-taking options consume their attached or following operand before
+   scanning continues. This includes repeated `-C <path>`, `-c name=value`,
+   `--git-dir`, `--work-tree`, `--namespace`, and `--config-env` in every form
+   accepted by Git.
+4. `-C` changes directory. Only lowercase `-c` and `--config-env` carry config
+   keys for dangerous-key validation.
+5. The first remaining positional token is the subcommand.
+6. A leading `--` before a subcommand leaves the invocation without an
+   identified subcommand; real Git remains the syntax authority.
+7. An unknown leading option whose operand arity is not known exits 2. The
+   parser never guesses and thereby skips a later destructive subcommand.
 
-    if arg.starts_with("--"):
-        # Long flag analysis
-        if arg == "--hard": has_hard_flag = True; block_now("--hard flag")
-        if arg == "--no-verify": has_no_verify_flag = True; block_now("--no-verify flag")
-        if arg == "--force" or arg == "-f": has_force_flag = True
-        if arg == "--force-with-lease": has_force_with_lease_flag = True
-        if arg.starts_with("--amend"): has_amend = True
-        if arg.starts_with("--ff-only") or arg.starts_with("--rebase"):
-            safe_pull_flag = True
-        if '=' in arg:
-            key = arg.split('=')[0].trim_start_matches('-')
-            if key == "c" or key == "C":
-                value = arg.split('=', 1)[1]
-                config_key = value.split('=')[0]
-                if config_key in DANGEROUS_CONFIG_KEYS:
-                    dangerous_config_keys.push(config_key)
-        continue
+**Phase 3: Subcommand-specific option collection:** After the subcommand is
+identified, parse its remaining argv with a command-specific option-arity
+table. Values consumed by `-m`, `--message`, and other value-taking options are
+data even when they begin with `-`. Stop option interpretation at the applicable
+`--` separator.
 
-    if arg.starts_with("-") and arg.len() > 1:
-        # Short flag analysis (e.g., -D, -f, -C)
-        # For multi-char short flags like -Cf, each char is a flag
-        # BUT -C and -c always consume the next arg as their value
-        chars = arg[1..].chars()
-        for ch in chars:
-            if ch == 'c' or ch == 'C':
-                state = expecting_config_value
-                break  # remaining chars after -C are part of next arg? No: git treats -Cf as -C -f, but -C needs value
-            if ch == 'f': has_force_flag = True
-            if ch == 'D': has_branch_D = True
-        continue
-
-    # arg doesn't start with "-" → this is the subcommand
-    if subcommand is None:
-        subcommand = Some(arg.clone())
-        match arg:
-            "stash" => stash_subcmd = True
-            "branch" => branch_subcmd = True
-    continue
-```
-
-**Phase 3: Subcommand-specific flag collection:** After the subcommand is identified, continue scanning remaining args for subcommand-specific flags:
-
-- For `push`: check for `--force`, `-f`, `--force-with-lease` in remaining args
-- For `branch`: check for `-D` in remaining args
+- For `push`: block `--force`, `-f`, bare `--force-with-lease`, and
+  `--force-with-lease=<value>`.
+- For `tag`: block actual `--force`/`-f` options.
+- For `branch`: block actual `--force`/`-f`, `-D`, and force-rename options.
+- For hook-running commands: block `--no-verify` and only the short aliases
+  defined by that command's grammar.
 - For `commit`: check for `--amend` in remaining args
-- For `revert`: identify the target commit (first non-flag arg after `revert`, or HEAD)
+- For `revert`: do not classify targets; pass argv through to Git
 
 **Phase 4: Decision:** Apply the block decision engine (§4) using the collected state. If no block, proceed to `execve()`.
 
 ### 3.2 Edge Cases
 
-| Input | Behaviour |
-|-------|-----------|
-| `git` (no args) | Pass through to real git |
-| `git --` | Pass through (no subcommand, separator only) |
-| `git -- --hard` | `--hard` is a pathspec after `--`, NOT a flag → pass through |
-| `git -c` (no value) | Pass through: git will error on missing value |
-| `git -C key=value` | Parse `key=value`, check against dangerous keys |
-| `git -Cf key=value` | `-C` expects value, so `key=value` is the config. `-f` is a dangling flag. |
-| `git -c core.hooksPath=/tmp/evil` | Blocked: key is `core.hooksPath` |
-| `git --upload-pack=/bin/sh clone ...` | Blocked if `--upload-pack` is in the block list (it is a dangerous flag) |
+| Input                                 | Behaviour                                                                  |
+| ------------------------------------- | -------------------------------------------------------------------------- |
+| `git` (no args)                       | Pass through to real git                                                   |
+| `git --`                              | Pass through (no subcommand, separator only)                               |
+| `git -- --hard`                       | Guard passes through; real Git rejects the separator before a subcommand   |
+| `git log -- --hard`                   | `--hard` is a pathspec after the subcommand separator, not a flag           |
+| `git -c` (no value)                   | Pass through: git will error on missing value                              |
+| `git -C repo status`                  | Consume `repo` as directory; identify `status` as subcommand                |
+| `git -Crepo reset`                    | Consume attached directory; identify and block `reset`                     |
+| `git --git-dir repo/.git reset`       | Consume option operand; identify and block `reset`                          |
+| `git -c core.hooksPath=/tmp/evil`     | Blocked: key is `core.hooksPath`                                           |
+| `git --upload-pack=/bin/sh clone ...` | Blocked if `--upload-pack` is in the block list (it is a dangerous flag)   |
 
-### 3.3 Subcommand Recognition
+### 3.3 Config-Bearing Global Options
 
-The guard only needs to classify subcommands into two categories: **blocked unconditionally** and **flag-gated** (needs further inspection). All other subcommands pass through.
+Config injection is parsed only in the leading global-option region. Supported
+forms are:
 
-| Blocked unconditionally | Flag-gated blocks |
-|------------------------|-------------------|
-| `reset` | `commit` (check for `--amend`) |
-| `checkout` | `branch` (check for `-D`) |
-| `clean` | `push` (check for `--force`/`-f`/`--force-with-lease`, background) |
-| `restore` | `revert` (check target is on origin) |
-| `rm` | `revert` (check target is on origin) |
-| `rebase` | `pull` (protected branch check) |
-| `gc` | `merge` (protected branch check) |
-| `prune` | |
+```text
+-c name=value
+-c name
+-cname=value
+-cname
+--config-env=name=environment_variable
+```
 
-Any argument that doesn't match a blocked or flagged subcommand and doesn't start with `-` passes through: git itself validates and rejects unknown subcommands.
+Each complete option is consumed before subcommand discovery continues. The
+guard stores only the exact key byte range, normalizes it with ASCII-only case
+folding for compiled-pattern matching, and retains the original argv separately
+as forensic evidence. Repeated overrides
+are all checked; one blocked key blocks the invocation. Dangerous keys block
+all users, while sudo-gated keys follow the effective-UID operator rule.
 
-### 3.4 The `--` Separator
+For `-c`, splitting occurs on the first `=` only. Additional `=` bytes remain
+part of the opaque value. When no `=` exists, Git treats the complete payload as
+a key with implicit boolean true, so both separate and attached no-value forms
+must still be checked. The key is the exact pre-`=` bytes: whitespace is not
+trimmed or otherwise rewritten. Keys are parsed without lossy UTF-8 conversion
+and use explicit ASCII case folding. Empty, non-ASCII, or structurally
+uninspectable keys exit 2; they are never replaced with an empty string. Values
+are not needed in normalized policy state, but original argv values are forwarded
+byte-identically and remain complete report/audit evidence.
+
+After policy accepts a syntactically valid key, execution uses the original
+argv byte slices rather than reconstructed or normalized arguments. This
+preserves safe config options and opaque values exactly. It does not preserve
+environment variables that the guard independently removes under its mandatory
+environment-sanitization policy.
+
+Uppercase `-C` consumes a repository-directory operand and is never config.
+There is no synthetic `--config` option. Once the subcommand or applicable `--`
+separator is reached, later tokens are interpreted only by that command's
+grammar. Malformed global config forms are forwarded unchanged for Git's own
+diagnostic unless their arity prevents reliable subcommand identification, in
+which case REQ-GGUARD-011 exits 2.
+
+#### Dangerous Config Policy Catalog
+
+`config/git_guard_config_keys.yaml` is the only key-pattern authority. Each
+entry records:
+
+- glob pattern (`*` is one key segment, `**` is zero or more segments);
+- enforcement class (`dangerous` or `sudo_gated`);
+- threat class;
+- concrete reason tied to Git behavior.
+
+The catalog covers every known configuration surface that can execute a
+command, redirect hooks/aliases/filters/merge drivers/pagers, expose
+credentials, alter transport or protocol policy, redirect repository/worktree
+or remote operations, or disable integrity checks. Unconditional entries apply
+to root as well as non-root. Sudo-gating is limited to reviewed operator
+identity and editor settings.
+
+Every entry has a positive blocked matrix case and a syntactically adjacent
+allowed control so wildcard overreach is visible. The pinned Git upgrade
+procedure inventories new configuration keys and requires an explicit threat
+classification before the upgrade is accepted.
+
+### 3.4 Subcommand Recognition
+
+The guard does not maintain a catalog of every harmless Git command. It
+classifies only commands carrying policy:
+
+- `blocked`: unconditional denial;
+- `sudo_gated`: denied to non-root and allowed to the operator path;
+- `partial`: requires command-specific argument policy;
+- `contract_check`: invokes the immutable WORKSPACE-CI policy engine;
+- `capability_loan`: may receive Ambient `CAP_DAC_OVERRIDE` while real Git
+  executes;
+- `mutating`: requires post-execution ownership reconciliation.
+
+`config/git_guard_subcommands.yaml` and the associated compiled reconciliation
+table are the source of truth. Build-time consistency checks reject category
+conflicts and require matrix coverage for every policy-bearing command.
+
+Matching is exact. The guard does not turn prefixes such as `reba` into
+`rebase`: Git may treat the former as an external `git-reba` command, and guard
+classification must not describe a different command from the one Git sees.
+Matching compares raw bytes with compiled ASCII names; non-ASCII positional
+command bytes therefore remain an unknown capless command rather than a failed
+text conversion.
+Commands outside the policy categories follow the unknown-subcommand rule and
+execute without an Ambient capability loan.
+Each supported Git upgrade requires a review for newly introduced commands that
+can violate guarded invariants.
+
+### 3.5 Unknown Commands and Capability Loan
+
+Unknown names are not assumed invalid: Git may resolve aliases, external
+`git-<name>` helpers, or commands introduced by a newer Git release. They pass
+through with argv unchanged but Ambient empty. The guard still has Effective
+`CAP_DAC_OVERRIDE` when the kernel checks execute permission on the root-only
+`git.original`; because the target has no file capabilities and Ambient is
+empty, all guard capabilities disappear across exec.
+
+Only exact commands in the compiled `capability_loan` category may raise
+Ambient `CAP_DAC_OVERRIDE`. The category is independent from block, contract,
+and reconciliation categories. Its inventory is justified by installed tests
+against root-owned repository metadata; a command is not added speculatively.
+No-subcommand and terminal-query invocations are capless.
+
+### 3.6 The `--` Separator
 
 Git uses `--` to separate options from pathspecs. For example:
+
 ```
 git checkout -- myfile.txt    # checkout the file "myfile.txt", not a branch
 git log -- src/main.rs        # show log for this file only
 ```
 
-The guard scans for `--` and stops flag interpretation at that point. Everything after `--` is treated as data, never as a git flag. This prevents bypass attacks like:
+The guard identifies the separator in the applicable Git command context and
+stops option interpretation there. Everything after it is treated as data,
+never as a Git flag. The original argv remains unchanged. For example:
+
 ```
-git -- --hard   # "--" makes "--hard" a pathspec, not a flag
+git log -- --hard   # "--hard" names a path; it is not the reset option
 ```
 
+The separator does not weaken subcommand policy: `git reset -- file` remains a
+`reset` invocation and is blocked by the subcommand rule. Conversely, a global
+rescan must not reclassify post-separator pathspecs such as `--hard`,
+`--force`, or `--no-verify` as options.
 
 ---
 
@@ -232,234 +356,572 @@ git -- --hard   # "--" makes "--hard" a pathspec, not a flag
 The guard applies checks in this order. The first block wins: later checks are not evaluated.
 
 ```
-1. Destructive subcommand? → BLOCK (reset, clean, restore, rm, rebase, gc, prune, stash). Sudo-gated (non-root blocked, root allowed): submodule, checkout
-2. Global destructive flag? → BLOCK (--hard, --no-verify)
-3. Dangerous -c/-C key? → BLOCK (core.hooksPath, core.sshCommand, etc.)
+1. Exact subcommand in compiled `blocked` category? → BLOCK for every user.
+   Exact subcommand in `sudo_gated`? → deny non-root, then apply any
+   unconditional destructive-form checks before allowing root. Exact
+   subcommand in `partial`? → run its command-specific policy.
+2. Destructive option in the identified command's parsed option state? → BLOCK.
+3. Dangerous `-c`/`--config-env` key? → BLOCK (core.hooksPath, core.sshCommand, etc.)
 4. Subcommand-specific block?
    4a. branch -D? → BLOCK
-   4b. push --force/-f/--force-with-lease? → BLOCK
+   4b. push force option, including `--force-with-lease=<value>`? → BLOCK
    4c. push from background? → BLOCK
-   4d. commit --amend on pushed HEAD? → BLOCK
-   4f. revert on unpushed commit? → BLOCK
+   4d. commit --amend as non-root? → BLOCK; verified root continues to contract
 5. Protected branch rule?
-   5a. pull on main/master without --ff-only/--rebase? → BLOCK
-   5b. merge on main/master without --ff-only (and without --abort, non-root)? → BLOCK
+   5a. pull on a catalog-protected branch without a final explicit ff-only or
+       enabled-rebase mode? → BLOCK
+   5b. non-root merge on a catalog-protected branch without final ff-only,
+       --abort, or --quit mode? → BLOCK
 6. Hook-bypass env var? → BLOCK (SKIP, PRE_COMMIT_ALLOW_NO_CONFIG)
-7. AMI-CI contract check? → BLOCK if contract fails (enforce mode)
+7. WORKSPACE-CI contract required? -> continue only on `Passed`; every typed
+   non-success exits 4 and is not an exit-1 policy block.
 8. ALL CLEAR → execve real git
 ```
 
-### 4.1 Block Messages
+`stash` is an unconditional category-1 block. The decision occurs before stash
+operation parsing, so bare `stash`, all named operations, unknown future
+operations, and operands after `--` have the same result for root and non-root.
+Although `list` and `show` are read-only, they remain blocked to avoid a second
+stash grammar and gaps as Git evolves. The hint names the sanctioned temporary
+worktree and `git diff` snapshot alternatives; it must not recommend another
+stash operation.
 
-Block messages follow this format:
+`branch` policy derives operations from branch's own option grammar. Any actual
+force option blocks, whether standalone or combined with delete, move, or copy.
+Consequently `-D`, `--delete --force`, `-df`, `-fd`, `-f`, `--force`, `-M`,
+`-C`, and equivalent move/copy-plus-force forms block. Safe `-d`, `-m`, and
+`-c` remain allowed without force. Short clusters and long-option spellings are
+interpreted exactly as the pinned Git parser interprets them; tokens after the
+applicable `--` are operands. Lowercase branch `-c` and uppercase branch `-C`
+are copy operations, never global config options once the subcommand has been
+identified.
+
+`push` policy likewise derives force semantics from push's grammar rather than
+literal token equality. It blocks `-f` clusters, `--force`, every
+`--force-with-lease` form, leading-`+` force refspecs, and `--mirror`. The parser
+accounts for whether a repository was supplied positionally or by option before
+classifying remaining operands as refspecs. `--` stops option parsing but not
+refspec parsing, so a post-separator leading-`+` refspec still blocks while a
+post-separator option-like operand is not treated as an option.
+`--force-if-includes` is allowed when no actual force mechanism is present.
+Before execution, the guard checks effective
+trusted repository values for `remote.<name>.push` force refspecs and
+`remote.<name>.mirror=true` under the same sanitized Git environment used for
+execution. The dangerous-config catalog unconditionally prevents those unsafe
+defaults from being introduced through guarded config-bearing paths. A block
+hint recommends only a normal non-forced push; `--force-with-lease` is not an
+allowed alternative.
+
+#### Protected Branch Catalog
+
+`config/git_guard_protected_branches.yaml` is the only authority for protected
+exact names and prefixes. Exact entries compare with the complete current branch
+name; prefix entries compare from byte zero and end in `/` so boundaries are
+explicit. Both policy and candidate use ASCII-only case folding. This deliberate
+conservative match may protect differently cased Git refs even though Git treats
+those refs as distinct. Root status does not change classification.
+
+The build rejects empty, non-ASCII, non-lowercase, duplicate, and invalid exact
+or prefix entries. A prefix is validated as a branch namespace rather than as a
+complete ref because its trailing `/` is intentional. The generated exact and
+prefix tables are the only runtime inputs; prose examples never define an
+additional list.
+
+Protected-branch `pull` policy computes two ordered option states: effective
+fast-forward mode and effective rebase mode. `--ff-only` sets the first safe;
+later `--ff` or `--no-ff` replaces it. `-r`, `--rebase`, and pinned-Git-supported
+non-false rebase values set the second safe; `--rebase=false` and `--no-rebase`
+replace it with unsafe. The pull is allowed if either final state is safe.
+Configuration does not supply the required explicit choice. Command-specific
+value consumption, short clusters, long abbreviations, and `--` follow the
+pinned pull parser; a value or post-separator operand that resembles a safe
+option has no policy effect.
+
+Protected-branch `merge` policy uses an ordered effective FF mode. `--ff-only`
+sets safe mode; a later `--ff` or `--no-ff` replaces it, and a later
+`--ff-only` restores it. Actual `--abort` and `--quit` modes are allowed for
+non-root recovery because they do not create a merge commit. `--continue` may
+create that commit and remains root-only. Merge's value-taking options are
+consumed before policy classification, so values such as the message in
+`-m --ff-only` or `-m --abort` cannot authorize a merge. Long abbreviations and
+`--` follow the pinned parser. Config-derived FF mode does not replace the
+required explicit argv choice. Verified root may use other merge modes.
+
+For every otherwise-allowed push, the guard parses `/proc/self/stat` by finding
+the final `)` of `comm` and then treating the following state token as absolute
+field 3. `pgrp` is relative index 2 and `tpgid` is relative index 5. A positive
+`tpgid` must equal `pgrp`; a mismatch is a background-push block. A non-positive
+`tpgid` means there is no controlling foreground terminal group and is allowed
+for non-interactive operation. Read failure, missing delimiter or fields,
+numeric parse failure, and overflow all block with exit 1. Detection failure is
+never downgraded to a warning.
+
+### 4.1 Failure Report Delivery
+
+Policy block messages use this exact ASCII grammar:
+
+```text
+BLOCKED: ts=<RFC3339-UTC-Z>|reason=<encoded>|argc=<decimal>|arg0=<encoded>|...|argN=<encoded>
+hint=<encoded>
 ```
-BLOCKED: git <command> <reason> (<ISO-8601-timestamp>)
-  → Hint: <alternative action>
-```
 
-Written to both stderr and `/dev/tty` (if openable). The `/dev/tty` write bypasses stdout/stderr redirection: a user running `git reset --hard > /dev/null 2>&1` will still see the block message on their terminal. Note the `/dev/tty` write is defence in depth only: at the shell layer, output-suppression idioms themselves (`> /dev/null`, `| tail`, `|| true`) are blocked outright for `-c` strings, interactive input, and untrusted scripts by the shell guard (REQ-SHG-308/309/310, SPEC-SHELL-GUARD §6 steps 9-11).
+The second line ends with exactly one newline; there are no other bytes. `argc`
+counts exact process arguments including `argv[0]`, and contiguous `arg0..argN`
+preserves empty arguments and boundaries. Encoded fields use §7.1's canonical
+uppercase `%HH` value encoding, including its unreserved ASCII set. The formatter
+never uses lossy conversion, joined argv, shell quoting, ANSI sequences,
+localization, masking, omission, hashing, or truncation. The fixed timestamp is
+UTC `YYYY-MM-DDTHH:MM:SSZ`.
+If the signed system time cannot be represented in that grammar, formatting
+returns a typed failure under REQ-GGUARD-110/092 rather than fabricating the Unix
+epoch or emitting a malformed block/audit record; the policy denial still stands.
 
-### 4.2 Subprocess Checks
+The first block in §4's ordered decision engine supplies the sole reason and
+hint; later matching checks are not evaluated and cannot append competing text.
+The reason names the exact compiled policy and blocked form. The hint is
+policy-owned static data, except for encoded evidence fields, and cannot contain
+unencoded caller bytes. It does not recommend an action blocked in the same
+caller/repository context. Where an alternative depends on root authority,
+repository state, or another precondition, the text states that condition and
+does not promise success. Hints are displayed as data and are never passed to a
+shell or subprocess.
+
+Argument bytes, selected reason bytes, and one timestamp are captured in a
+single immutable evidence object. The visible formatter and canonical audit
+formatter consume that object, preventing disagreement between destinations.
+The visible hint is additional policy-owned evidence; §7.1's audit schema does
+not duplicate it. One formatted visible payload is reused for stderr and any
+distinct controlling tty under REQ-GGUARD-110.
+
+One shared delivery function accepts an immutable byte payload and returns typed
+per-destination results; it does not exit. The dispatcher uses it for policy,
+validation, guard-unavailable, contract-summary, and non-recursive audit-failure
+reports. Each write is checked to completion, partial writes continue, and only
+valid `EINTR` conditions are retried. The same payload bytes are reused rather
+than reformatted per destination.
+
+The report is always attempted on stderr. The guard then opens `/dev/tty`
+write-only and close-on-exec when a controlling terminal exists. If stderr is
+not a terminal, the tty receives the report. If stderr is a terminal, safe tty
+APIs compare terminal/session identity for stderr and the controlling terminal;
+filesystem pathname, inode, `st_dev`, and ordinary file identity are forbidden
+for this decision because `/dev/tty` may alias the same `/dev/pts/N` through
+different metadata. A proven same terminal receives no second copy; a proven
+distinct terminal does. If stderr is a terminal but identity cannot be proven,
+the already-attempted stderr report stands and the tty copy is skipped to avoid
+duplication. Thus an ordinary interactive failure appears once, while redirected
+stderr still permits a distinct controlling-terminal report.
+
+Expected no-controlling-terminal results are not errors. Unexpected tty open,
+terminal-identity, stderr-write, and tty-write failures become typed delivery
+results and are surfaced non-recursively through any surviving destination.
+They never alter the original typed exit or execution decision. Separately
+streamed contract bytes are not copied into the summary payload. Warnings remain
+stderr-only and ordinary real Git output never uses this function. The tty write
+is defense in depth; shell-layer output-suppression rules remain independent.
+
+### 4.2 Policy-Denial Exit
+
+`PolicyDenied { reason, hint }` is the sole guard outcome that maps to exit 1.
+It covers every static or contextual command/config/environment/repository
+policy denial without a more specific contract class, not merely operations
+described as destructive. The central denial dispatcher emits one complete
+stderr/distinct-tty report and attempts one canonical root-owned
+`event=block|exit=1` audit append before exiting. Reporting/audit failure is
+reported separately but cannot change the original denial or permit Git.
+
+Validation, privilege/integrity/supervision, and contract outcomes map to exits
+2, 3, and 4 respectively. A real Git process may independently exit 1; that
+status is propagated without `BLOCKED` output or a block audit event. Internal
+fork/exec/capability/wait failures never use exit 1.
+
+### 4.3 Subprocess Checks
 
 Some checks require invoking real git:
 
-| Check | Subcommand | Timeout | On timeout |
-|-------|-----------|---------|------------|
-| `commit --amend` | `git merge-base --is-ancestor HEAD origin/<branch>` | 2s | Skip check (warn) |
-| `revert` | `git rev-parse --verify <target>^{commit}` | 2s | Skip check (warn) |
-| `revert` (is-on-remote) | `git merge-base --is-ancestor <target> origin/<branch>` | 2s | Skip check (warn) |
-| Protected branch | `git rev-parse --abbrev-ref HEAD` | 2s | Skip check (warn) |
+| Check                   | Subcommand                                              | Timeout | On timeout        |
+| ----------------------- | ------------------------------------------------------- | ------- | ----------------- |
+| Effective repository    | fixed repository-resolution helper                      | 2s      | Block affected operation |
+| Protected branch        | `git symbolic-ref --quiet HEAD`                         | 2s      | Block known-repository operation |
 
-When a subprocess times out, the associated safety check is **skipped** (not blocked). The rationale: these are preventive checks, not destructive command blocks. The destructive commands themselves (reset, clean, restore, etc.) are blocked by the static deny-list regardless of subprocess availability. `checkout` is sudo-gated (root may run it via sudo for conflict resolution).
+Timeout behavior is defined by each subprocess-backed requirement. Commands in
+the compiled `blocked` category and static sudo-gated decisions such as
+non-root `commit --amend` do not invoke a subprocess and cannot be skipped by a
+timeout. Partial commands retain their explicit policy; subprocess failure
+shall not silently reclassify one category as another.
+
+Repository resolution consumes the validated location selectors from the
+original global-option region and is performed once. A typed no-repository
+result differs from timeout, malformed output, and operational failure. In a
+resolved repository, fixed `symbolic-ref --quiet HEAD` output must be a
+byte-exact `refs/heads/<name>` plus its single line terminator. This recognizes
+unborn branches and linked-worktree HEAD files without lossy UTF-8 conversion.
+The helper's status identifies detached HEAD; no-repository is accepted only
+from the shared resolver. Those two proven states skip branch policy. Every
+other failure blocks an affected pull or non-root merge with exit 1. The same
+resolved repository and branch result feed policy, locking, sealing, execution,
+and reconciliation so checks cannot silently target different repositories.
 
 ---
 
 ## 5. Environment Sanitisation
 
-### 5.1 Unset List
+### 5.1 Catalog Allow-List
 
-Before `execve()`, the guard removes these variables from the environment:
+`config/git_guard_environment.yaml` is the only environment authority. Its
+compiled categories are allowed exact names, allowed prefixes, effective-root
+editor/identity names, blocked bypass names, reserved `--config-env` value
+carriers, and guard-owned exact names/prefixes. Unknown inherited names are
+dropped with a byte-exact evidence warning; the specification does not maintain a
+second finite deny list.
 
-**Git-specific** (can redirect git behaviour to attacker-controlled resources):
-```
-GIT_EXEC_PATH        → subcommand binary lookup path
-GIT_TEMPLATE_DIR     → template for new repos (can contain malicious hooks)
-GIT_SSH              → SSH command replacement
-GIT_SSH_COMMAND      → SSH command replacement (newer)
-GIT_ASKPASS          → auth prompt command
-GIT_TERMINAL_PROMPT  → interactive prompt control
-GIT_EDITOR           → editor command (sudo-gated: passed through only for root)
-GIT_SEQUENCE_EDITOR  → editor for interactive rebase (sudo-gated: passed through only for root)
-GIT_CONFIG           → config file override
-GIT_CONFIG_GLOBAL    → global config file override
-GIT_CONFIG_SYSTEM    → system config file override
-GIT_CEILING_DIRECTORIES → repo discovery boundary
-GIT_DIR              → explicit .git directory
-GIT_WORK_TREE        → explicit work tree root
-GIT_NAMESPACE        → repository namespace
-GIT_INDEX_FILE       → index file path
-GIT_OBJECT_DIRECTORY → object store location
-GIT_ALTERNATE_OBJECT_DIRECTORIES → alternate object stores
-GIT_DISCOVERY_ACROSS_FILESYSTEM → cross-FS repo discovery
-GIT_CONFIG_COUNT / GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* → env-based config
-```
+The sanitizer starts empty. It copies each catalog-allowed inherited name at
+most once with its value bytes unchanged, admits root-only names only when
+effective UID is zero, and admits a reserved config-value carrier only when the
+validated argv references it. It then inserts fixed guard-owned values after
+discarding every caller version, including complete config-injection and SSH
+wrapper families. `AT_SECURE` indicates secure execution, not operator
+authorization.
 
-**Dynamic linker** (defense-in-depth; glibc ignores these in SUID mode):
-```
-LD_PRELOAD           → preloaded shared libraries
-LD_LIBRARY_PATH      → library search path
-LD_AUDIT             → library auditing
-LD_DEBUG             → linker debug output
-LD_BIND_NOW          → immediate symbol resolution
-LD_BIND_NOT          → skip symbol binding
-LD_PROFILE           → profiling
-LD_PROFILE_OUTPUT    → profiling output path
-LD_TRACE_LOADED_OBJECTS → ldd-style output
-LD_USE_LOAD_BIAS     → load bias control
-LD_HWCAP_MASK        → hardware capability mask
-LD_DEBUG_OUTPUT      → debug output file
-```
+Build-time checks reject non-ASCII or invalid names, duplicates, category
+overlap, unsafe broad prefixes, and allow entries that expose known Git, loader,
+shell, pager, editor, credential, object-store, repository, or config-injection
+controls. Allowed values may be non-UTF-8 and remain byte-exact whenever emitted
+as evidence. Policy helpers,
+the contract runner, and final Git all begin with this same environment; each may
+add only its documented fixed variables. Removed, replaced, malformed, and
+unauthorized inherited names and values are reported as reversible evidence;
+filtering is never
+silent.
 
-**glibc unsecvars** (defense-in-depth):
-```
-GCONV_PATH           → iconv module path
-GETCONF_DIR          → getconf directory
-NLSPATH              → NLS message catalog path
-TMPDIR               → temporary directory
-TZDIR                → timezone data directory
-RES_OPTIONS          → resolver options
-HOSTALIASES          → hostname aliases
-LOCALDOMAIN          → local domain name
-NIS_PATH             → NIS path
-RESOLV_HOST_CONF     → resolver host config
-LOCPATH              → locale data path
-MALLOC_TRACE         → malloc trace file
-MALLOC_ARENA_MAX     → malloc arena count
-GLIBC_TUNABLES       → glibc runtime tunables
-```
+The catalog's blocked-bypass category is evaluated before helper execution and
+is not merely filtered. A non-empty byte value blocks the complete invocation
+with exit 1 for every user; an empty value is inactive, is omitted from the child
+environment, and produces a byte-exact evidence warning. Detection uses
+`OsStr` bytes rather than
+`std::env::var`, so non-UTF-8 values cannot evade the decision. Reports contain
+the cataloged name and exact value under reversible escaping. Hook-framework upgrades require a
+review of new environment bypass controls and matrix coverage before the pinned
+version changes.
 
-**Hook bypass**:
-```
-SKIP                 → pre-commit framework: skip hooks
-PRE_COMMIT_ALLOW_NO_CONFIG → pre-commit: allow without config
-```
+### 5.2 PATH Preservation
 
-### 5.2 PATH Reset
-
-PATH is set to `/usr/local/bin:/usr/bin:/bin`. This prevents PATH injection attacks where an attacker places a malicious binary earlier in the search path.
+`PATH` is a cataloged allowed exact variable. Its caller value is preserved as
+bytes for root and non-root; absence remains absence. The guard never uses that
+value to locate guard-owned programs: real Git, the contract shell/script, SSH
+wrapper, and policy helpers use fixed absolute paths and their applicable
+integrity checks. Git, hooks, contract scripts, and external `git-*` helpers may
+use caller PATH for ordinary tool resolution. Resetting PATH after the guard has
+already been selected does not secure initial guard lookup and would break
+workspace tools, toolchain shims, hooks, and external Git commands.
 
 ### 5.3 Preserved Variables
 
-The following are explicitly preserved:
-```
-HOME                 → needed for git config, ssh keys
-USER                 → needed for git author identification
-LANG, LC_ALL, LC_*   → locale, affects git output formatting
-TERM                 → terminal type, affects colour output
-DISPLAY, WAYLAND_DISPLAY → GUI git tools (gitk, git-gui)
-SSH_AUTH_SOCK        → SSH agent for git+ssh operations
-GPG_TTY, PINENTRY_USER_DATA → GPG signing
-GIT_PAGER            → output pager
-EDITOR, VISUAL       → user's preferred editor (sudo-gated: dropped with a warning for non-root)
-SHELL                → user's shell
-PATH                 → set to known-safe value (§5.2)
-PWD                  → current directory
-```
+Only names in the compiled environment catalog are preserved; this section does
+not duplicate that list. Root-only editor and identity entries are dropped with
+a byte-exact evidence warning for non-root and admitted for effective-UID-zero operators.
+File-capability secure execution does not authorize them. Command-selecting
+pager, editor, diff, credential, and helper variables are not ordinary preserved
+variables.
 
-The commit-identity vars `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
-`GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`, and `EMAIL`, plus the editor vars
-above (`EDITOR`, `VISUAL`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`), are
-**sudo-gated**: dropped (with an explicit warning, no exit) for non-root and
-passed through only when the guard runs in SUID context (`getauxval(AT_SECURE) != 0`).
+The required caller-visible identity/locale surface is exact `HOME`, `USER`,
+`LANG`, and `LANGUAGE`, plus prefix `LC_`. Presence, absence, emptiness, and value
+bytes are preserved. `LOCPATH`, `NLSPATH`, and other loader/catalog path controls
+are outside that prefix and remain excluded. Caller HOME and USER are data for
+Git and its tools only; guard authority derives from kernel UID/GID and passwd
+records. In particular they cannot select audit-log homes, trusted Git identity,
+provisioned SSH keys, policy files, or protected filesystem paths.
 
 ### 5.4 Implementation: Allow-List Approach
 
-The guard constructs a **minimal environment from scratch** rather than surgically removing dangerous variables. This is the only correct approach for a SUID binary: a deny-list of env vars is inherently incomplete because glibc and git can add new sensitive variables in future releases. An allow-list has a closed surface.
+The guard constructs a minimal environment from scratch rather than surgically
+removing dangerous variables. A deny-list is incomplete as libc, Git, and helper
+tools add controls. Names are matched as ASCII bytes against compiled exact and
+prefix categories; admitted values remain arbitrary `OsString` bytes. The guard
+serializes each unique admitted name and value directly into `CString` storage
+without Unicode conversion, then adds canonical guard-owned entries. `execve`
+receives only that finalized vector. This makes absence the default and keeps the
+catalog auditable without duplicating it in code or prose.
 
-The implementation:
+### 5.5 Untrusted Snapshot and Diagnostics
 
-```rust
-// ALLOWED_VARS is the definitive list of env vars to preserve
-let mut envp: Vec<CString> = ALLOWED_VARS
-    .iter()
-    .filter_map(|&key| {
-        std::env::var_os(key).map(|val| {
-            // SAFETY: key is ASCII, val is valid UTF-8 from the environment.
-            // Neither can contain null bytes (OsStr invariant on Linux).
-            CString::new(format!("{}={}", key, val.to_string_lossy())).unwrap()
-        })
-    })
-    .collect();
+The guard snapshots inherited environment entries once at startup as raw Unix
+name/value bytes. The snapshot is immutable and is consumed only by compiled
+environment-policy categories. It is never authority for executable or policy
+paths, user/home identity, capabilities, integrity, repository selection, or
+other security decisions. Universal `secure_getenv()` is intentionally not used:
+under file-capability `AT_SECURE` execution it returns no caller values and would
+disable required detection and preservation. No additional FFI site is needed.
 
-// Inject safe PATH
-envp.push(CString::new("PATH=/usr/local/bin:/usr/bin:/bin").unwrap());
+`WORKSPACE_GUARD_TRACE` is a cataloged guard-diagnostic name. Its enablement is
+computed once from the immutable startup snapshot: only a present non-empty
+value enables tracing. The name is consumed and never forwarded. Trace records
+use this exact ASCII grammar:
 
-// nix::unistd::execve is a safe wrapper over execve(2). It takes &CStr
-// slices and constructs the null-terminated pointer arrays internally.
-// execve replaces the process image and does not return on success.
-match nix::unistd::execve(git_path, &argv_c, &envp) {
-    Ok(inf) => match inf {},
-    Err(errno) => {
-        eprintln!("FATAL: execve failed: {}", std::io::Error::from_raw_os_error(errno as i32));
-        std::process::exit(3);
-    }
-}
+```text
+TRACE: phase=<static-token>|event=start
+TRACE: phase=<static-token>|event=end|elapsed-ns=<decimal>
 ```
 
-This approach has two advantages over `remove_var()`:
-1. **Completeness**: Any variable not in `ALLOWED_VARS` is absent from the child's environment. No future glibc variable can sneak through.
-2. **Auditability**: The allowed list is the single source of truth: reviewers can verify each entry against its justification.
+Each record has exactly one final newline and is written completely to stderr.
+Phase tokens come from a closed compiled set. Trace records contain no argv,
+environment values, credentials, repository paths, policy contents, helper
+output, or caller-controlled bytes. Re-reading the process environment per phase,
+free-form phase names, empty-value activation, `eprintln!`, and unchecked writes
+are forbidden.
+
+Policy-helper stderr is surfaced on helper success and failure using bounded
+incremental chunks with this exact ASCII grammar:
+
+```text
+HELPER-STDERR: helper=<static-token>|seq=<decimal>|final=<0|1>|data=<encoded>
+```
+
+Each chunk has exactly one final newline. Helper tokens come from a closed
+compiled set. For non-empty stderr, sequence starts at zero and is contiguous,
+exactly one final chunk has `final=1`, and concatenating decoded `data` fields
+reproduces the exact stderr bytes. Empty helper stderr emits no chunks. `data` uses §7.1's canonical
+uppercase `%HH` encoding. Successful helper stdout remains an internal typed
+protocol and is never emitted. Failed or malformed protocol stdout is preserved
+as encoded failure evidence, not copied raw to stdout. Spawn errors, reader
+failures, signals, timeouts, malformed results, and non-zero statuses retain
+distinct typed diagnostics and are never converted to empty output or a silent
+fallback.
+
+An ordinary successful invocation with no diagnostic condition remains
+transparent. Transparency never suppresses explicit trace output, filtering
+warnings, helper diagnostics, policy warnings, validation/provisioning errors,
+contract output, or block reports.
+
+### 5.6 Runtime Warnings
+
+The runtime warning catalog is closed:
+
+| `kind` | Ordered encoded fields | Origin |
+| --- | --- | --- |
+| `filtered-environment` | name, value, filter-reason token | REQ-GGUARD-070 |
+| `empty-hook-bypass-environment` | name, explicit empty value | REQ-GGUARD-071 |
+| `workspace-marker-drift` | path, observed condition | REQ-GGUARD-081, only when inspected |
+| `reconcile-symlink-skipped` | path | REQ-GGUARD-176 |
+| `reconcile-protected-path-drift` | path, observed condition | REQ-GGUARD-178 |
+
+One inherited entry produces at most one warning. The specialized empty
+hook-bypass variant supersedes the generic filtered-environment variant; a
+non-empty hook-bypass value is an exit-1 denial and produces no warning.
+
+No other runtime condition may be relabeled as a warning to avoid its policy,
+validation, guard-unavailable, contract, audit, or reconciliation outcome. Trace
+lines, helper stderr, contract streams, and installer output retain their own
+contracts. In particular, background-push detection failure remains an exit-1
+policy denial.
+
+Each warning is one immutable byte payload with this exact grammar:
+
+```text
+WARNING: ts=<RFC3339-UTC-Z>|kind=<catalog-token>|fieldc=<decimal>|field0=<encoded>|...|fieldN=<encoded>
+```
+
+The line has exactly one final newline. The variant fixes canonical field count
+and order. `kind` is its static lowercase ASCII token; dynamic fields use §7.1's
+uppercase `%HH` encoding. Environment name/value bytes, including an explicit
+empty value, and Unix path bytes remain exact. Lossy conversion, ANSI sequences,
+localization, masking, omission, and truncation are forbidden.
+
+Warnings use a checked complete-write loop to stderr only. A successful write
+does not alter execution or the eventual real-Git outcome. No warning is copied
+to `/dev/tty`, prefixed `BLOCKED:`, or appended to an audit sink. Expected absence
+of a warning is silent. Short write, `EPIPE`, or any other non-retryable stderr
+failure returns `GuardUnavailable { stage=warning-stderr, cause, os_status }`;
+only a valid `EINTR` is retried. Before requested Git starts, exit 3 executes no
+Git. After Git starts, exit 3 reports that its operation may already stand. An
+independent documented reconciliation failure retains its exit-74 precedence.
+The guard-unavailable summary then uses §4.1 delivery, including a distinct tty;
+the warning itself never does.
+
+### 5.7 Stream Ownership and Ordering
+
+The guard emits no guard-generated bytes to stdout. Real Git inherits caller
+stdout and stderr directly: the guard does not pipe, buffer, decode, encode,
+prefix, merge, reorder, or duplicate either stream. This preserves binary output,
+terminal detection, prompts, progress, color, broken-pipe behavior, and Git's own
+write-error outcome. Stdout may otherwise contain only incrementally streamed
+WORKSPACE-CI stdout under §6.2. Contract stderr is likewise streamed under its
+contract and is not helper framing or a guard diagnostic.
+
+Guard diagnostics, warning records, trace records, helper-stderr chunks, and
+post-Git reconcile reports use stderr. Enforced failure reports additionally use
+the distinct-tty rules in §4.1. Successful audit persistence emits no terminal
+output. Successful helper protocol stdout remains internal.
+
+Causal ordering is mandatory: pre-Git warnings, trace records, and helper
+diagnostics complete before requested Git starts; contract stdout/stderr is
+surfaced before Git starts; a failed contract's concise summary follows its
+preserved streams; and post-Git trace/reconcile diagnostics begin only after Git
+is reaped. Bytes remain ordered within each individual stream. The guard does not
+claim a total ordering between independently written stdout and stderr.
+
+Checked trace/helper diagnostic writes return typed outcomes. Before Git starts,
+a write failure maps to `GuardUnavailable` exit 3 and launches no requested Git.
+After Git starts, it maps to exit 3 and reports that Git's operation or mutation
+may already stand; an independent reconciliation invariant failure retains the
+documented exit-74 precedence. Contract stream read/write failure remains a typed
+exit-4 contract outcome. Failure-report delivery follows §4.1 without changing
+its original exit class. Errors produced by real Git while writing its inherited
+streams remain real-Git outcomes and are propagated under §8.5.
 
 ---
 
 ## 6. WORKSPACE-CI Contract Enforcement
 
+The compiled `contract_check` category is an exact two-element set: `commit` and
+`push`. It mirrors the trusted script's only supported command values and is not
+an open-ended list. Root and non-root use the same contract. Static blocks and
+effective repository resolution precede one contract invocation; capability
+loan and requested real-Git execution follow only after success.
+
+`cherry-pick`, `am`, `apply`, and recovery operations do not invoke this runner.
+Their native hooks and reconciliation still apply, and any resulting history is
+contract-checked before push. Adding another command requires first specifying
+and implementing what prospective or resulting content the trusted runner can
+correctly validate for that command.
+
 ### 6.1 Workspace Detection
 
-The guard determines if the current repo is inside an WORKSPACE workspace by:
-1. Getting the repo's top-level directory (via `rev-parse --show-toplevel` subprocess, or scanning for `.git`).
-2. Walking up from that directory to `/`, checking each ancestor for:
-   - `.boot-linux/` directory exists
-   - `projects/CI/` directory exists
-   - `workspace/scripts/utils/git-guard` file exists
+The guard reads workspace authority from the fixed root-owned runtime registry
+`/etc/workspace-guard/workspace-roots`. Its parent chain must be root-owned and
+not group/other-writable. The registry contains canonical absolute root paths and
+is accepted only as a no-follow regular file with `root:root`, exact mode `0644`,
+and the filesystem immutable flag. Registry absence, parse failure,
+replacement, or metadata/integrity drift blocks a contract-eligible invocation;
+it is never interpreted as “outside workspace.”
 
-The first ancestor with all three is the workspace root. If none found, skip contract enforcement.
+The effective repository resolved once under §4.3 is canonicalized and compared
+to registered roots by path components. Equality or descendant containment is a
+match; lexical prefixes such as `/workspace-a` versus `/workspace-agent` are
+not. For explicitly overlapping roots, the longest matching ancestor supplies
+the workspace binding. Paths remain Unix bytes rather than lossy strings, and
+root/non-root classification is identical.
+
+Legacy workspace markers such as `.boot-linux` and source-checkout paths are not
+authority. They may be inspected as drift evidence, with every mismatch surfaced,
+but forging, deleting, replacing, or symlinking all markers cannot alter registry
+membership. Repositories outside every verified registered root proceed to the
+REQ-GGUARD-082 outside-workspace rule.
+
+Outside-workspace behavior depends on the exact contract command. `commit`
+skips without reading local remotes; mutable repository config is not commit
+scope authority. `push` first resolves its effective destination from the parsed
+repository operand and, when needed, sanitized Git's named/default remote and
+push-URL resolution. Explicit URLs and effective rewrite rules are included.
+
+A compiled protected-remote catalog records reviewed canonical host plus
+repository path/namespace rules. Host-only matching is insufficient. An
+outside-workspace push proceeds without the contract only when its typed
+destination is successfully proven unrelated. Protected destinations block with
+exit 4 and require operation from a registered workspace. Missing, ambiguous,
+malformed, failed, or otherwise indeterminate resolution also exits 4. The same
+resolved destination feeds subsequent push policy, and helper status/stderr is
+never converted to an unrelated result or swallowed.
 
 ### 6.2 Contract Check Delegation
 
-When the repo is in an WORKSPACE workspace and the subcommand is `commit` or `push`, the guard runs:
+When the repo is in an WORKSPACE workspace and the subcommand is `commit` or
+`push`, the guard first verifies the deployed WORKSPACE-CI artifact and then
+runs the fixed argument vector:
 
-```bash
-bash /path/to/projects/CI/lib/checks_quality.sh
+```text
+argv[0] = /bin/bash
+argv[1] = /opt/workspace-ci/lib/checks_quality.sh
+cwd     = <canonical effective repository root>
+stdin   = /dev/null
 ```
 
+`/bin/bash` and the script path are absolute constants. The guard does not use
+`-c`, stdin program text, `source`, generated code, PATH lookup, workspace-root
+prefixing, or a caller override. This is the only shell subprocess permitted by
+the Git guard. Immediately before spawn, `/bin/bash` is verified against the
+installed shell-guard identity/integrity contract. The script and each trusted
+parent component are inspected without following a final symlink and must match
+the deployed root ownership, non-writability, exact mode, immutable state, and
+content identity. The contract child receives no Git capability loan.
+
 With environment variables:
+
 ```
 WORKSPACE_GGUARD_CMD=<commit|push>
 WORKSPACE_GGUARD_REPO_ROOT=<repo top-level>
 WORKSPACE_GGUARD_WORKSPACE_ROOT=<workspace root>
 ```
 
-The script outputs violations to stderr. If it exits non-zero, the guard blocks with exit code 4 and passes through the script's stderr.
+These are the only runner bindings. `CMD` is the exact compiled contract command;
+the two roots are the same canonical byte-oriented identities already selected
+for effective repository policy and verified registry membership. They are not
+re-resolved or converted through UTF-8. The runner cwd and `REPO_ROOT` binding
+refer to the same repository identity.
+
+The child environment is cleared and rebuilt from the same sanitized
+environment contract used for real Git, then the three bindings above are
+inserted exactly once. Dynamic-loader variables, Git redirection variables,
+hook-skip variables, caller-supplied `WORKSPACE_GGUARD_*`, and legacy
+`AMI_GGUARD_*` values never survive and each spoofing removal is reported with
+its exact value as evidence. Legacy aliases are neither emitted nor accepted. Missing, duplicate,
+NUL-invalid, or identity-inconsistent bindings fail closed with exit 4. The
+trusted script quotes the values and treats spaces, newlines, non-UTF-8 bytes,
+and leading-hyphen path components as data. The
+configured contract timeout is mandatory and timeout fails closed with exit 4.
+
+The runner drains stdout and stderr concurrently while the timeout is active so
+pipe capacity cannot deadlock the script. Both streams are incrementally surfaced
+on success and failure without truncation or masking, using bounded per-chunk
+memory. The runner
+starts the script in a dedicated process group; timeout terminates and reaps the
+whole group. Spawn, pipe, output, wait, signal, timeout, integrity, and non-zero
+exit outcomes retain distinct diagnostics and all failures map to exit 4.
+
+The runner returns a typed outcome: `Passed`, `Rejected { code }`,
+`Signaled { signal }`, `TimedOut`, `SpawnFailed`, `OutputFailed`, `WaitFailed`,
+or `IntegrityFailed`. Only `Passed` continues to requested Git. Contract stream
+bytes are emitted once and are not embedded in the outcome message. On any other
+outcome the guard emits a separate concise summary containing status metadata,
+exits 4, and uses standard stderr/distinct-tty/audit delivery. The audit event
+records the command and outcome; script stdout/stderr remains separately
+preserved evidence and is not duplicated in the summary record. Output bytes and
+per-stream order are preserved, including non-UTF-8 data.
 
 ### 6.3 Why Shell Delegation?
 
 The contract checks involve:
+
 - YAML parsing (`project_enforcement.yaml`)
 - File content inspection (checking hook headers for `AUTO-GENERATED`)
 - Tier resolution logic
 - Makefile grep
 
 Re-implementing this in Rust would:
-1. Add YAML parsing dependency (violates the "no external dependencies" constraint)
+
+1. Add a runtime YAML parser outside REQ-GGUARD-122's privileged runtime closure
 2. Duplicate logic that already exists and is maintained in WORKSPACE-CI
 3. Create two sources of truth for contract rules
 
-Delegation keeps the guard binary thin and delegates policy to the policy engine.
+Delegation keeps the guard binary thin and delegates policy to the policy
+engine. The exception is safe only because both executable paths are fixed,
+the deployed script is integrity-checked before launch, argv contains no inline
+program text, stdin is `/dev/null`, cwd is the effective repository, the
+environment is rebuilt, no Git capability is loaned, and execution/output are
+time-bounded.
 
-### 6.4 Graceful Degradation
+### 6.4 Missing Deployment
 
-If `checks_quality.sh` is not found at the expected path, the guard emits a warning to stderr and allows the operation. This prevents a missing CI library from blocking all git operations across the workspace.
+Only a contract-required invocation probes runner availability. Missing
+`/opt/workspace-ci`, script, or `/bin/bash`, and every type, ownership, mode,
+parent-writability, immutable, deployed-content, permission, inspection,
+replacement, or pre-spawn race failure produces a typed contract-unavailable
+outcome and exit 4 for every user. The concise report identifies the fixed path
+and failure class through stderr, distinct tty, and audit without copying mutable
+file content or secrets. Missing/untrusted deployment is never permission to
+skip, and the guard performs no source-checkout fallback, alternate selection,
+repair, installation, or network retrieval. Invocations outside contract scope
+do not inspect the runner.
 
 ---
 
@@ -468,26 +930,71 @@ If `checks_quality.sh` is not found at the expected path, the guard emits a warn
 ### 7.1 Log Format
 
 ```
-<ISO-8601-timestamp>|<cwd>|<blocked-command>|<reason>|uid=<real-uid>
+v=1|ts=<RFC3339-UTC-Z>|event=<class>|exit=<decimal>|uid=<decimal>|cwd=<encoded>|argc=<decimal>|arg0=<encoded>|...|reason=<encoded>
 ```
 
 Example:
+
 ```
-2026-05-18T14:32:01+00:00|${HOME}/projects/WORKSPACE-PORTAL|git reset|destructive subcommand|uid=1000
+v=1|ts=2026-05-18T14:32:01Z|event=block|exit=1|uid=1000|cwd=%2Fworkspace|argc=2|arg0=git|arg1=reset|reason=destructive%20subcommand
 ```
+
+Fields are fixed-order ASCII `name=value` pairs separated by raw `|`, followed
+by exactly one newline. Values preserve only the approved unreserved ASCII set;
+`%`, delimiters, spaces, CR/LF, controls, and bytes `>=0x7f` use canonical
+uppercase `%HH`. Encoding is fully reversible and performs no redaction. `argc` plus contiguous
+`arg0..argN` fields preserves empty arguments and boundaries; space-joined argv
+is never audited. Event classes are `block`, `contract-reject`,
+`contract-unavailable`, and, only when a separate authoritative sink
+successfully stores it, `audit-failure`. Version, names/order,
+decimal forms, and event vocabulary are parser-enforced. Unsupported versions,
+bad escapes, duplicate/missing/reordered fields, count mismatch, unknown classes,
+and embedded/extra record newlines are invalid. Records are never truncated.
 
 ### 7.2 Log Location
 
-`${HOME}/.workspace-guard.log`: the HOME is the **real user's** home directory (resolved via `nix::unistd::User::from_uid(getuid())`, a safe wrapper over `getpwuid_r(3)`), not root's home. Since the guard runs as SUID root but the real UID is the invoking user, we must use the real UID to find the correct HOME.
+The only Git audit location is
+`/var/log/workspace-guard/git-<real-uid>.log`. No authoritative or convenience
+mirror is written beneath HOME or any user-writable directory. `/var/log` and
+the fixed audit directory are opened/verified by trusted directory descriptors;
+the latter is `root:root` exact `0750` and non-writable by group/other. The
+decimal filename comes from kernel real UID. The target is opened no-follow and
+must be a regular `root:root` exact-`0600` file with no special bits.
 
-### 7.3 Secret-Safe Logging
+Each denial builds one complete encoded record, locks the file, appends the
+record without interleaving, syncs, checks every result, and closes. A missing
+per-UID file may be created only inside the verified root-owned directory and is
+immediately secured before any record is accepted. Audit failure never changes
+the denial but is reported through stderr and a distinct tty; it is not silent.
+Exit-1 policy blocks and exit-4 contract failures use this same sink.
+Runtime warnings never open or append this sink.
 
-When logging `-c key=value` blocks, only the key is logged:
+Audit append returns a typed stage error rather than exiting or discarding an
+error. Parent verification, open/create, metadata, lock, encode, write, sync,
+unlock, and close failures each retain OS status where available. Main policy
+handling reports one reversibly escaped `AUDIT FAILURE` diagnostic through stderr
+and a distinct tty and exits with the original denial's code. No requested Git
+execution, path fallback, or integrity retry occurs. HOME, `/tmp`, workspace,
+caller-selected, world-writable, and unverified alternate destinations are
+forbidden. A successful append plus sync is required before persistence may be
+claimed. Failure reporting never recursively invokes the failed writer; an
+`audit-failure` record is valid only if a separate verified authoritative sink
+actually persists it.
+
+### 7.3 Complete Forensic Evidence
+
+Blocked config values and every other caller-supplied byte remain evidence:
+
 ```
-2026-05-18T14:32:01+00:00|${HOME}|git -c core.hooksPath=...|dangerous config key|uid=1000
+v=1|ts=2026-05-18T14:32:01Z|event=block|exit=1|uid=1000|cwd=%2Fworkspace|argc=3|arg0=git|arg1=-c|arg2=core.hooksPath%3D%2Ftmp%2Fevil|reason=dangerous%20config%20key
 ```
 
-The value portion is replaced with `...` to avoid logging potentially sensitive paths or commands.
+No input is redacted, masked, omitted, hashed, or truncated. Inline credentials
+or tokens violate the agent operating contract; agents must use sanctioned
+secret-store paths. Such misuse remains complete root-owned forensic evidence.
+Terminal escaping and audit percent encoding are reversible framing only.
+Separately streamed helper output need not be duplicated in a summary audit
+record, but every destination that receives it preserves the exact bytes.
 
 ### 7.4 Log Write Timing
 
@@ -499,14 +1006,17 @@ The log file is opened and written **only after** the block decision is made: no
 
 ```
 parse args -> block decision -> audit log (on block)
-  -> sanitise env -> loan caps (ambient/inheritable) -> exec git
+  -> sanitise env -> conditionally loan ambient CAP_DAC_OVERRIDE
+  -> exec git
   -> wait -> reconcile policy manifest (this section) -> exit(git status)
 ```
 
 Reconcile runs in the guard process AFTER `wait()` reaps git, while
-the guard still holds its own effective/permitted capability set. The
-ambient/inheritable loan applies only to the exec'd git; reconcile
-uses the guard's own `cap_chown`/`cap_fowner` from its permitted set.
+the guard still holds its own effective/permitted capability set. The Ambient
+loan applies only when the exact subcommand is in the compiled
+`capability_loan` category. Unknown, external, alias, no-subcommand, and
+terminal-query execution keeps Ambient empty, so real Git starts capless.
+Reconcile uses the guard's own `cap_chown`/`cap_fowner` from its permitted set.
 
 ### 8.2 Trigger Set
 
@@ -514,8 +1024,8 @@ Reconcile runs only when ALL hold:
 
 1. git exited (any status; a failed merge still mutates the tree);
 2. the subcommand is in the mutating set: `pull, merge, checkout,
-   switch, restore, rebase, cherry-pick, revert, apply, am,
-   submodule` (update), `reset/clean` (root-only paths);
+switch, restore, rebase, cherry-pick, revert, apply, am,
+submodule` (update), `reset/clean` (root-only paths);
 3. the cwd is inside a guarded worktree (`.git` present).
 
 Read-only porcelains (`status, log, diff, fetch, show, ...`) skip
@@ -556,7 +1066,69 @@ Failure of any single path: record, continue, then exit
 `EX_IOERR (74)` with the full drift list on stderr. The git result is
 NOT rolled back (the tree is valid; the invariant is not).
 
-### 8.5 What Reconcile Deliberately Does NOT Do
+### 8.5 Outcome Propagation
+
+The parent waits because post-exec relock/reconciliation must run before the
+guard returns control. After that work, a normally exited Git child supplies its
+exact exit code. A signaled Git child causes the guard to restore/default and
+raise the same signal after reconciliation; converting it into a normal
+`128 + signal` exit is forbidden because callers must retain `WIFSIGNALED`
+semantics. If reconciliation detects invariant drift, documented `EX_IOERR` 74
+overrides the child outcome and states that the Git operation already stands.
+
+Fork, capability-loan, exec, and wait/supervision failures are typed guard
+failures and use their assigned guard exit classes. They never become exit 1 or
+pretend to be Git's outcome. A normal non-zero Git result is not a policy denial,
+does not create a block audit event, and preserves Git stdout/stderr unchanged.
+
+### 8.6 Guard-Unavailable Exit
+
+`GuardUnavailable { stage, cause, os_status }` is the sole internal outcome that
+maps to exit 3. It covers deployment/privilege/capability verification,
+`NoNewPrivileges` inspection, required resource limits, real-Git verification,
+capability promotion/loan, fork, exec, wait, signal propagation, and otherwise
+unclassified internal supervision failures. Validation, policy, contract,
+audit-delivery, and reconciliation outcomes retain exits 2, 1, 4, their original
+denial code, and 74 respectively.
+
+Inspection errors never become acceptable state. `EINTR` is retried only where
+the syscall contract permits it. A pre-exec failure launches no requested Git.
+If failure occurs after Git starts, the diagnostic explicitly states that the
+outcome is unknown or mutation may already stand. Stage, cause, and OS status are
+reversibly escaped evidence. Exit 3 is not a policy block and does not create an
+`event=block` record. A real Git exit 3 remains a normal propagated child result
+without guard-unavailable output.
+
+### 8.7 Contract Exit
+
+The exhaustive contract error types are `ContractRejected { child_code }`,
+`ContractUnavailable { stage, cause, os_status }`, and
+`ContractRequiredOutsideWorkspace { destination }`; each maps to exit 4.
+`ContractRejected` records a verified runner's normal non-zero exit.
+`ContractRequiredOutsideWorkspace` records a protected or indeterminate
+outside-workspace push destination. `ContractUnavailable` covers every inability
+to determine required scope or verify/build/run/drain/wait/terminate/reap the
+contract safely, including workspace, repository, destination, consumer-hook,
+deployment, binding, runner, pipe, output, signal, timeout, integrity, and
+cleanup stages. Inspection/helper failure is evidence, never an empty result or
+successful check.
+
+Only a verified `Passed` contract outcome proceeds to requested Git. Every other
+outcome launches no requested Git, including for effective UID 0, and emits one
+concise reversible summary through stderr, distinct tty, and the authoritative
+audit API. `ContractRejected` and `ContractRequiredOutsideWorkspace` use
+`event=contract-reject`; `ContractUnavailable` uses
+`event=contract-unavailable`. Runner stream bytes remain separately preserved
+once and are not copied into the summary. Report/audit delivery failure is
+surfaced non-recursively while the original exit 4 remains enforced.
+
+Validation, policy, and guard-unavailable outcomes reached before contract
+evaluation retain exits 2, 1, and 3. A normal real-Git exit 4 after a passed
+contract is propagated unchanged and creates no contract summary or audit event.
+The dispatcher therefore classifies typed outcomes, never the numeric code
+alone.
+
+### 8.8 What Reconcile Deliberately Does NOT Do
 
 - No `chattr` (needs `cap_linux_immutable`, which the guard does not
   carry; tracked policy files no longer use `+i`, REQ-GGUARD-174).
@@ -565,14 +1137,14 @@ NOT rolled back (the tree is valid; the invariant is not).
 - No locking around concurrent git processes (two reconciles
   interleave safely: idempotent chown/chmod).
 
-### 8.6 One-Time Migration (root, operator)
+### 8.9 One-Time Migration (root, operator)
 
 Per guarded repo: `chown root:root config/ config/*.yaml`,
 `chmod 0755 config/`, `chattr -i` tracked policy files (drop the
 flag), keep `+i` on `.git/hooks/*` + registries. Delivered as a
 `/tmp` operator script; never a committed target (AGENTS.md).
 
-### 8.7 Interactions
+### 8.10 Interactions
 
 - **stash**: blocked (REQ-GGUARD-050); reconcile does not special-case it.
 - **pre-push cap scrub** (`setpriv --inh-caps=-all`): unaffected; the

@@ -108,16 +108,16 @@ hp_e2e_marker_path() {
 hp_e2e_assert_install_gate_blocks() {
     local guard_root ci_root rc=0 out="" _out_file=""
     guard_root="$(hp_e2e_guard_root)"
-    ci_root="/projects/CI"
+    ci_root="/projects/WORKSPACE-CI"
     if [[ ! -f "$ci_root/lib/guard-host-exec.sh" ]]; then
         echo "ERROR: deployed CI not mounted at $ci_root" >&2
         return 1
     fi
     _guard_dir="$guard_root"
     log_error() { echo "ERROR: $*" >&2; }
-    # shellcheck source=/projects/CI/lib/guard-drift.sh
+    # shellcheck source=/projects/WORKSPACE-CI/lib/guard-drift.sh
     source "$ci_root/lib/guard-drift.sh" || return 1
-    # shellcheck source=/projects/CI/lib/guard-host-exec.sh
+    # shellcheck source=/projects/WORKSPACE-CI/lib/guard-host-exec.sh
     source "$ci_root/lib/guard-host-exec.sh" || return 1
     _out_file="$(mktemp)"
     if guard_assert_host_provision_complete >"$_out_file" 2>&1; then

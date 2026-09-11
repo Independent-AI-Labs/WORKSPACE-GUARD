@@ -35,11 +35,174 @@ pub enum KeyError {
     NotAMap,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathSegment {
+    pub key: String,
+    pub wildcard: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Access {
+    Key(String),
+    Index(usize),
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+pub fn parse_unset_path(path: &str) -> Result<Vec<PathSegment>, String> {
+    if path.is_empty() {
+        return Err("unset path is empty".to_string());
+    }
+    let raw: Vec<&str> = path.split('.').collect();
+    let mut out = Vec::with_capacity(raw.len());
+    for (i, segment) in raw.iter().enumerate() {
+        let (name, wildcard) = match segment.strip_suffix("[]") {
+            Some(name) => (name, true),
+            None => (*segment, false),
+        };
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/'))
+            || name.contains(['[', ']'])
+            || (!wildcard && segment.contains(['[', ']']))
+        {
+            return Err(format!("unsupported unset path segment: {segment}"));
+        }
+        if wildcard && i + 1 == raw.len() {
+            return Err("unset path cannot end with []".to_string());
+        }
+        out.push(PathSegment {
+            key: name.to_string(),
+            wildcard,
+        });
+    }
+    Ok(out)
+}
+
+/// Longest literal join of consecutive non-wildcard segments that exists
+/// as a key at this level (map keys may contain dots and slashes, e.g.
+/// classification manifest entries named after file paths). Splits that
+/// reconstruct an existing key win over single-segment interpretation,
+/// mirroring resolve_segments (REQ-YE-204). Returns (key, take).
+fn resolve_join(map: &serde_yaml::Mapping, segments: &[PathSegment]) -> (String, usize) {
+    let mut max_len = 0;
+    while max_len < segments.len() && !segments[max_len].wildcard {
+        max_len += 1;
+    }
+    for take in (1..=max_len).rev() {
+        let joined = segments[..take]
+            .iter()
+            .map(|s| s.key.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        if map.contains_key(joined.as_str()) {
+            return (joined, take);
+        }
+    }
+    (String::new(), 0)
+}
+
+fn collect_unsets(
+    node: &Value,
+    segments: &[PathSegment],
+    prefix: &mut Vec<Access>,
+    out: &mut Vec<Vec<Access>>,
+) -> Result<(), String> {
+    let segment = segments
+        .first()
+        .ok_or_else(|| "unset path has no field".to_string())?;
+    let map = node
+        .as_mapping()
+        .ok_or_else(|| format!("path component is not a mapping: {}", segment.key))?;
+    // Keys containing dots/slashes (file-path keys) resolve literal-first.
+    let (joined, take) = resolve_join(map, segments);
+    if take > 0 {
+        let child = map
+            .get(joined.as_str())
+            .ok_or_else(|| format!("path not found: {joined}"))?;
+        prefix.push(Access::Key(joined.clone()));
+        if take == segments.len() {
+            out.push(prefix.clone());
+        } else {
+            collect_unsets(child, &segments[take..], prefix, out)?;
+        }
+        prefix.pop();
+        return Ok(());
+    }
+    let child = map
+        .get(segment.key.as_str())
+        .ok_or_else(|| format!("path not found: {}", segment.key))?;
+    prefix.push(Access::Key(segment.key.clone()));
+    if segment.wildcard {
+        let items = child
+            .as_sequence()
+            .ok_or_else(|| format!("path component is not a sequence: {}[]", segment.key))?;
+        if items.is_empty() {
+            return Err(format!("wildcard matched zero items: {}[]", segment.key));
+        }
+        for (index, item) in items.iter().enumerate() {
+            if !item.is_mapping() {
+                return Err(format!(
+                    "wildcard item {index} is not a mapping: {}[]",
+                    segment.key
+                ));
+            }
+            prefix.push(Access::Index(index));
+            collect_unsets(item, &segments[1..], prefix, out)?;
+            prefix.pop();
+        }
+    } else if segments.len() == 1 {
+        out.push(prefix.clone());
+    } else {
+        collect_unsets(child, &segments[1..], prefix, out)?;
+    }
+    prefix.pop();
+    Ok(())
+}
+
+fn remove_access(node: &mut Value, path: &[Access]) -> Result<(), String> {
+    match path {
+        [Access::Key(key)] => node
+            .as_mapping_mut()
+            .and_then(|map| map.remove(key.as_str()))
+            .map(|_| ())
+            .ok_or_else(|| format!("path disappeared before removal: {key}")),
+        [Access::Key(key), rest @ ..] => {
+            let child = node
+                .as_mapping_mut()
+                .and_then(|map| map.get_mut(key.as_str()))
+                .ok_or_else(|| format!("path disappeared before removal: {key}"))?;
+            remove_access(child, rest)
+        }
+        [Access::Index(index), rest @ ..] => {
+            let child = node
+                .as_sequence_mut()
+                .and_then(|items| items.get_mut(*index))
+                .ok_or_else(|| format!("path index disappeared before removal: {index}"))?;
+            remove_access(child, rest)
+        }
+        _ => Err("invalid concrete unset path".to_string()),
+    }
+}
+
+pub fn unset_fields(doc: &Value, path: &str) -> Result<(Value, Vec<Vec<Access>>), String> {
+    let segments = parse_unset_path(path)?;
+    let mut concrete = Vec::new();
+    collect_unsets(doc, &segments, &mut Vec::new(), &mut concrete)?;
+    if concrete.is_empty() {
+        return Err("unset path matched zero fields".to_string());
+    }
+    let mut expected = doc.clone();
+    for access in &concrete {
+        remove_access(&mut expected, access)?;
+    }
+    Ok((expected, concrete))
 }
 
 /// Parse a spec value as a YAML scalar so numbers stay numeric

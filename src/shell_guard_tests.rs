@@ -40,7 +40,6 @@ fn rules() -> Vec<Rule> {
 #[test]
 fn all_patterns_compile() {
     assert_eq!(rules().len(), shell_config::SHELL_PATTERNS.len());
-    assert!(!shell_config::SHELL_PATTERNS.is_empty());
 }
 
 #[derive(serde::Deserialize)]

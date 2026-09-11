@@ -9,7 +9,7 @@ teardown() { guard_teardown; }
 
 @test "guard-drift-aux: stale git-ssh-wrapper detected" {
     local ci_root tmp_state ref_ssh
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     tmp_state="$TEST_TMPDIR/guard-state"
     mkdir -p "$tmp_state"
     printf 'stale-wrapper\n' > "$tmp_state/git-ssh-wrapper"
@@ -30,7 +30,7 @@ teardown() { guard_teardown; }
 
 @test "guard-drift-aux: missing agent-git-identity detected" {
     local ci_root tmp_state ref_ssh
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     tmp_state="$TEST_TMPDIR/guard-state"
     mkdir -p "$tmp_state"
     ref_ssh="$TEST_TMPDIR/workspace-git-ssh"
@@ -51,7 +51,7 @@ teardown() { guard_teardown; }
 
 @test "guard-host-exec: remove git install artifacts preserves host-provision.ok" {
     local ci_root tmp_state
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     tmp_state="$TEST_TMPDIR/guard-state"
     mkdir -p "$tmp_state/ssh-keys"
     printf 'admin=breakglass\n' > "$tmp_state/host-provision.ok"
@@ -74,7 +74,7 @@ teardown() { guard_teardown; }
 
 @test "guard-host-exec: fleet sudo warns but does not block install gate" {
     local ci_root tmp_state cfg fleet
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     tmp_state="$TEST_TMPDIR/guard-state"
     fleet="$TEST_TMPDIR/fleet.yaml"
     cfg="$TEST_TMPDIR/host-provision.yaml"
@@ -109,25 +109,4 @@ EOF
     assert_success
     assert_output --partial "WARN:Fleet user"
     assert_output --partial "audit-only"
-}
-
-@test "guard-host-exec: purge refuses without GUARD_PURGE_CONFIRM" {
-    local ci_root tmp_state
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
-    tmp_state="$TEST_TMPDIR/guard-state"
-    mkdir -p "$tmp_state"
-    printf 'admin=breakglass\n' > "$tmp_state/host-provision.ok"
-
-    run bash -c "
-        export WORKSPACE_GUARD_STATE_DIR='$tmp_state'
-        _guard_dir='$GUARD_ROOT'
-        log_error() { printf 'ERR:%s\n' \"\$*\"; }
-        log_warn() { :; }
-        log_info() { :; }
-        source \"$ci_root/lib/guard-host-exec.sh\"
-        purge_guard_state
-    "
-    assert_failure
-    assert_output --partial "GUARD_PURGE_CONFIRM=1"
-    [ -f "$tmp_state/host-provision.ok" ]
 }

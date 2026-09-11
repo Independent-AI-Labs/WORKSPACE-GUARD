@@ -1,8 +1,6 @@
 # System dependencies for WORKSPACE-GUARD.
 # Checked and installed by: make init / make init-check
-# (via ../CI/scripts/install-system-deps)
 #
-# Unified schema :  see projects/CI/config/system-deps.yaml header.
 
 requires:
   # --- bootstrap prerequisites ---
@@ -74,19 +72,19 @@ requires:
 
   - check_type: apt-package
     apt_package: bats-assert
-    description: bats-assert (shell test helper; optional :  harness uses built-in asserts)
+    description: "bats-assert (shell test helper; optional :  harness uses built-in asserts)"
     optional: true
     platforms: [linux]
 
   - check_type: apt-package
     apt_package: bats-support
-    description: bats-support (shell test helper; optional :  harness uses built-in asserts)
+    description: "bats-support (shell test helper; optional :  harness uses built-in asserts)"
     optional: true
     platforms: [linux]
 
   - check_type: apt-package
     apt_package: bats-file
-    description: bats-file (shell test helper; optional :  harness uses built-in asserts)
+    description: "bats-file (shell test helper; optional :  harness uses built-in asserts)"
     optional: true
     platforms: [linux]
 
@@ -104,11 +102,10 @@ requires:
 
   # --- hermetic bootstraps (separate phase in make init) ---
   - check_cmd: cargo
-    bootstrap_script: ../CI/scripts/bootstrap-rust
+    bootstrap_script: /opt/workspace-ci/scripts/bootstrap-rust
     description: Rust toolchain (cargo)
     component: rust
-
   - check_cmd: podman
-    bootstrap_script: ../CI/scripts/bootstrap-podman
+    bootstrap_script: /opt/workspace-ci/scripts/bootstrap-podman
     description: Podman (Linux container runtime)
     component: podman

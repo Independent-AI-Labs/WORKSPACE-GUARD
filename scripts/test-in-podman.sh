@@ -9,8 +9,8 @@ _REPO_ROOT="$(cd "$_SCRIPT_DIR/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
 resolve_podman() {
-    if [[ -x "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]]; then
-        echo "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman"
+    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
+        echo "/opt/workspace-ci/.boot-linux/bin/podman"
         return 0
     fi
     if command -v real-podman; then
@@ -26,8 +26,8 @@ resolve_podman() {
 }
 
 _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
-if [[ ! -d "$_PROJECTS_ROOT/CI" ]]; then
-    echo "ERROR: WORKSPACE-CI not found at $_PROJECTS_ROOT/CI" >&2
+if [[ ! -d "$_PROJECTS_ROOT/WORKSPACE-CI" ]]; then
+    echo "ERROR: WORKSPACE-CI not found at $_PROJECTS_ROOT/WORKSPACE-CI" >&2
     echo "       Clone/sync workspace repos (make ensure-repos in CI)." >&2
     exit 1
 fi

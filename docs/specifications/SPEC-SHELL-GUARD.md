@@ -92,8 +92,8 @@ shell at `/bin/bash.real` is mode 0700 root:root: a non-root agent
 cannot read or execute it directly, cannot `LD_PRELOAD` around the
 guard (§8), and cannot learn a bypass by reading guard source. The
 guard pattern-scans the command string before any exec and blocks
-the catastrophic set unconditionally. Root's operator channel is
-invoking `/bin/bash.real` directly.
+the catastrophic set unconditionally. Automation does not invoke the backing
+interpreter directly.
 
 ---
 
@@ -140,11 +140,11 @@ with a malicious binary or a permission relaxation.
 
 The guard classifies argv (after its own argv[0]) into three forms:
 
-| Form | Shape | Handling |
-|------|-------|----------|
-| Command string | `bash -c STR [name [args...]]`, `bash -xc STR` | Scan STR against the pattern table (§5); full policy, no exemption |
-| Script file | `bash FILE [args...]`, `bash -- FILE` | Open `O_NOFOLLOW`, `fstat`, classify trust tier (§4.1), scan content (§5); unreadable → warn + pass through |
-| Interactive/login | `bash`, `bash -l`, `bash -i`, argv[0] `-bash` | Pass through unchanged (typed REPL input is unscanned; the guard wraps process spawn, not the line editor) |
+| Form              | Shape                                          | Handling                                                                                                    |
+| ----------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Command string    | `bash -c STR [name [args...]]`, `bash -xc STR` | Scan STR against the pattern table (§5); full policy, no exemption                                          |
+| Script file       | `bash FILE [args...]`, `bash -- FILE`          | Open `O_NOFOLLOW`, `fstat`, classify trust tier (§4.1), scan content (§5); unreadable → warn + pass through |
+| Interactive/login | `bash`, `bash -l`, `bash -i`, argv[0] `-bash`  | Pass through unchanged (typed REPL input is unscanned; the guard wraps process spawn, not the line editor)  |
 
 ### 4.1 Script Trust Tiers (REQ-SHG-211)
 
@@ -172,11 +172,10 @@ A script file is **trusted tier** iff, at `open(O_NOFOLLOW)` +
    (unlink+recreate). An immutable boundary directory cannot be
    renamed or replaced by the agent-owned parent above it, so the
    anchored chain is exactly as tamper-proof as the full-root chain.
-    The anchor is how root-deployed toolchains that live under the
-    agent's home (e.g. `projects/CI` with `chattr +i`) stay trusted:
-    they are tamper-proof, so direct regular files in this tier are
-    executed by path without raw-text body scanning. Command strings and
-    untrusted script bodies remain policy-scanned.
+   `/opt/workspace-ci` instead uses a complete root-owned parent chain and
+   immutable artifact. Direct regular files in this tier are executed by path
+   without raw-text body scanning. Command strings and untrusted script bodies
+   remain policy-scanned.
 
 Trusted tier: direct regular files with this provenance are executed by
 path without raw-text body scanning. The root-owned,
@@ -225,8 +224,8 @@ scanned byte-exactly (REQ-SHG-205, REQ-SHG-703).
   only after `||`. Bare `tail file` and bare `true` after `;` never
   match.
 - Quotes and comments are NOT special (REQ-SHG-207): `echo "a | tail"`
-  matches the pipe-sink pattern and is blocked. Accepted false
-  positive; root's channel is `/bin/bash.real`.
+  matches the pipe-sink pattern and is blocked. Accepted false positive;
+  rewrite automation to avoid ambiguous raw text.
 - Quote-splitting evasion (`pki''ll`), variable indirection, and
   dynamic `eval` do NOT match and are documented residuals (§16,
   REQ-SHG-208).
@@ -318,15 +317,15 @@ the specific process instead".
 
 ### 6.2 kill Argument Matrix
 
-| Invocation | Decision |
-|------------|----------|
-| `kill 1234` | allow |
-| `kill -9 1234`, `kill -TERM 1234 1235`, `kill -s KILL 1234` | allow |
-| `kill -l`, `kill -L` (list signals) | allow |
-| `kill %1`, `kill %%` | block (job spec) |
-| `kill -9 -1`, `kill -TERM -1` | block (all processes) |
-| `kill -9 -1234` (negative pgrp) | block |
-| `kill -0 1234` | allow (existence probe) |
+| Invocation                                                  | Decision                |
+| ----------------------------------------------------------- | ----------------------- |
+| `kill 1234`                                                 | allow                   |
+| `kill -9 1234`, `kill -TERM 1234 1235`, `kill -s KILL 1234` | allow                   |
+| `kill -l`, `kill -L` (list signals)                         | allow                   |
+| `kill %1`, `kill %%`                                        | block (job spec)        |
+| `kill -9 -1`, `kill -TERM -1`                               | block (all processes)   |
+| `kill -9 -1234` (negative pgrp)                             | block                   |
+| `kill -0 1234`                                              | allow (existence probe) |
 
 Rule: the pattern fires on a job spec (`%`), a `-1` target, or a
 negative multi-digit PID anywhere in the `kill` operand text; pure
@@ -352,43 +351,91 @@ version: 1
 # the raw command text, and a remediation hint.
 patterns:
   # --- destructive commands (REQ-SHG-300) ---
-  - {id: process-by-name,  regex: '\b(pkill|killall|skill|snice)\b',
-     hint: "use kill <pid> on the specific process"}
-  - {id: power-command,    regex: '\b(shutdown|reboot|poweroff|halt|kexec|telinit)\b',
-     hint: "power actions are an operator operation"}
-  - {id: fs-destroy,       regex: '\b(wipefs|fdisk|sfdisk|cfdisk|parted|mkfs(\.[a-z0-9]+)?)\b',
-     hint: "filesystem/partition destruction is blocked"}
+  - {
+      id: process-by-name,
+      regex: '\b(pkill|killall|skill|snice)\b',
+      hint: "use kill <pid> on the specific process",
+    }
+  - {
+      id: power-command,
+      regex: '\b(shutdown|reboot|poweroff|halt|kexec|telinit)\b',
+      hint: "power actions are an operator operation",
+    }
+  - {
+      id: fs-destroy,
+      regex: '\b(wipefs|fdisk|sfdisk|cfdisk|parted|mkfs(\.[a-z0-9]+)?)\b',
+      hint: "filesystem/partition destruction is blocked",
+    }
   # --- shell escape (REQ-SHG-307) ---
-  - {id: alt-shell,        regex: '\b(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)\b',
-     hint: "only bash/sh are permitted on this host"}
-  - {id: busybox-shell,    regex: '\bbusybox\s+(sh|ash)\b',
-     hint: "only bash/sh are permitted on this host"}
+  - {
+      id: alt-shell,
+      regex: '\b(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)\b',
+      hint: "only bash/sh are permitted on this host",
+    }
+  - {
+      id: busybox-shell,
+      regex: '\bbusybox\s+(sh|ash)\b',
+      hint: "only bash/sh are permitted on this host",
+    }
   # --- power verbs / kill / flags / dd / mounts / swap (REQ-SHG-300..302) ---
-  - {id: power-verb,       regex: '\b(systemctl|loginctl)\s+[^;|&]*\b(poweroff|reboot|halt|kexec|soft-reboot|suspend|hibernate|hybrid-sleep|kill)\b',
-     hint: "power actions are an operator operation"}
-  - {id: kill-mass,        regex: '\bkill\b[^;|&]*(\s-1(\s|$)|%|\s-[0-9]{2,}(\s|$))',
-     hint: "use kill <pid> on the specific process"}
-  - {id: chattr-strip,     regex: '\bchattr\b[^;|&]*\s-i\b',
-     hint: "immutability strip is blocked"}
-  - {id: rm-rootfs,        regex: '\brm\b[^;|&]*--no-preserve-root',
-     hint: "root-fs deletion is blocked"}
-  - {id: dd-device,        regex: '\bdd\b[^;|&]*\bof=/dev/(sd|nvme|mmcblk|vd|mapper/|disk/)',
-     hint: "writing block devices is blocked"}
-  - {id: mount-protected,  regex: '\b(u?mount)\b[^;|&]*/usr/lib/workspace-guard',
-     hint: "guard mountpoints are protected"}
-  - {id: swap-teardown,    regex: '\bswapoff\b[^;|&]*\s-a\b',
-     hint: "swap teardown is blocked"}
+  - {
+      id: power-verb,
+      regex: '\b(systemctl|loginctl)\s+[^;|&]*\b(poweroff|reboot|halt|kexec|soft-reboot|suspend|hibernate|hybrid-sleep|kill)\b',
+      hint: "power actions are an operator operation",
+    }
+  - {
+      id: kill-mass,
+      regex: '\bkill\b[^;|&]*(\s-1(\s|$)|%|\s-[0-9]{2,}(\s|$))',
+      hint: "use kill <pid> on the specific process",
+    }
+  - {
+      id: chattr-strip,
+      regex: '\bchattr\b[^;|&]*\s-i\b',
+      hint: "immutability strip is blocked",
+    }
+  - {
+      id: rm-rootfs,
+      regex: '\brm\b[^;|&]*--no-preserve-root',
+      hint: "root-fs deletion is blocked",
+    }
+  - {
+      id: dd-device,
+      regex: '\bdd\b[^;|&]*\bof=/dev/(sd|nvme|mmcblk|vd|mapper/|disk/)',
+      hint: "writing block devices is blocked",
+    }
+  - {
+      id: mount-protected,
+      regex: '\b(u?mount)\b[^;|&]*/usr/lib/workspace-guard',
+      hint: "guard mountpoints are protected",
+    }
+  - {
+      id: swap-teardown,
+      regex: '\bswapoff\b[^;|&]*\s-a\b',
+      hint: "swap teardown is blocked",
+    }
   # --- output suppression (REQ-SHG-308/309/310) ---
-  - {id: suppress-pipe,    regex: '\|\s*(tail|head)\b',
-     hint: "run without truncation; write long output to a file and read it with offset/limit"}
-  - {id: suppress-null,    regex: '(&?>|[0-9]+>>?)\s*/dev/null',
-     hint: "capture output and print it on failure instead of discarding it"}
-  - {id: suppress-swallow, regex: '(\|\||\|&?)\s*(true|:)\b',
-     hint: "handle the exit code explicitly instead of masking it"}
+  - {
+      id: suppress-pipe,
+      regex: '\|\s*(tail|head)\b',
+      hint: "run without truncation; write long output to a file and read it with offset/limit",
+    }
+  - {
+      id: suppress-null,
+      regex: '(&?>|[0-9]+>>?)\s*/dev/null',
+      hint: "capture output and print it on failure instead of discarding it",
+    }
+  - {
+      id: suppress-swallow,
+      regex: '(\|\||\|&?)\s*(true|:)\b',
+      hint: "handle the exit code explicitly instead of masking it",
+    }
   # --- interpreter escape (REQ-SHG-313; -c text, command position) ---
-  - {id: alt-interp,       regex: '(^|([\n;|&`]|&&|\|\||\$\()\s*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b(\s+(-[^;|&\s]*|[A-Za-z_]+=\S*))*\s+)(python[0-9.]*|perl[0-9.]*|...|awk|gawk|mawk|nawk)\b',
-     hint: "interpreters are an unscanned command channel; run them from a script or the operator shell",
-     scope: command}
+  - {
+      id: alt-interp,
+      regex: '(^|([\n;|&`]|&&|\|\||\$\()\s*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b(\s+(-[^;|&\s]*|[A-Za-z_]+=\S*))*\s+)(python[0-9.]*|perl[0-9.]*|...|awk|gawk|mawk|nawk)\b',
+      hint: "interpreters are an unscanned command channel; run them from a script or the operator shell",
+      scope: command,
+    }
 ```
 
 The alt-interp match is command-position only: an interpreter name
@@ -427,6 +474,7 @@ mirroring the git guard's `git_guard_policy_matrix.yaml` mechanism
 ### 8.1 Unset List
 
 **Shell injection vectors** (dropped unconditionally):
+
 ```
 BASH_ENV / ENV       → non-interactive rc file sourcing
 SHELLOPTS / BASHOPTS → option injection into every child shell
@@ -512,7 +560,7 @@ therefore executes the SCANNED bytes:
 3. Clear `FD_CLOEXEC`; the fd is intentionally leaked past the
    guard's Rust drop scope so it survives the exec;
    `execve("/bin/bash.real", ["bash",
-   "/proc/self/fd/<n>", args...], clean_envp)`.
+"/proc/self/fd/<n>", args...], clean_envp)`.
 
 Observable difference: `$0` and `BASH_SOURCE` name the
 `/proc/self/fd/<n>` path instead of the original script path. To
@@ -540,38 +588,40 @@ unchanged: their content cannot be swapped by the agent.
 ### 10.1 Log Format
 
 ```
-<ISO-8601-timestamp>|<cwd>|<blocked-command>|<reason>|uid=<real-uid>
+v=1|ts=<RFC3339-UTC-Z>|event=block|exit=1|uid=<decimal>|cwd=<encoded>|argc=<decimal>|arg0=<encoded>|...|reason=<encoded>
 ```
 
 Example:
 
 ```
-2026-07-27T14:32:01+00:00|${HOME}/projects/WORKSPACE-GUARD|bash -c 'pkill -f opencode'|blocked command: pkill|uid=1000
+v=1|ts=2026-07-27T14:32:01Z|event=block|exit=1|uid=1000|cwd=%2Fworkspace|argc=3|arg0=bash|arg1=-c|arg2=pkill%20-f%20opencode|reason=blocked%20command%3A%20pkill
 ```
 
-Command strings are truncated to 200 bytes; single quotes are
-replaced with `'` alternates (`'`) so pipe-delimited parsing is not
-confusable; text after `=` in `NAME=value` assignments is redacted
-to `...` (secret-safe logging, same rule as SPEC-GIT-GUARD §7.3).
+The exact version, field order, byte-level percent encoding, argv boundaries,
+strict parsing, and no-truncation rules are shared with SPEC-GIT-GUARD §7.1.
+Assignment values remain complete forensic evidence; encoding is reversible and
+performs no redaction.
 
 ### 10.2 Log Location and Timing
 
-`${HOME}/.workspace-guard.log`, where HOME is resolved via
-`getpwuid_r(getuid())` (the real user, not root). The file is opened
-`O_WRONLY | O_APPEND | O_NOFOLLOW` and only after a block decision
-is made. If the open or write fails, the block still stands: logging
-failure never bypasses blocking.
+`/var/log/workspace-guard/shell-<real-uid>.log`, opened only within the verified
+root-owned non-agent-writable audit directory. No HOME log or mirror is created.
+The decimal UID comes directly from kernel `getuid()`. Directory-fd opening,
+no-follow regular-file verification, `root:root` exact `0600`, locking, atomic
+record append, sync, and failure diagnostics follow SPEC-GIT-GUARD §7.2. The file
+is opened only after a block decision. Logging failure never bypasses the block
+and is always surfaced through stderr and distinct tty.
 
 ---
 
 ## 11. Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Allowed; real shell exit code (via exec) |
-| 1 | Policy block |
-| 2 | Validation error (null bytes, oversize input, nesting depth, malformed argv) |
-| 3 | Not privileged (`AT_SECURE == 0`) or real shell unverifiable |
+| Code | Meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
+| 0    | Allowed; real shell exit code (via exec)                                     |
+| 1    | Policy block                                                                 |
+| 2    | Validation error (null bytes, oversize input, nesting depth, malformed argv) |
+| 3    | Not privileged (`AT_SECURE == 0`) or real shell unverifiable                 |
 
 ---
 
@@ -587,8 +637,7 @@ Root-only. All paths target the RESOLVED bash path (usrmerge:
    `target/release/workspace-shell-guard`); the script never builds.
    Verify it is a valid ELF.
 2. Self-stage when `$0` is outside the trusted tier (e.g. the
-   agent-owned repo): copy to `/var/lib/workspace-guard/` (root:root
-   0700) and re-exec. Once the guard is live, a shebang re-exec
+   agent-owned repo): copy to `/var/lib/workspace-guard/` (root:root 0700) and re-exec. Once the guard is live, a shebang re-exec
    would resolve bash to the guard and fail closed, so the staged
    copy is run through the sealed `/bin/bash.real` when present.
 3. Seal the stock bash as `/bin/bash.real`: copy from the resolved
@@ -600,8 +649,8 @@ Root-only. All paths target the RESOLVED bash path (usrmerge:
 4. Sanity probes via `runuser` as a non-root probe user
    (`SHG_PROBE_USER`/`workspace`/`agent`/`nobody`): benign `-c`
    exits 0, `--version` exits 0, a concat-built destructive `pkill`
-   probe exits 1. As root every probe must exit 3 (fail-closed,
-   REQ-SHG-606).
+   probe exits 1. Root probes use the same guard and expected policy outcomes
+   (REQ-SHG-606).
 5. `dpkg-divert` the resolved bash path to `<bash>.distrib`
    (and `/bin/sh` when it resolves to bash).
 6. Install the guard at the resolved bash path (root:root 0755,
@@ -650,10 +699,9 @@ shell-guard-check:        read-only health check (modes, caps, divert, +i, hash)
 
 `shell-guard-check` is caller-agnostic:
 
-- Root fails closed through the guarded `/bin/bash` (AT_SECURE == 0
-  for root execs of the fcap binary), so the Makefile target and
-  `guard-operator.sh` route root through the sealed
-  `/bin/bash.real`; non-root callers use plain `bash`.
+- Root and non-root callers use guarded `/bin/bash`. Effective UID 0 may run
+  without `AT_SECURE`; non-root execution outside the installed capability
+  context fails closed.
 - The repo root resolves explicitly: first argument, else
   `SHG_REPO_ROOT`, else derivation from the script's own path.
   An explicitly supplied root must be an existing directory
@@ -701,7 +749,7 @@ guest has no bats), with six phases:
    matrix (incl. the command-scoped `alt-interp` rule and its
    invisibility proof in script bodies), argv classification, env
    hygiene (incl. `AMI_*` preservation), rlimits, trust tiers,
-   sealed-memfd exec, audit (format, redaction), oversize bound,
+   sealed-memfd exec, audit (format, evidence fidelity), oversize bound,
    and fail-closed verify (relaxed `.real` mode exits 3).
 3. **install lifecycle**: check reports NOT INSTALLED, install,
    check OK as root (via `bash.real`) AND as the non-root user
@@ -759,26 +807,29 @@ one auditable unit. `build.rs` parses
 and validates `config/shell_guard_policy_matrix.yaml`
 against it (build fails on disagreement). Profile and dependency
 constraints follow REQ-GIT-GUARD §13/§16 (`panic = "abort"`, full
-RELRO, `strip`; `std` + `libc` + `nix` + `rustix` + `regex`).
+RELRO, release overflow checks, static PIE, non-executable stack, stack
+protection, `strip`, and final built/installed ELF verification; `std` + `libc`
++ `nix` + `rustix` + `regex`).
 `shell_guard.rs` contains NO `unsafe` blocks: `AT_SECURE` is read
 from `/proc/self/auxv`, `lstat` goes through `std::fs::symlink_metadata`,
-and `memfd_create` uses the safe `rustix` wrapper (nix 0.29 does not
-expose `MFD_EXEC`).
+immutable-flag reads use REQ-GGUARD-121's centralized reviewed wrapper, and
+`memfd_create` uses the safe `rustix` wrapper (nix 0.29 does not expose
+`MFD_EXEC`).
 
 ---
 
 ## 14. bats Suite (tests/shell/21-shell-guard.bats)
 
-| Area | Test classes |
-|------|--------------|
-| argv classification | `-c`, bundled `-xc`, `--` separator, `name args` operands, script file, unreadable script, interactive, login argv[0], null bytes, oversize |
-| scanner | non-UTF-8 input, patterns inside quotes match (documented false positive), quote-split evasion does NOT match (documented residual), 1 MiB bound |
-| policy | every pattern family: destructive set, `mkfs.*`, blocked shells (path-qualified `/usr/bin/zsh`, prefixed `env fish`, `busybox sh`, nested `bash -c` allowed), power verbs, kill matrix (§6.2), chattr/rm/swapoff flag gates, dd device prefixes, protected-path mounts |
-| suppression | pipe sinks (`\| tail`, `\| tail -n N`, `2>&1 \| head`, `$(x \| tail)`), redirect targets (`> /dev/null`, `2>/dev/null`, `&> /dev/null`, `>/dev/null 2>&1`, `2>"/dev/null"`), null swallows (`\|\| true`, `\| true`, `\|\| :`), allowed controls (bare `tail file`, `true` after `;`/`&&`, `2>&1` alone) |
-| trust tiers | root-owned script scanned and blocked on policy match, agent-writable script full policy, memfd exec of scanned bytes (script-swap fixture stays blocked), `$0` divergence documented |
-| env | BASH_ENV/functions/LD_* dropped, PATH reset, OPENCODE_*/WORKSPACE_* preserved |
-| logging | block line format, truncation, secret redaction, log-open failure still blocks |
-| install | dry-run, idempotency, rollback on sanity-check failure, uninstall restores |
+| Area                | Test classes                                                                                                                                                                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| argv classification | `-c`, bundled `-xc`, `--` separator, `name args` operands, script file, unreadable script, interactive, login argv[0], null bytes, oversize                                                                                                                                                             |
+| scanner             | non-UTF-8 input, patterns inside quotes match (documented false positive), quote-split evasion does NOT match (documented residual), 1 MiB bound                                                                                                                                                        |
+| policy              | every pattern family: destructive set, `mkfs.*`, blocked shells (path-qualified `/usr/bin/zsh`, prefixed `env fish`, `busybox sh`, nested `bash -c` allowed), power verbs, kill matrix (§6.2), chattr/rm/swapoff flag gates, dd device prefixes, protected-path mounts                                  |
+| suppression         | pipe sinks (`\| tail`, `\| tail -n N`, `2>&1 \| head`, `$(x \| tail)`), redirect targets (`> /dev/null`, `2>/dev/null`, `&> /dev/null`, `>/dev/null 2>&1`, `2>"/dev/null"`), null swallows (`\|\| true`, `\| true`, `\|\| :`), allowed controls (bare `tail file`, `true` after `;`/`&&`, `2>&1` alone) |
+| trust tiers         | root-owned script scanned and blocked on policy match, agent-writable script full policy, memfd exec of scanned bytes (script-swap fixture stays blocked), `$0` divergence documented                                                                                                                   |
+| env                 | BASH_ENV/functions/LD_* dropped, PATH reset, OPENCODE__/WORKSPACE__ preserved                                                                                                                                                                                                                           |
+| logging             | canonical block format, complete evidence, log-open failure still blocks                                                                                                                                                                                                                                |
+| install             | dry-run, idempotency, rollback on sanity-check failure, uninstall restores                                                                                                                                                                                                                              |
 
 ---
 
@@ -791,8 +842,8 @@ expose `MFD_EXEC`).
 - A non-root agent CANNOT escalate through the guard: file caps
   (not SUID) mean euid never changes, and caps are cleared by the
   kernel on the final `execve()`.
-- Blocks are unconditional for ALL users including root; root's
-  channel is `/bin/bash.real` directly, which only root can exec.
+- Scanned blocks are unconditional for all users including root. Automation
+  cannot bypass a block through the backing interpreter.
 - Blocked invocations are always logged; logging failure never
   downgrades a block.
 - A non-root agent CANNOT escape to an unguarded shell from within
@@ -822,9 +873,9 @@ expose `MFD_EXEC`).
   reassembly (REQ-SHG-208). Containment for the agent is that these
   forms are conspicuous in review and audit, unlike the one-character
   suppression idioms this guard exists to kill.
-- **Quoted-text false positives**: patterns match inside quotes and
-  comments (`echo "use | tail"` blocks). Accepted by design
-  (REQ-SHG-207); root's channel for such text is `/bin/bash.real`.
+- **Quoted-text false positives**: patterns match inside quotes and comments
+  (`echo "use | tail"` blocks). Automation must avoid ambiguous raw text
+  (REQ-SHG-207).
 - **dd symlink indirection**: `dd of=` matching is prefix-based on
   the literal path; a symlink to a block device under a non-device
   path is not resolved (no canonicalisation in a text scan).
@@ -846,7 +897,7 @@ expose `MFD_EXEC`).
   agent could route a blocked idiom through it. Operators should treat any
   argument-evaluating root-owned script as a defect.
 - **Interpreter-internal suppression**: `python3 -c
-  'subprocess.run(..., stdout=subprocess.DEVNULL)'` hides output
+'subprocess.run(..., stdout=subprocess.DEVNULL)'` hides output
   without shell grammar. Not detectable at this layer (REQ-SHG-NG-07).
 - **memfd `$0` divergence**: untrusted scripts observe
   `/proc/self/fd/<n>` as `$0`/`BASH_SOURCE` (§9.1); the guard

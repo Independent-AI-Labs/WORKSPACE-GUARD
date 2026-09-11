@@ -24,7 +24,7 @@ and both deployment-mode E2E sanity check tests locally.
 
 Installation and deployment of the guard remain specified in
 [REQ-GIT-GUARD](REQ-GIT-GUARD.md) and
-[SPEC-GIT-GUARD-INSTALL](../specifications/SPEC-GIT-GUARD-INSTALL.md). This
+[SPEC-GIT-GUARD-DEPLOYMENT](../specifications/SPEC-GIT-GUARD-DEPLOYMENT.md). This
 document covers **verification only**.
 
 See also [ROOT-ONLY-MODE.md](../ROOT-ONLY-MODE.md) for the root-only threat
@@ -39,7 +39,7 @@ model exercised in Tier 2.
 - **REQ-POD-001**: The harness shall run on **macOS (Darwin)** via Podman
   Machine and on **Linux** via native Podman (rootless or rootful).
 - **REQ-POD-002**: On Darwin, `make init` shall bootstrap Podman (via
-  `../CI/scripts/bootstrap-podman`) and ensure a running Podman Machine.
+  `/opt/workspace-ci/scripts/bootstrap-podman`) and ensure a running Podman Machine.
 - **REQ-POD-003**: On Darwin, the pre-push hook (`ci-check-push`) shall run
   `make test-podman` instead of skipping Linux-only checks.
 - **REQ-POD-003a**: On Linux, the pre-push hook (`ci-check-push`) shall run
@@ -67,8 +67,8 @@ model exercised in Tier 2.
   `cargo` artifacts persist across runs.
 - **REQ-POD-021**: Container working directory shall be
   `/projects/WORKSPACE-GUARD`.
-- **REQ-POD-022**: The harness shall require `../CI` (WORKSPACE-CI) to exist;
-  guard install E2E delegates to `../CI/scripts/bootstrap-workspace-guard`.
+- **REQ-POD-022**: The host harness shall require `/opt/workspace-ci`; container
+  fixtures mount WORKSPACE-CI source at `/projects/WORKSPACE-CI`.
 
 ### 4. Tier 0 :  macOS Host Shell Tests
 
@@ -91,7 +91,7 @@ model exercised in Tier 2.
 - **REQ-POD-050**: After Tier 1 in the same container session, the harness
   shall install the guard in **root-only mode** via
   `BUILD_MODE=root-only FORCE_ROOT_ONLY=1 GUARD_NONINTERACTIVE=1` and
-  `../CI/scripts/bootstrap-workspace-guard install`.
+  `/opt/workspace-ci/scripts/bootstrap-workspace-guard install`.
 - **REQ-POD-051**: Tier 2 sanity check tests shall verify: `git status` succeeds in a
   fresh repo; `git reset --hard` is blocked. Tier 2 runs as container root:
   repo identity may be set via root-local `git config` (operator bootstrap).
@@ -122,11 +122,11 @@ model exercised in Tier 2.
 - **REQ-POD-070**: The Makefile shall expose: `init`, `init-check`,
   `test-podman`, `test-podman-quick`, `test-podman-provision`, and `check-push`
   (the latter includes `test-podman-provision` on Linux). System packages are
-  `config/system-deps.yaml` and resolved via `../CI/scripts/install-system-deps`
+  `config/system-deps.yaml` and resolved via `/opt/workspace-ci/scripts/install-system-deps`
   (no inline `brew install` / `apt-get` in the Makefile).
 - **REQ-POD-071**: The Makefile shall expose guard delegation targets matching
   WORKSPACE-CI: `build-guard`, `install-guard`, `uninstall-guard`,
-  `check-guard` (via `../CI/scripts/bootstrap-workspace-guard`).
+  `check-guard` (via `/opt/workspace-ci/scripts/bootstrap-workspace-guard`).
 - **REQ-POD-072**: `moon.yml` task `build-guard` shall resolve via
   `make build-guard` without error.
 
@@ -134,7 +134,7 @@ model exercised in Tier 2.
 
 - **REQ-POD-080**: All harness scripts under `scripts/podman/` and
   `scripts/test-in-podman.sh` shall avoid bash process substitution per
-  `../CI/docs/PORTABILITY.md`.
+  `/opt/workspace-ci/docs/specifications/SPEC-PORTABILITY.md`.
 - **REQ-POD-081**: Harness scripts shall use `set -euo pipefail`.
 - **REQ-POD-082**: Harnesses shall not use inline executable payloads.
   Podman entrypoints shall be checked-in, extension-qualified scripts.
@@ -144,7 +144,7 @@ model exercised in Tier 2.
 
 ### 10. Non-Interactive Install
 
-- **REQ-POD-090**: `../CI/scripts/bootstrap-workspace-guard` shall honour
+- **REQ-POD-090**: `/opt/workspace-ci/scripts/bootstrap-workspace-guard` shall honour
   `GUARD_NONINTERACTIVE=1` to skip the `[y/N]` installation prompt (required
   for container E2E).
 
@@ -166,4 +166,4 @@ model exercised in Tier 2.
 - [SPEC-PODMAN-TESTING](../specifications/SPEC-PODMAN-TESTING.md): implementation
 - [REQ-GIT-GUARD](REQ-GIT-GUARD.md): guard functional requirements
 - [ROOT-ONLY-MODE.md](../ROOT-ONLY-MODE.md): root-only threat model
-- [PORTABILITY.md](../../../CI/docs/specifications/SPEC-PORTABILITY.md): shell portability
+- [SPEC-PORTABILITY](../../../WORKSPACE-CI/docs/specifications/SPEC-PORTABILITY.md): shell portability

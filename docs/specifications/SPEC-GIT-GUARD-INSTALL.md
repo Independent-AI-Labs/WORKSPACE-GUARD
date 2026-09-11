@@ -1,7 +1,12 @@
-# Specification: Git Guard Installation Procedure
+# Specification: Git Guard Installation Procedure (Superseded)
+
+**Status:** SUPERSEDED by
+[SPEC-GIT-GUARD-DEPLOYMENT](SPEC-GIT-GUARD-DEPLOYMENT.md). This file records
+the retired SUID installation design and is not normative. No implementation or
+operator flow may use its `4555`, SUID, `pre-req`, or legacy target directions.
 
 **Date:** 2026-05-18
-**Status:** DRAFT
+**Former Status:** DRAFT
 **Type:** Specification
 **Parent:** [SPEC-GIT-GUARD](SPEC-GIT-GUARD.md)
 **Requirements:** [REQ-GIT-GUARD](../requirements/REQ-GIT-GUARD.md) §15 (REQ-GGUARD-140 through REQ-GGUARD-162)
@@ -90,18 +95,44 @@ if ! rustup target list --installed | grep -q musl; then
     exit 1
 fi
 echo "[INFO] Building statically linked binary (musl)..."
-cargo build --release --target x86_64-unknown-linux-musl
-GUARD_BIN="target/x86_64-unknown-linux-musl/release/workspace-guard"
+<unprivileged-controlled-build-env> cargo +<pinned-toolchain> build \
+  --config git-guard/.cargo/config.toml \
+  --manifest-path git-guard/Cargo.toml --package workspace-guard \
+  --bin workspace-guard --locked --frozen --offline --release \
+  --target x86_64-unknown-linux-musl <exact-mode-feature>
+GUARD_BIN="git-guard/target/x86_64-unknown-linux-musl/release/workspace-guard"
 ```
+
+Before Cargo executes dependency code, a metadata-only gate compares the exact
+normal/build/proc-macro closure and features for the selected mode with
+`git-guard/dependency-closure.json`, verifies lockfile/source checksums, and
+rejects forbidden source forms or duplicate versions. Cargo uses only the trusted
+read-only offline source store. The build runs without root, network, or write
+access outside `git-guard/target`; root resumes only for artifact verification
+and installation.
 
 ### 4.3 Build Verification
 
 After build completes, the script verifies:
-- The binary file exists at the expected path
-- It is a valid ELF executable (`file $GUARD_BIN | grep -q ELF`)
-- It is not empty (`test -s $GUARD_BIN`)
+- The binary is a no-follow regular file at the exact expected target path.
+- ELF architecture/target is pinned x86-64 and type is static PIE.
+- `GNU_RELRO` exists and covers relocation state.
+- `GNU_STACK` is non-executable.
+- Stack-protection evidence matches the pinned toolchain verifier contract.
+- No `PT_INTERP` or dynamic dependency exists.
+- The release artifact is stripped and was built with panic abort and checked
+  release arithmetic under the trusted profile/flag manifest.
+- A cryptographic digest is recorded for installation identity.
 
-If verification fails, the installation aborts with an error.
+The build rejects inherited compiler/linker/target/wrapper flags before Cargo is
+run. Missing tools, unsupported required flags, malformed or ambiguous verifier
+output, and every property failure abort before installation.
+
+After copying, the installer verifies the destination's no-follow regular-file
+identity, expected ownership/mode, digest equality with the verified source, and
+the complete ELF property set again. File capabilities are applied only after
+that destination verification. Any replacement or mismatch aborts without
+labeling the destination privileged.
 
 ---
 

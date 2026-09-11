@@ -1,0 +1,82 @@
+# Exact-file classifications (reviewed); roots are structural facts.
+test_roots:
+  - tests/
+doc_roots:
+  - docs/
+doc_files:
+  - README.md
+  - AGENTS.md
+files:
+  Cargo.lock:
+    class: lock
+    validated_by: lockfile sync checks
+    owner: workspace-ci
+  config/banned_words_exceptions.yaml:
+    class: policy-definition
+    owner: workspace-ci
+  config/file_classifications.yaml:
+    class: policy-definition
+    owner: workspace-ci
+  docs/references/NVD-CVE-2021-4034.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/NVD-CVE-2025-32463.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/SOURCES.md:
+    class: reference
+    owner: workspace-ci
+  docs/references/capabilities.7.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/cis-dil-benchmark-suid-rb.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/elastic-cap-escalation.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/gtfobins-caps.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/gtfobins-sudo.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/gtfobins-suid.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/konstruktoid-suid-list.pdf:
+    class: binary
+    owner: workspace-ci
+  docs/references/konstruktoid-suid-list.txt:
+    class: reference
+    owner: workspace-ci
+  docs/references/sandlock-arxiv.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/sudo-Baron-Samedit-CVE-2021-3156.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/sudo-chroot-CVE-2025-32463.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/sudo-chroot-CVE-2025-32463.pdf:
+    class: binary
+    owner: workspace-ci
+  docs/references/systemshardening-cap-hardening.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/systemshardening-chattr.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/systemshardening-dm-verity.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/yunolay-caps-abuse.html:
+    class: reference
+    owner: workspace-ci
+  docs/references/yunolay-suid-sgid-abuse.html:
+    class: reference
+    owner: workspace-ci
+  res/LOGO.png:
+    class: binary
+    owner: workspace-ci

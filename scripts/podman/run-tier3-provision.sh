@@ -10,8 +10,8 @@ _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
 resolve_podman() {
-    if [[ -x "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman" ]]; then
-        echo "$_PROJECTS_ROOT/CI/.boot-linux/bin/podman"
+    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
+        echo "/opt/workspace-ci/.boot-linux/bin/podman"
         return 0
     fi
     if _podman_probe="$(command -v real-podman 2>&1)"; then
@@ -26,8 +26,8 @@ resolve_podman() {
     return 1
 }
 
-if [[ ! -d "$_PROJECTS_ROOT/CI" ]]; then
-    echo "ERROR: WORKSPACE-CI not found at $_PROJECTS_ROOT/CI" >&2
+if [[ ! -d "$_PROJECTS_ROOT/WORKSPACE-CI" ]]; then
+    echo "ERROR: WORKSPACE-CI not found at $_PROJECTS_ROOT/WORKSPACE-CI" >&2
     exit 1
 fi
 
@@ -45,7 +45,7 @@ echo "==> Host provision E2E in $_IMAGE"
     "$_IMAGE" \
     bash -c 'set -euo pipefail
 bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
-export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/CI
+export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
 cd "$GUARD_ROOT"
 bash scripts/podman/e2e-host-provision.sh'
 
@@ -56,7 +56,7 @@ echo "==> Host provision safety E2E in $_IMAGE"
     "$_IMAGE" \
     bash -c 'set -euo pipefail
 bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
-export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/CI
+export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
 cd "$GUARD_ROOT"
 bash scripts/podman/e2e-host-provision-safety.sh'
 

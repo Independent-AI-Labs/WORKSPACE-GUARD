@@ -26,14 +26,12 @@ It is organized into five deployed programs:
 4. **Program III - Home Lock.** Root-locks `~/.gitconfig`, `~/.ssh/*`, and
    declared config globs inside fleet accounts.
 5. **Shell Guard.** Replaces `/bin/bash` with `workspace-shell-guard`,
-   which scans every `-c` string and every script body against a
+   which scans every `-c` string and every untrusted script body against a
    regex pattern table (destructive commands, output suppression,
    exit swallows), executes untrusted scripts from a sealed memfd,
-   applies the same block policy to root-owned trusted-tier scripts,
-   and fails closed (exit 3) whenever its capability context is
-   missing - including every root invocation. Root maintenance that
-   legitimately needs a forbidden idiom uses `/bin/bash.real`
-   (0700 root:root, `chattr +i`) behind a `dpkg-divert`.
+   and executes trusted scripts by path after provenance validation. Root and
+   non-root automation use the same guarded `/bin/bash`; the sealed backing
+   interpreter is not an automation interface.
 
 Program II-B - Sandbox is roadmap: a hardened systemd unit template ships,
 but the launcher binary that would apply Landlock, seccomp, and namespace
@@ -43,17 +41,18 @@ Enforcement rests on three ideas:
 
 1. **Forward-only history.** Agents cannot rewrite, revert, restore, clean,
    stash, force-push, or bypass hooks (`--no-verify`). `git commit
-   --amend` is available only to operators via sudo.
+--amend` is available only to operators via sudo.
 2. **Scoped root-locking.** Program I root-locks `.git/` inside workspace
    repos and provisioned-host clones; Program III root-locks user-global
    identity files and declared config globs. Locks are not applied to
    temporary sandboxes outside these scopes.
 3. **Operator intent.** Root-owned policy YAMLs are edited through the
-   sudo-gated `workspace-yaml-edit` binary (`sudo make yaml-add` /
-   `yaml-remove`), which manipulates YAML contents directly while the
-   files stay root-owned at all times. Files are never released or relocked.
+   sudo-gated `workspace-yaml-edit` binary, including field unset, literal
+   comment cleanup, and digest-guarded file deletion. It manipulates source
+   YAML directly while files stay root-owned; `/opt` mutations are forbidden.
 
-Blocks are audited to `~/.workspace-guard.log` and `/dev/tty`. Full policy
+Blocks are audited only to root-owned per-UID files under
+`/var/log/workspace-guard/` and reported on `/dev/tty`. Full policy
 detail is in `docs/specifications/`; operator workflow in
 [docs/OPERATOR.md](docs/OPERATOR.md).
 
@@ -61,14 +60,14 @@ detail is in `docs/specifications/`; operator workflow in
 
 ## What this repo covers
 
-| Surface | Program | Status | Install |
-|---------|---------|--------|---------|
-| Git wrapper | **I - Git Guard** | Deployed | `sudo make reconcile-guard-host-exec` |
-| SUID and file-cap binaries | **II-A - Binary lock** | Deployed | `make install-lock` |
-| Long-running agents under systemd | **II-B - Sandbox** | Roadmap: unit template shipped, launcher not built | `make install-sandbox` (unit only) |
-| Audit and inventory | **II-C + II-D** | Deployed | `make install-auditd`, `make sync-gtfobins` |
-| Home-directory identity files | **III - Home lock** | Deployed | `make install-home-lock` |
-| `/bin/bash` command scanning | **Shell guard** | Deployed | `sudo make install-shell-guard` |
+| Surface                           | Program                | Status                                             | Install                                     |
+| --------------------------------- | ---------------------- | -------------------------------------------------- | ------------------------------------------- |
+| Git wrapper                       | **I - Git Guard**      | Deployed                                           | `sudo make reconcile-guard-host-exec`       |
+| SUID and file-cap binaries        | **II-A - Binary lock** | Deployed                                           | `make install-lock`                         |
+| Long-running agents under systemd | **II-B - Sandbox**     | Roadmap: unit template shipped, launcher not built | `make install-sandbox` (unit only)          |
+| Audit and inventory               | **II-C + II-D**        | Deployed                                           | `make install-auditd`, `make sync-gtfobins` |
+| Home-directory identity files     | **III - Home lock**    | Deployed                                           | `make install-home-lock`                    |
+| `/bin/bash` command scanning      | **Shell guard**        | Deployed                                           | `sudo make install-shell-guard`             |
 
 Programs compose on one host. Each has its own install target, spec, and
 operational lifecycle.
@@ -77,11 +76,11 @@ operational lifecycle.
 
 ## Execution classes
 
-| Class | Mechanism | Use |
-|-------|-----------|-----|
-| `host-exec` | File capabilities on `/usr/bin/git` via `setcap` | **Primary.** Agent dev hosts; IDE terminals do not run PAM login, so ambient caps are unavailable |
-| `sandbox-service` | systemd `AmbientCapabilities` on `workspace-agent@` | Program II-B runtime only; installed by `make install-sandbox`, never by git install |
-| `root-only` | `BUILD_MODE=root-only` in the harness | CI soft barrier (Podman Tier 2 / PRoot / macOS); no host git guard |
+| Class             | Mechanism                                           | Use                                                                                               |
+| ----------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `host-exec`       | File capabilities on `/usr/bin/git` via `setcap`    | **Primary.** Agent dev hosts; IDE terminals do not run PAM login, so ambient caps are unavailable |
+| `sandbox-service` | systemd `AmbientCapabilities` on `workspace-agent@` | Program II-B runtime only; installed by `make install-sandbox`, never by git install              |
+| `root-only`       | `BUILD_MODE=root-only` in the harness               | CI soft barrier (Podman Tier 2 / PRoot / macOS); no host git guard                                |
 
 The installed class is recorded at `/usr/lib/workspace-guard/deployment-class`,
 which is the source of truth for drift, check, and runtime. Per-host binding:
@@ -149,8 +148,8 @@ Invariants enforced by the current code:
   point at provisioned hosts; everything else is untouched.
 - Workspace detection fails closed: incomplete workspace markers or a
   workspace clone outside the workspace tree block enforcement bypass.
-- CI deployment integrity is verified by content, not just ownership
-  (`src/ci_integrity.rs`).
+- CI deployment integrity at `/opt/workspace-ci` is verified by content, not
+  just ownership (`src/ci_integrity.rs`).
 - Provisioned SSH key material is kept off agent-readable disk and offered
   through the guard-managed ssh wrapper (`config/git_ssh_allowlist.yaml`).
 
@@ -163,13 +162,14 @@ Shell-guard invariants:
   scan-then-exec TOCTOU race.
 - Trusted tier (a direct regular script owned by root under an
   immutable-anchored path) is executed by path without raw-text policy
-  scanning; its provenance is the trust decision. Root maintenance that
-  needs a forbidden command-string idiom must use `/bin/bash.real` directly.
-- Root invocations always fail closed (exit 3): the guard only operates in
-  a file-capability context (`AT_SECURE != 0`).
+  scanning; its provenance is the trust decision.
+- Root and non-root automation use guarded `/bin/bash`. The `AT_SECURE` gate
+  fails closed for non-root execution outside the installed capability context.
 - Stock bash is sealed as `/bin/bash.real` (0700 root:root, `chattr +i`)
   behind a `dpkg-divert`; blocks are appended to the invoking user's
-  passwd-home `.workspace-guard.log` with `NAME=value` redaction.
+  root-owned per-UID audit files with complete reversibly encoded evidence;
+  inline credentials are prohibited and sanctioned secret-store paths are
+  required.
 
 ---
 
@@ -194,20 +194,24 @@ before delegating to `git.original`.
 
 **Config lock and CI integrity:**
 
-- `workspace-yaml-edit` gives operators sudo-gated add/remove/set/get/list
-  over root-owned policy YAMLs (`*_exceptions.yaml`, thresholds, excludes,
-  gate configs). The guard's glob lock is unconditional; edits happen as
-  root via atomic, fail-closed transforms (see SPEC-YAML-EDIT).
-- `ci_integrity` verifies that deployed WORKSPACE-CI mirror content matches
+- `workspace-yaml-edit` gives operators sudo-gated add/remove/set/unset,
+  exact-comment removal, and digest-guarded deletion over root-owned policy
+  YAMLs (`*_exceptions.yaml`, thresholds, excludes, gate configs), plus
+  read-only get/list/validate operations. The guard's glob lock is
+  unconditional; edits happen as root via atomic, fail-closed transforms.
+  Mutations preserve owner/group/mode and are forbidden below `/opt`; deployed
+  artifacts are replaced only through their release control plane (see
+  SPEC-YAML-EDIT).
+- `ci_integrity` verifies that `/opt/workspace-ci` content matches
   the expected tree, so an agent-modified deployment is detected even when
   file ownership still looks correct.
 
-| Document | Content |
-|----------|---------|
-| [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md) | Policy engine, rules, config keys |
-| [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) | Install classes, host profiles, drift |
-| [SPEC-GIT-GUARD-HARDENING](docs/specifications/SPEC-GIT-GUARD-HARDENING.md) | `.git` lock, capability flow, threat model |
-| [SPEC-YAML-EDIT](docs/specifications/SPEC-YAML-EDIT.md) | Sudo-gated YAML policy editor |
+| Document                                                                      | Content                                    |
+| ----------------------------------------------------------------------------- | ------------------------------------------ |
+| [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md)                       | Policy engine, rules, config keys          |
+| [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) | Install classes, host profiles, drift      |
+| [SPEC-GIT-GUARD-HARDENING](docs/specifications/SPEC-GIT-GUARD-HARDENING.md)   | `.git` lock, capability flow, threat model |
+| [SPEC-YAML-EDIT](docs/specifications/SPEC-YAML-EDIT.md)                       | Sudo-gated YAML policy editor              |
 
 ---
 
@@ -243,13 +247,13 @@ cannot be started. Do not run `install-sandbox` on IDE-shell hosts.
 - `make install-auditd`: deploy `config/auditd/99-workspace-guard.rules` and
   AIDE configuration.
 
-| Document | Content |
-|----------|---------|
-| [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md) | Contain-via-guard procedure |
-| [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md) | Profiles and systemd unit |
-| [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md) | auditd and integrity monitoring |
-| [SPEC-CAP-THROTTLE](docs/specifications/SPEC-CAP-THROTTLE.md) | Capability allowlists |
-| [RESEARCH-SYSTEM-BINARIES](docs/RESEARCH-SYSTEM-BINARIES.md) | CVE catalog and layer rationale |
+| Document                                                      | Content                         |
+| ------------------------------------------------------------- | ------------------------------- |
+| [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md)   | Contain-via-guard procedure     |
+| [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md)           | Profiles and systemd unit       |
+| [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md)               | auditd and integrity monitoring |
+| [SPEC-CAP-THROTTLE](docs/specifications/SPEC-CAP-THROTTLE.md) | Capability allowlists           |
+| [RESEARCH-SYSTEM-BINARIES](docs/RESEARCH-SYSTEM-BINARIES.md)  | CVE catalog and layer rationale |
 
 ---
 
@@ -267,10 +271,10 @@ sudo make install-home-lock
 make home-drift-check
 ```
 
-| Document | Content |
-|----------|---------|
+| Document                                                | Content                   |
+| ------------------------------------------------------- | ------------------------- |
 | [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md) | Install, uninstall, drift |
-| [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md) | Requirements (`REQ-HL-*`) |
+| [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md)     | Requirements (`REQ-HL-*`) |
 
 ---
 
@@ -316,18 +320,20 @@ or acknowledged.
 Run from the workspace root; full detail in
 [docs/OPERATOR.md](docs/OPERATOR.md).
 
-| Command | Purpose |
-|---------|---------|
-| `sudo make guard-up` | Idempotent bring-up (provision plus git guard plus shell guard as needed) |
-| `sudo make guard-refresh` | Reinstall after pulling guard code (alias `refresh-guard`) |
-| `make guard-check` | Read-only health check (git guard plus shell guard) |
-| `sudo make guard-down` | Remove shell guard and git guard (provision state preserved) |
-| `sudo GUARD_PURGE_CONFIRM=1 make guard-reset` | Factory reset then bring-up |
-| `sudo make install-shell-guard` | Install the bash/sh shell guard (also part of guard-up; SPEC-SHELL-GUARD) |
-| `sudo make yaml-add FILE=.. KEY=.. FIELDS=".."` | Append a YAML policy entry |
-| `sudo make yaml-remove FILE=.. KEY=.. FIELDS=".."` | Remove matching YAML policy entries |
-| `sudo make yaml-set FILE=.. KEY=.. VALUE=..` | Set a YAML policy scalar |
-| `make yaml-list FILE=..` / `make yaml-validate FILE=..` | Print / schema-validate a YAML policy file |
+| Command                                                 | Purpose                                                                   |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `sudo make guard-up`                                    | Idempotent bring-up (provision plus git guard plus shell guard as needed) |
+| `sudo make guard-refresh`                               | Reinstall after pulling guard code (alias `refresh-guard`)                |
+| `make guard-check`                                      | Read-only health check (git guard plus shell guard)                       |
+| `sudo make guard-down`                                  | Remove shell guard and git guard (provision state preserved)              |
+| `sudo make install-shell-guard`                         | Install the bash/sh shell guard (also part of guard-up; SPEC-SHELL-GUARD) |
+| `sudo make yaml-add FILE=.. KEY=.. FIELDS=".."`         | Append a YAML policy entry                                                |
+| `sudo make yaml-remove FILE=.. KEY=.. FIELDS=".."`      | Remove matching YAML policy entries                                       |
+| `sudo make yaml-set FILE=.. KEY=.. VALUE=..`            | Set a YAML policy scalar                                                  |
+| `sudo make yaml-unset FILE=.. KEY='hooks[].safety'`      | Remove a field through a dotted mapping/list-wildcard path                 |
+| `sudo make yaml-remove-comment FILE=.. VALUE=".."`      | Remove every exact matching full YAML comment line                        |
+| `sudo make yaml-delete FILE=.. EXPECT_SHA256=..`         | Delete one policy file only when its reviewed SHA-256 still matches       |
+| `make yaml-list FILE=..` / `make yaml-validate FILE=..` | Print / schema-validate a YAML policy file                                |
 
 ---
 
@@ -345,8 +351,8 @@ make test-podman       # + Tier 3 host-exec E2E
 ```
 
 ```bash
-cargo build --release
-cargo build --release --no-default-features --features root-only
+make build-guard
+BUILD_MODE=root-only make build-guard
 make lint
 make sync-gtfobins-linux   # Regenerate baselines inside Linux container
 ```
@@ -358,14 +364,14 @@ See [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md).
 
 ## Requirements and specifications
 
-| Area | Requirements | Specifications |
-|------|--------------|----------------|
-| Git guard | [REQ-GIT-GUARD](docs/requirements/REQ-GIT-GUARD.md) | [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md), [SPEC-GIT-GUARD-IMPL](docs/specifications/SPEC-GIT-GUARD-IMPL.md), [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) |
-| System surface | [REQ-SANDBOX](docs/requirements/REQ-SANDBOX.md) | [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md), [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md), [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md) |
-| Home lock | [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md) | [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md) |
-| Shell guard | [REQ-SHELL-GUARD](docs/requirements/REQ-SHELL-GUARD.md) | [SPEC-SHELL-GUARD](docs/specifications/SPEC-SHELL-GUARD.md) |
-| Host provision | n/a | [SPEC-HOST-PROVISION](docs/specifications/SPEC-HOST-PROVISION.md) |
-| Podman testing | [REQ-PODMAN-TESTING](docs/requirements/REQ-PODMAN-TESTING.md) | [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md) |
+| Area           | Requirements                                                  | Specifications                                                                                                                                                                                            |
+| -------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git guard      | [REQ-GIT-GUARD](docs/requirements/REQ-GIT-GUARD.md)           | [SPEC-GIT-GUARD](docs/specifications/SPEC-GIT-GUARD.md), [SPEC-GIT-GUARD-IMPL](docs/specifications/SPEC-GIT-GUARD-IMPL.md), [SPEC-GIT-GUARD-DEPLOYMENT](docs/specifications/SPEC-GIT-GUARD-DEPLOYMENT.md) |
+| System surface | [REQ-SANDBOX](docs/requirements/REQ-SANDBOX.md)               | [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md), [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md), [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md)                                         |
+| Home lock      | [REQ-HOME-LOCK](docs/requirements/REQ-HOME-LOCK.md)           | [SPEC-HOME-LOCK](docs/specifications/SPEC-HOME-LOCK.md)                                                                                                                                                   |
+| Shell guard    | [REQ-SHELL-GUARD](docs/requirements/REQ-SHELL-GUARD.md)       | [SPEC-SHELL-GUARD](docs/specifications/SPEC-SHELL-GUARD.md)                                                                                                                                               |
+| Host provision | n/a                                                           | [SPEC-HOST-PROVISION](docs/specifications/SPEC-HOST-PROVISION.md)                                                                                                                                         |
+| Podman testing | [REQ-PODMAN-TESTING](docs/requirements/REQ-PODMAN-TESTING.md) | [SPEC-PODMAN-TESTING](docs/specifications/SPEC-PODMAN-TESTING.md)                                                                                                                                         |
 
 Canonical reference sources: [docs/references/SOURCES.md](docs/references/SOURCES.md).
 

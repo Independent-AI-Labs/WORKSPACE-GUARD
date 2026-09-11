@@ -7,7 +7,6 @@ sudo make guard-up       # idempotent bring-up (provision + guard install as nee
 sudo make guard-refresh  # after pulling guard code (alias: refresh-guard)
 make guard-check         # read-only health
 sudo make guard-down     # remove shell guard first, then git guard (provision state preserved)
-sudo GUARD_PURGE_CONFIRM=1 make guard-reset  # factory reset then bring-up
 ```
 
 `guard-check`, `check-guard-host-exec`, and `shell-guard-check` are read-only
@@ -29,12 +28,11 @@ bash scripts/shell-guard-check           # read-only health: OK / DRIFTED / NOT 
 sudo bash scripts/uninstall-shell-guard  # restore stock bash byte-identical
 ```
 
-While the guard is live, root shell invocations fail closed (exit 3,
-`AT_SECURE == 0` by design). Only non-root users get scanning shells.
-`make shell-guard-check` and `make guard-check` route root through the
-sealed `/bin/bash.real` automatically; when invoking the check script
-by hand as root, use `sudo /bin/bash.real scripts/shell-guard-check`.
-Non-root runs go through the guard (env scrub, sealed-memfd staging):
+While the guard is live, root and non-root automation use guarded `/bin/bash`.
+Command strings and untrusted scripts are scanned for both. The backing
+`/bin/bash.real` interpreter is a guard implementation detail, not an
+automation interface. Runs through the guard use environment scrubbing and
+sealed-memfd staging:
 the check resolves the repo root explicitly from its first argument,
 `SHG_REPO_ROOT`, or its own script path (under memfd staging `$0` is
 a `/proc/self/fd/<n>` path; the guard publishes the original as
@@ -55,12 +53,10 @@ for example `uv run python tools/check.py`. `uv run python -c` is blocked;
 Detection-only arguments such as `command -v python3` are not execution, but
 they do not authorize a subsequent interpreter invocation.
 
-Root-deployed toolchains under the agent's home (e.g. `projects/CI`)
-run as trusted tier only while their boundary directory carries the
-immutable flag (REQ-SHG-214 anchored chain): `sudo chattr +i
-"$HOME/projects/CI"`. Without the anchor the
-scripts stay untrusted and `chattr`-mentioning tooling such as
-`generate-hooks` is hard-blocked.
+The deployed WORKSPACE-CI toolchain lives at `/opt/workspace-ci`, under the
+root-owned `/opt` parent. Its root ownership, fixed modes, and immutable flags
+make its scripts trusted-tier inputs. Agent-owned workspace paths are never
+deployment trust anchors.
 
 Drift repair: `shell-guard-check` exits 1 on drift (missing hook,
 stale binary hash, relaxed `.real` mode, missing caps). Re-run
@@ -92,6 +88,10 @@ sudo make yaml-add      FILE=config/quality_exceptions.yaml KEY=exceptions FIELD
 sudo make yaml-remove   FILE=config/quality_exceptions.yaml KEY=exceptions FIELDS="hook=pre-commit;paths=[src/x.py]"
 sudo make yaml-set      FILE=config/coverage_thresholds.yaml KEY=unit.threshold VALUE=80
 sudo make yaml-bootstrap FILE=config/file_length_limits.yaml KEY=max_file_bytes VALUE=262144
+sudo make yaml-unset    FILE=config/required_hooks.yaml KEY='hooks[].safety'
+sudo make yaml-remove-comment FILE=config/required_hooks.yaml VALUE='Safety-tier hooks (installed even at POC tier, mandatory always)'
+sha256sum config/obsolete-policy.schema.yaml
+sudo make yaml-delete FILE=config/obsolete-policy.schema.yaml EXPECT_SHA256=<reviewed-digest>
 make yaml-get           FILE=config/coverage_thresholds.yaml KEY=unit.threshold
 make yaml-list          FILE=config/quality_exceptions.yaml KEY=exceptions
 make yaml-validate      FILE=config/quality_exceptions.yaml
@@ -103,6 +103,28 @@ needed), `--allow-no-match` (remove: no-match exits 0), `--string`
 
 Use `yaml-bootstrap` once to create a missing top-level scalar key; it
 rejects keys that already exist. Use `yaml-set` for subsequent updates.
+
+`yaml-unset` accepts ordinary dotted mapping paths and `[]` list wildcards.
+For example, `hooks[].safety` requires `hooks` to be a non-empty sequence,
+every item to be a mapping, and every item to contain `safety`. Any malformed
+branch or missing field aborts the whole operation without changing the file.
+
+`yaml-remove-comment` compares literal text only. It removes standalone YAML
+comment lines after indentation, the leading `#`, and indentation immediately
+following `#` are removed; it
+does not use regular expressions and never changes scalar values or inline
+comments containing the same text. A missing comment is an error.
+
+`yaml-delete` deletes one regular file only after hashing the no-follow open
+file and comparing it with the required reviewed digest. It rejects symlinks,
+directories, globs, digest drift, and concurrent path replacement. It does not
+delete recursively.
+
+All mutations are forbidden below `/opt`, including `/opt/workspace-ci`.
+Edit source policy files and publish deployed artifacts through the release
+control plane. Successful rewrites preserve the target's owner, group, mode,
+comments, ordering, and unrelated formatting; output has exactly one terminal
+newline and no blank line at EOF.
 
 If a file carries the chattr immutable flag (e.g. it is under
 WORKSPACE-CI's exemption manifest), the tool clears the flag only for

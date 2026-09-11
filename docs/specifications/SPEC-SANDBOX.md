@@ -398,7 +398,8 @@ Every launch appends one line to `/var/log/workspace-sandbox.log`:
 Fields: ISO 8601 timestamp, profile, hostname, launcher PID, joined command,
 workload exit code. Satisfies REQ-SBX-140.
 
-Program I continues to log blocks to `~/.workspace-guard.log` independently.
+Program I logs blocks only to its guard-specific root-owned per-UID file under
+`/var/log/workspace-guard/`; no audit mirror exists in a user-writable directory.
 
 ---
 

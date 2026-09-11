@@ -28,17 +28,18 @@ directly, generically, atomically, and fail-closed:
       v
    /usr/bin/workspace-yaml-edit  (require_root for mutations)
       |  0. flock /var/lib/workspace-guard/yaml-edit.lock
-      |  1. preflight: exists, regular file, canonical, root:root
+      |  1. preflight: regular, no-follow, canonical, root:root, outside /opt;
+      |     capture parent fd + target device/inode/metadata
       |  2. serde_yaml parse (fail-closed) of the whole document
       |  3. locate splice region by indentation; transform
       |  4. emit entry via serde_yaml emitter (valid by construction)
       |  5. re-parse temp + assert exact semantic delta (real parser)
       |  6. schema registry validation by basename
       |  7. chattr +i detected -> transient clear inside flock
-      |  8. temp -> chown root:root 0644 -> rename over target
-      |  9. restore chattr flags; audit line -> guard log
+      |  8. temp -> preserve uid/gid/mode -> fsync -> identity check -> rename
+      |  9. fsync parent; restore chattr flags; audit line -> guard log
       v
-   file stays root:root 0644 (+ immutable if it had it) at ALL times
+   file stays root:root with its original mode (+ immutable if present)
 ```
 
 Design rule (REQ-YE-006): **serde_yaml decides meaning; line scanning
@@ -92,14 +93,45 @@ workspace-yaml-edit add      <file> <list-key> <field-spec>...   (ROOT)
 workspace-yaml-edit remove   <file> <list-key> <field-spec>...   (ROOT)
 workspace-yaml-edit set      <file> <dotted.key> <value>         (ROOT)
 workspace-yaml-edit bootstrap <file> <top-level-key> <value>      (ROOT)
+workspace-yaml-edit unset    <file> <dotted.path>                 (ROOT)
+workspace-yaml-edit remove-comment <file> <exact-comment-text>    (ROOT)
+workspace-yaml-edit delete   <file> --expected-sha256 <digest>    (ROOT)
 workspace-yaml-edit get      <file> <dotted.key>
 workspace-yaml-edit list     <file> [<list-key>]
 workspace-yaml-edit validate <file>
+workspace-yaml-edit check    <file>
+workspace-yaml-edit format   <file> [--dry-run]                   (ROOT)
 ```
 
-Flags: `--dry-run` (mutations only; print unified diff, no install,
-not root-gated), `--allow-no-match` (remove only; no-match exits 0
-instead of 3), `--string` (set only; force string typing).
+Flags: `--dry-run` (mutations and format only; print unified diff, no
+install, not root-gated), `--allow-no-match` (remove only; no-match
+exits 0 instead of 3), `--string` (set only; force string typing),
+`--create` (set only; insert an absent leaf key under an existing
+block-mapping parent, REQ-YE-205), and `--expected-sha256` (delete
+only; mandatory reviewed digest).
+
+### 3.7 Syntax + format preflight (operator ruling 2026-09-06)
+
+Every mutating intent runs two separate pre-mutation steps before any
+transform: syntax (the document must parse) and format (every block
+sequence's dash items must sit strictly deeper than their parent key
+indent, section 4.1). A target with an indentless block sequence is
+refused with exit 2, one precise error per offending key (key name,
+line, both indents), and the instruction
+`run: workspace-yaml-edit format <file>`; no mutation, not even
+`--dry-run`, proceeds on an unformatted target. Formatting is its own
+audited command (`format`), never a side effect of an edit.
+
+`check` is the unprivileged read-only preflight: syntax, registry
+schema, and splice-shape in one pass; exits 1 listing every finding.
+
+`format` canonicalizes indentless block sequences (dash at key indent
++ 2). Comments, blank lines, key order, scalar spelling, and trailing
+bytes survive byte-for-byte except for the inserted indentation
+(REQ-YE-103); the result must re-parse to the identical document
+(section 4.4 verification) and pass the registry schema; idempotent
+(second run reports `unchanged`). Root-gated, lock-serialized,
+audited, atomically installed like every mutation.
 
 ### 3.1 Field spec grammar (REQ-YE-200)
 
@@ -129,7 +161,52 @@ containing a dot at the current level wins), then descend segment by
 segment through maps. `set` refuses a key that opens a block (list,
 map, or block scalar) with exit 2 and a dedicated message.
 
-### 3.4 Exit codes
+With `--create`, a `set` whose dotted key does not resolve instead
+splits at the last dot: the parent path must resolve to an existing
+block mapping, and the new leaf key is appended at the end of the
+parent's block region at child indent. Missing parents, flow-style
+parents, non-mapping parents, and top-level keys (use `bootstrap`)
+all fail closed (REQ-YE-205).
+
+### 3.4 Unset paths
+
+`unset` uses a deliberately smaller path grammar than a general YAML query
+language:
+
+```text
+path      = segment ("." segment)*
+segment   = name | name "[]"
+name      = one or more ASCII letters, digits, `_`, `-`, or `/`
+```
+
+`[]` is valid only on a non-final segment and applies the remaining path to
+every sequence item. `hooks[].safety` therefore removes `safety` from every
+mapping in `hooks`. Every branch is validated first: the sequence must be
+non-empty, every item must be a mapping, every intermediate field must have
+the required mapping/sequence kind, and every final field must exist. One bad
+or missing branch aborts the whole operation before a splice is produced.
+
+2026-09-06: map keys named after file paths (e.g. classification manifest
+entries) contain dots and slashes. Unset resolves each level literal-first
+like `set`/`get` (REQ-YE-204): the longest join of consecutive non-wildcard
+segments that exists as a key at the current level wins over the
+single-segment interpretation, so `files.config-staging/banned_words.yaml`
+addresses the literal key `config-staging/banned_words.yaml` inside `files`.
+The splice layer locates such key lines verbatim; comments and sibling
+entries are untouched.
+
+### 3.5 Exact comment text
+
+`remove-comment` scans only lines whose first non-indentation byte is `#`.
+For comparison it removes the indentation, `#`, and any indentation spaces
+immediately following `#`. The remaining bytes must exactly equal the argument.
+No regular expression engine, shell evaluation, substring match, inline-comment
+match, or scalar-value match is involved. Every exact full-line match is
+removed. Blank-line normalization is local to each removed line and limits a
+newly adjacent blank run to one line without changing pre-existing runs
+elsewhere.
+
+### 3.6 Exit codes
 
 | rc | meaning |
 |---|---|
@@ -220,6 +297,32 @@ Only the target key's block region (plus the key line for `[]`
 conversion) is rewritten. Everything else is copied byte-for-byte,
 including header comments, blank lines, and unrelated keys.
 
+### 4.6 unset
+
+The semantic engine parses and expands the complete strict path against a
+clone of the parsed document. It records concrete mapping-field removals only
+after every wildcard branch validates. The splice layer then removes each
+field node from the original bytes, including that field's nested value block
+but not unrelated surrounding comments. A field on a sequence dash line is
+rewritten to a valid remaining mapping item; an emptied mapping is emitted as
+`{}`. The result is reparsed and must deep-equal the independently mutated
+clone. Success prints the number of removed fields.
+
+### 4.7 remove-comment
+
+The original document must parse before scanning. After literal full-line
+comment removal and local blank normalization, the result must parse and
+deep-equal the original semantic document. Success prints the number of
+removed comments. A zero count is an error and publishes nothing.
+
+### 4.8 Terminal normalization
+
+Every text mutation passes through one final terminal normalizer. It removes
+only terminal blank or whitespace-only lines, then appends exactly one `\n`.
+Changed and emitted lines contain no trailing spaces. Interior unrelated bytes
+are copied unchanged. This fixes the final-list-entry regression where
+terminal line reconstruction produced a new blank line at EOF.
+
 ---
 
 ## 5. Schema Registry (REQ-YE-301)
@@ -272,12 +375,15 @@ Mutation flow (`yaml_edit_ops.rs` / `yaml_edit_install.rs`):
    `list`/`get`/`validate`/`--dry-run`.
 2. If a `yaml_edit_schemas.yaml` override exists next to the target,
    it must be a root:root regular file (exit 2 otherwise).
-3. Preflight (exit 2): file exists, is a regular file,
-   `canonicalize` equals the normalized given path (symlink refusal),
-   and, for mutations, owner uid/gid are 0. Reads refuse symlinks too.
+3. Preflight (exit 2): reject parent-directory traversal components; resolve
+   an absolute path; reject `/opt` and every descendant for mutations; require
+   an existing regular file whose canonical path equals the normalized input;
+   and, for mutations, require owner uid/gid 0. Reads refuse symlinks too.
 4. Open and flock `/var/lib/workspace-guard/yaml-edit.lock`
    (LOCK_EX; directory created root:root 0700 if missing).
-5. Read the target, parse with serde_yaml (exit 1 on parse error).
+5. Open the parent directory and target with no-follow descriptor-relative
+   operations, capture device/inode/uid/gid/mode/timestamps, read the already
+   open target, and parse with serde_yaml (exit 1 on parse error).
 6. Transform in memory (splice), then verify: the result re-parses
    with serde_yaml to exactly the expected semantic document
    (REQ-YE-006), then schema validation against the registry.
@@ -286,8 +392,10 @@ Mutation flow (`yaml_edit_ops.rs` / `yaml_edit_install.rs`):
 8. Install: detect the immutable flag via `lsattr -d` (unsupported
    filesystem means "no flags", with a stderr notice); `chattr -i` if
    set; write the verified content to a temp file in the same
-   directory (mode 0600); `chown root:root`, `chmod 0644`; `rename`
-   over the target; restore `chattr +i`. Failure to restore is a
+   directory (mode 0600); apply the captured uid, gid, and permission mode;
+   flush the temp file; recheck target device/inode immediately before
+   descriptor-relative rename; rename over the target; flush the parent
+   directory; restore `chattr +i`. Failure to restore is a
    loud error: the edit succeeded but the file must not be left
    unsealed.
 
@@ -295,23 +403,36 @@ Mutation flow (`yaml_edit_ops.rs` / `yaml_edit_install.rs`):
 (`yaml_edit_diff.rs`, LCS-based, no external `diff` dependency); it
 requires no root and installs nothing.
 
+### 6.1 Guarded deletion
+
+`delete` runs under the same root gate, `/opt` prohibition, deployed-CI
+restriction, global lock, no-follow preflight, root ownership check, malformed
+YAML rejection, immutable-state handling, and audit requirement. The expected
+digest must be exactly 64 hexadecimal characters. SHA-256 is computed from the
+already-open file descriptor. A post-hash `fstat` must match the captured
+identity and stability metadata, and a no-follow lookup through the open
+parent directory must still identify the same device/inode immediately before
+unlink. Digest mismatch or identity drift leaves the path untouched. Success
+unlinks only that basename through the parent descriptor, fsyncs the parent,
+and prints both the deleted path and verified lowercase digest. Directories,
+symlinks, globs, and recursive deletion have no command grammar.
+
 ---
 
 ## 7. Audit
 
-One line per mutation appended to the guard log file. The file name
-is a compiled-in constant (`LOG_FILE_NAME` in `yaml_edit_ops.rs`)
-that a unit test keeps identical to `log_file` in
-`config/shared_paths.yaml`; the path joins onto the operator home
-resolved via `SUDO_UID` -> `getpwuid` (else: euid's passwd
-entry), never `$HOME`:
+One line per mutation is appended only to the verified root-owned
+`/var/log/workspace-guard/yaml-edit-<invoking-uid>.log`. No HOME log or mirror
+exists. Secure directory-fd opening, metadata checks, locking, append, sync, and
+failure diagnostics follow SPEC-GIT-GUARD §7.2. `SUDO_UID` identifies the
+operator for this root-only editor; it never selects an audit directory:
 
 ```
 <utc-iso8601> yaml-edit <intent> user=<name> file=<path> key=<key> fields=<k=v;k=[x,y]> result=ok
 ```
 
-(`set` records `value=<v>` in place of `fields=`.) Audit write
-failure aborts before install (REQ-YE-601).
+(`set` records `value=<v>` in place of `fields=`; delete records the verified
+digest.) Audit write failure aborts before install or unlink (REQ-YE-601).
 
 ---
 
@@ -322,9 +443,14 @@ yaml-add:      ## (ROOT) FIELDS="hook=x;reason=...;paths=[a,b];added_by=.."
 yaml-remove:   ## (ROOT) FIELDS="hook=x;paths=[a]"
 yaml-set:      ## (ROOT) FILE=.. KEY=unit.threshold VALUE=80
 yaml-bootstrap: ## (ROOT) FILE=.. KEY=top_level VALUE=123
+yaml-unset:    ## (ROOT) FILE=.. KEY='hooks[].safety'
+yaml-remove-comment: ## (ROOT) FILE=.. VALUE='exact comment text'
+yaml-delete:   ## (ROOT) FILE=.. EXPECT_SHA256=<reviewed digest>
 yaml-get:      ## FILE=.. KEY=unit.threshold
 yaml-list:     ## FILE=.. [KEY=exceptions]
 yaml-validate: ## FILE=..
+yaml-check:    ## FILE=..
+yaml-format:   ## (ROOT) FILE=..
 ```
 
 `FIELDS` is split on `;` via `IFS=';' read -ra` inside the recipe, so
@@ -352,6 +478,7 @@ root-owned CI repo.
 | 5 | awk -v backslash escapes | Rust strings; no escape layer (3.2) |
 | 6 | Makefile word-split FIELDS | `;` separator via IFS (8) |
 | 7 | YAML type confusion on emission | serde_yaml emitter quotes correctly (3.4/REQ-YE-203) |
+| 36 | timestamp strings emitted plain, PyYAML (YAML 1.1) re-reads them as `datetime.date` | `needs_quotes` in `yaml_edit_emit.rs` quotes YAML 1.1 timestamp shapes (`YYYY-M-D` with optional `[T ]hh:mm:ss` suffix) alongside booleans/nulls/numbers (2026-09-07 activation fix) |
 | 8 | chattr +i invariant mismatch with CI | lsattr detect / chattr -i / install / chattr +i restore (6 step 8) |
 | 9/13 | no mutual exclusion | global flock (6 step 2) |
 | 10 | hardcoded 2-space indent | indents computed from the document (4.1 step 5) |
@@ -395,6 +522,11 @@ root-owned CI repo.
   following the suite 16/17 pattern; PATH interception cannot fake
   `geteuid()` for a compiled binary and `unshare -Ur` is blocked in
   this container.
+- Root-tier deletion tests cover required/correct/mismatched digests,
+  symlinks, directories, concurrent replacement detection, parent fsync,
+  immutable handling, and exact owner/group/mode preservation for rewrites.
+- EOF regressions assert exactly one terminal newline after every mutation and
+  specifically after removing the final list entry.
 
 ---
 
@@ -405,19 +537,23 @@ root-owned CI repo.
   root.
 - No release window, no skip list, no timer, no mutable runtime state
   that punches holes in the lock.
-- All edits are atomic (temp + rename), fail-closed (parse,
+- All edits are atomic and durable (temp + file fsync + rename + parent fsync),
+  fail-closed (parse,
   verification, schema, audit all abort before install), and
   auditable (log line + git history).
 - chattr `+i` is preserved end-to-end: files under WORKSPACE-CI's
   exemption manifest keep passing `validate_exemption_file` after
   every edit, with the flag down only for the rename syscall inside
   the flock.
+- No mutation can target `/opt`; source policy changes must flow through
+  review and the deployment control plane before reaching installed artifacts.
 
 ---
 
 ## 12. Non-Goals
 
-Per REQ-YE-NG-01..06: no yq-style query language, no whole-document
+Per REQ-YE-NG-01..06: no yq-style query language beyond the documented unset
+wildcard, no whole-document
 re-emission, no consumer-side semantic validation, no sudoers
 drop-in, no YAML parsing in the guard binary, no persistent `.bak`
 files, no editing of user-owned YAML.

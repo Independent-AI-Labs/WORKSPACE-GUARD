@@ -1,0 +1,187 @@
+exceptions:
+  - rule: bsilent
+    path: ^\.pre\-commit\-config\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bsilent
+    path: ^config/banned_words_exceptions\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bsilent
+    path: ^config/policies\.index\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bsilent
+    path: ^src/yaml_edit_schema\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bsilent
+    path: ^src/yaml_edit_schema_tests\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bunlock-b
+    path: ^config/git_guard_policy_matrix\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bunlock-b
+    path: ^src/block\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bunlocks-b
+    path: ^config/git_guard_policy_matrix\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: bunlocks-b
+    path: ^src/block\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: home
+    path: ^docs/requirements/REQ\-HOME\-LOCK\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: home
+    path: ^docs/specifications/SPEC\-HOME\-LOCK\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: protected-bare-system-interpreter
+    path: ^config/shell_guard_policy_matrix\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: protected-bare-system-interpreter
+    path: ^docs/requirements/REQ\-SHELL\-GUARD\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: protected-bare-system-interpreter
+    path: ^docs/specifications/SPEC\-SHELL\-GUARD\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^Containerfile\.test$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^Makefile$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^\.pre\-commit\-config\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^config/banned_words_exceptions\.yaml$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^docs/specifications/SPEC\-BINARY\-LOCK\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^docs/specifications/SPEC\-GIT\-GUARD\-HARDENING\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^docs/specifications/SPEC\-GIT\-GUARD\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^docs/specifications/SPEC\-SANDBOX\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^tests/shell/lib/harness\.bash$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: rule
+    path: ^tests/shell/stubs/dpkg\-divert$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^docs/specifications/SPEC\-GIT\-GUARD\-IMPL\.md$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^src/exec\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^src/exec_tests\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^src/gitdir\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^src/main\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^src/reconcile\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^src/shell_guard\.rs$
+    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
+    owner: workspace-ci
+    review_date: '2026-09-06'
+    removal: Remove when the file no longer quotes the rule.

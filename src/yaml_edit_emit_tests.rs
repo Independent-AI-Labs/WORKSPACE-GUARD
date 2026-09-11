@@ -50,6 +50,27 @@ fn numeric_strings_get_quoted() {
 }
 
 #[test]
+fn timestamp_strings_get_quoted() {
+    for s in [
+        "2026-09-07",
+        "2001-12-15",
+        "2026-09-07T10:30:00Z",
+        "2026-09-07 10:30:00",
+        "2026-09-07t10:30:00.5+02:00",
+        "2026-9-7",
+    ] {
+        let v = Value::String(s.to_string());
+        let token = render_scalar(&v);
+        assert!(token.starts_with('\''), "{s} must be quoted, got {token}");
+        roundtrip(&v);
+    }
+    for not_ts in ["2026-09-07x", "123-45-67"] {
+        let v = Value::String(not_ts.to_string());
+        roundtrip(&v);
+    }
+}
+
+#[test]
 fn indicator_strings_get_quoted() {
     for s in [
         "- dash", "[x]", "#hash", "a: b", "a # b", "key:", "*star", " lead", "trail ",

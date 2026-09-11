@@ -406,8 +406,8 @@ pub fn check_workspace_ci_contract(
 
     crate::ci_integrity::check_ci_integrity(&toplevel, &wsroot)?;
 
-    let ci_script = format!("{}/{}", wsroot, CONTRACT_SCRIPT);
-    if !Path::new(&ci_script).exists() {
+    let ci_script = CONTRACT_SCRIPT;
+    if !Path::new(ci_script).exists() {
         return Err(GuardError::ContractFailed(format!(
             "WORKSPACE-CI contract check script not found at {}: \
              failing closed (contract cannot be verified)",
@@ -416,7 +416,7 @@ pub fn check_workspace_ci_contract(
     }
 
     let child = std::process::Command::new("/bin/bash")
-        .arg(&ci_script)
+        .arg(ci_script)
         .env("WORKSPACE_GGUARD_CMD", subcommand)
         .env("WORKSPACE_GGUARD_REPO_ROOT", &toplevel)
         .env("WORKSPACE_GGUARD_WORKSPACE_ROOT", &wsroot)

@@ -1,10 +1,10 @@
 # WORKSPACE-GUARD Makefile: Capability guard framework (git PoC).
 #
-# This repo is a sibling of WORKSPACE-CI under projects/. The actual
+# This repo consumes the immutable WORKSPACE-CI artifact. The actual
 # installation of the guard binary (setcap, dpkg-divert, chattr, apt hook)
 # is owned by WORKSPACE-CI's bootstrap-workspace-guard script, invoked
 # from this repo's Makefile via the build-guard/install-guard/check-guard
-# targets that delegate to ../CI/Makefile.
+# targets that delegate to its protected bootstrap script.
 #
 # IMPORTANT: In capability mode, gitdir::lock() claims the entire .git/
 # tree as root:root. Hook files under .git/hooks/ are kept at 0o755
@@ -22,51 +22,12 @@ _OS := $(shell uname -s)
 # Homebrew prefix is architecture-derived: Apple Silicon installs to
 # /opt/homebrew, Intel to /usr/local. No filesystem probing.
 _HB_PREFIX := $(if $(filter arm64,$(shell uname -m)),/opt/homebrew,/usr/local)
-# Root detection MUST happen before the SHELL assignment below:
-# make's $(shell) honors the makefile's SHELL variable, so once SHELL
-# points at the guarded bash, every $(shell) probe fails closed for
-# root (AT_SECURE == 0) and returns empty. While SHELL is still the
-# stock /bin/sh, `id -u` answers truthfully for every caller.
-# Root recipes run through the sealed /bin/bash.real instead of the
-# guarded bash (root execs of the fcap guard fail closed by design).
-# A missing /bin/bash.real is a hard provisioning error; the build
-# never re-routes through the guarded bash.
-ifeq ($(shell id -u),0)
-ifeq ($(wildcard /bin/bash.real),)
-# These are the only targets allowed to run before the shell guard exists.
-# They build and install /bin/bash.real; every other root target remains
-# fail-closed until that sealed interpreter is available.
-ifneq ($(filter build-shell-guard install-shell-guard,$(MAKECMDGOALS)),)
-SHELL := /bin/bash
-else
-$(error /bin/bash.real is missing: run sudo make install-shell-guard first)
-endif
-else
-SHELL := /bin/bash.real
-endif
-else
 ifneq ($(wildcard $(_HB_PREFIX)/bin/bash),)
 SHELL := $(_HB_PREFIX)/bin/bash
 else
 SHELL := /bin/bash
 endif
-endif
-# Interpreter for repo scripts invoked explicitly from recipes. Bare `bash`
-# resolves to the guarded /usr/bin/bash, which fails closed for root
-# (AT_SECURE == 0) and broke sudo make guard-refresh -> build-guard.
-ifeq ($(shell id -u),0)
-ifeq ($(wildcard /bin/bash.real),)
-ifneq ($(filter build-shell-guard install-shell-guard,$(MAKECMDGOALS)),)
-SCRIPT_BASH := /bin/bash
-else
-$(error /bin/bash.real is missing: run sudo make install-shell-guard first)
-endif
-else
-SCRIPT_BASH := /bin/bash.real
-endif
-else
 SCRIPT_BASH := bash
-endif
 export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-sed/libexec/gnubin:$(_HB_PREFIX)/opt/findutils/libexec/gnubin:$(_HB_PREFIX)/opt/grep/libexec/gnubin:$(_HB_PREFIX)/bin:$(PATH)
 
 .DEFAULT_GOAL := help
@@ -75,7 +36,7 @@ export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-
 _WORKSPACE_GUARD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
 REPO_ROOT := $(patsubst %/,%,$(dir $(_WORKSPACE_GUARD_MK)))
 # Guard builds and tests use the deployed, sanctioned CI checkout.
-CI_DIR := $(abspath $(REPO_ROOT)/../CI)
+CI_DIR := /opt/workspace-ci
 CI_BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 CI_BOOT_BIN := $(CI_DIR)/$(CI_BOOT_NAME)/bin
 export PATH := $(CI_BOOT_BIN):$(PATH)
@@ -106,7 +67,9 @@ GITLEAKS_BIN := $(WORKSPACE_ROOT)/$(BOOT_NAME)/bin/gitleaks
 # the cargo child (cargo discovers rustc/rustfmt/clippy via PATH).
 # Missing binary is a hard preflight error, never a quiet substitute.
 _CARGO_BOOT := $(CI_BOOT_BIN)
-CARGO := PATH="$(_CARGO_BOOT):$$PATH" $(_CARGO_BOOT)/cargo
+RUSTUP_HOME := $(CI_DIR)/$(CI_BOOT_NAME)/rust
+CARGO_HOME := /tmp/workspace-guard-cargo-$(shell id -u)
+CARGO := RUSTUP_HOME="$(RUSTUP_HOME)" CARGO_HOME="$(CARGO_HOME)" PATH="$(_CARGO_BOOT):$$PATH" $(_CARGO_BOOT)/cargo
 
 SUDO := $(shell if [ "$$(id -u)" -eq 0 ]; then echo ""; else echo "sudo"; fi)
 
@@ -182,10 +145,7 @@ install-hooks: ## Regenerate native git hooks from .pre-commit-config.yaml
 		echo "       (or run before the guard is installed / in root-only mode)" >&2; \
 		exit 1; \
 	fi
-	if [ -x "$(CI_DIR)/scripts/cleanup-precommit" ]; then \
-		$(SCRIPT_BASH) "$(CI_DIR)/scripts/cleanup-precommit"; \
-	fi
-	$(SCRIPT_BASH) $(CI_DIR)/scripts/generate-hooks
+	$(SCRIPT_BASH) $(CI_DIR)/scripts/reinstall-hooks
 
 .PHONY: sync
 sync: ## Sync dependencies + reinstall hooks
@@ -260,15 +220,7 @@ test-shell: ## Run the bats shell test suite (gated in check-push).
 		echo "bats not found. Run 'make init' (apt) or install bats-core from source."; \
 		exit 1; \
 	fi
-	if [ "$(shell id -u)" -eq 0 ] && [ -x /bin/bash.real ]; then \
-		_shim="$$(mktemp -d)"; \
-		printf '#!/bin/bash.real\nexec /bin/bash.real "$$@"\n' > "$$_shim/bash"; \
-		chmod +x "$$_shim/bash"; \
-		PATH="$$_shim:$$PATH" BATS_TEST_TIMEOUT=30 /bin/bash.real "$$(command -v bats)" --timing tests/shell/; \
-		_st=$$?; rm -rf "$$_shim"; exit $$_st; \
-	else \
-		"$(SCRIPT_BASH)" scripts/podman/run-shell-tests.sh; \
-	fi
+	"$(SCRIPT_BASH)" scripts/podman/run-shell-tests.sh
 
 # =============================================================================
 # Pre-push Quality Gate
@@ -289,7 +241,7 @@ check-push: ## Pre-push quality gate: fmt + clippy + check + tests + shell tests
 # =============================================================================
 
 .PHONY: test-podman test-podman-quick test-podman-provision
-.PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard purge-guard-state check-guard check-guard-host-exec
+.PHONY: build-guard install-guard install-guard-host-exec reconcile-guard-host-exec uninstall-guard check-guard check-guard-host-exec
 
 test-podman: init-check ## Full Podman harness: Tier 0 (Darwin) + Tiers 1-3
 	$(SCRIPT_BASH) scripts/test-in-podman.sh
@@ -309,7 +261,11 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (RO
 		echo "ERROR: build-guard needs root (install consumes target/ artifacts): sudo make build-guard" >&2; \
 		exit 1; \
 	fi
-	CARGO_TARGET_DIR="$(REPO_ROOT)/target" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+	rm -f "$(REPO_ROOT)/target/release/workspace-guard" \
+		"$(REPO_ROOT)/target/release/workspace-guard.mode" \
+		"$(REPO_ROOT)/target/x86_64-unknown-linux-musl/release/workspace-guard" \
+		"$(REPO_ROOT)/target/x86_64-unknown-linux-musl/release/workspace-guard.mode"
+	WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" CARGO_TARGET_DIR="$(REPO_ROOT)/target" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(REPO_ROOT)/target/agent"
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
@@ -342,13 +298,11 @@ install-guard: ## REMOVED - use install-guard-host-exec
 
 _INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
 install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
-	$(SUDO) $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
+	$(SUDO) WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
+	$(SCRIPT_BASH) scripts/check-guard-host-exec-readonly
 
 uninstall-guard: ## Uninstall git-guard, restore stock git; preserve provision state (requires root)
-	$(SUDO) $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
-
-purge-guard-state: ## Destroy all /usr/lib/workspace-guard state (requires GUARD_PURGE_CONFIRM=1)
-	$(SUDO) $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" purge-guard-state
+	$(SUDO) WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
 
 reconcile-guard-host-exec: build-guard ## Force rebuild + reinstall git guard and aux artifacts (requires root)
 	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
@@ -374,11 +328,7 @@ uninstall-shell-guard: ## Uninstall shell guard, restore stock bash/sh (ROOT)
 	$(SCRIPT_BASH) scripts/uninstall-shell-guard
 
 shell-guard-check: ## Read-only shell guard health check (modes, caps, divert, +i, hash)
-	if [ "$$(id -u)" = "0" ] && [ -x /bin/bash.real ]; then \
-		/bin/bash.real scripts/shell-guard-check "$(REPO_ROOT)"; \
-	else \
-		$(SCRIPT_BASH) scripts/shell-guard-check "$(REPO_ROOT)"; \
-	fi
+	$(SCRIPT_BASH) scripts/shell-guard-check "$(REPO_ROOT)"
 
 # =============================================================================
 # Build
@@ -523,6 +473,29 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	"$(SCRIPT_BASH)" scripts/guard-operator.sh '$*'
 
 # =============================================================================
+# Storage
+# =============================================================================
+
+WS_BACKUP_DEVICE ?= /dev/disk/by-uuid/3466BD2C66BCF02A
+WS_BACKUP_MOUNT ?= /mnt/ws-backup
+WS_BACKUP_USER ?= agent
+
+.PHONY: mount-ws-backup unmount-ws-backup
+mount-ws-backup: ## Mount WS-BACKUP for agent (ROOT)
+	if [ "$$(id -u)" -ne 0 ]; then \
+		echo "ERROR: mount-ws-backup needs root: sudo make mount-ws-backup" >&2; exit 1; \
+	fi
+	uid="$$(id -u "$(WS_BACKUP_USER)")"; gid="$$(id -g "$(WS_BACKUP_USER)")"; \
+		$(SCRIPT_BASH) scripts/mount-storage-device.sh "$(WS_BACKUP_DEVICE)" "$(WS_BACKUP_MOUNT)" \
+		"rw,nosuid,nodev,noexec,uid=$$uid,gid=$$gid,umask=0077"
+
+unmount-ws-backup: ## Unmount WS-BACKUP (ROOT)
+	if [ "$$(id -u)" -ne 0 ]; then \
+		echo "ERROR: unmount-ws-backup needs root: sudo make unmount-ws-backup" >&2; exit 1; \
+	fi
+	$(SCRIPT_BASH) scripts/unmount-storage-device.sh "$(WS_BACKUP_MOUNT)"
+
+# =============================================================================
 # YAML Policy Edit (sudo-gated secure YAML editor; SPEC-YAML-EDIT)
 # =============================================================================
 # Policy YAMLs stay root:root at all times (guard ownership lock). Edits go
@@ -531,6 +504,7 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 # ';' so values may contain spaces; list fields use brackets (paths=[a,b]).
 
 YAML_EDIT := /usr/bin/workspace-yaml-edit
+export FILE KEY FIELDS VALUE EXPECT_SHA256
 
 .PHONY: build-yaml-edit install-yaml-edit
 build-yaml-edit: ## Build workspace-yaml-edit release binary (ROOT)
@@ -548,13 +522,10 @@ install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (R
 	fi
 	install -o root -g root -m 0755 "$(REPO_ROOT)/target/release/workspace-yaml-edit" "$(YAML_EDIT)"
 
-# Root-only yaml-edit recipes must not run through the guarded bash:
-# root execs of the fcap guard fail closed (AT_SECURE == 0). They share
-# SCRIPT_BASH, which is the sealed /bin/bash.real for root (hard error
-# when missing) and plain bash otherwise.
+# YAML recipes use the same guarded interpreter as all other automation.
 YAML_SH := $(SCRIPT_BASH)
 
-.PHONY: yaml-add yaml-remove yaml-set yaml-bootstrap yaml-get yaml-list yaml-validate
+.PHONY: yaml-add yaml-remove yaml-set yaml-bootstrap yaml-unset yaml-remove-comment yaml-delete yaml-get yaml-list yaml-validate yaml-check yaml-format
 yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
@@ -581,6 +552,24 @@ yaml-bootstrap: ## Create a top-level scalar: make yaml-bootstrap FILE=.. KEY=..
 	fi'
 	"$(YAML_SH)" -c '"$(YAML_EDIT)" bootstrap "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)'
 
+yaml-unset: ## Remove fields by path: make yaml-unset FILE=.. KEY='hooks[].safety' (ROOT)
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-unset needs root: sudo make yaml-unset" >&2; exit 1; \
+	fi'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" unset "$$FILE" "$$KEY" $(YAML_FLAGS)'
+
+yaml-remove-comment: ## Remove exact comments: make yaml-remove-comment FILE=.. VALUE='text' (ROOT)
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-remove-comment needs root: sudo make yaml-remove-comment" >&2; exit 1; \
+	fi'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" remove-comment "$$FILE" "$$VALUE" $(YAML_FLAGS)'
+
+yaml-delete: ## Delete one reviewed file: make yaml-delete FILE=.. EXPECT_SHA256=.. (ROOT)
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-delete needs root: sudo make yaml-delete" >&2; exit 1; \
+	fi'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" delete "$$FILE" --expected-sha256 "$$EXPECT_SHA256"'
+
 yaml-get: ## Print a scalar: make yaml-get FILE=.. KEY=..
 	"$(YAML_EDIT)" get "$(FILE)" "$(KEY)"
 
@@ -589,6 +578,15 @@ yaml-list: ## Print the file or one list key's block: make yaml-list FILE=.. [KE
 
 yaml-validate: ## Schema-validate a policy file: make yaml-validate FILE=..
 	"$(YAML_EDIT)" validate "$(FILE)"
+
+yaml-check: ## Syntax + schema + splice-shape preflight: make yaml-check FILE=..
+	"$(YAML_EDIT)" check "$(FILE)"
+
+yaml-format: ## Canonicalize indentless block sequences (ROOT): make yaml-format FILE=..
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-format needs root: sudo make yaml-format" >&2; exit 1; \
+	fi'
+	"$(YAML_EDIT)" format "$(FILE)"
 
 # =============================================================================
 # Host Provision

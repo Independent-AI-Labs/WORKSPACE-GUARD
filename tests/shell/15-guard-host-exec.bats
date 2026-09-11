@@ -8,7 +8,7 @@ teardown() { guard_teardown; }
 
 @test "guard-host-exec: host profile resolves vm-ws to host-exec" {
     local ci_root profiles
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     profiles="$GUARD_ROOT/config/shared_host_profiles.yaml"
     run bash -c "
         _guard_dir='$GUARD_ROOT'
@@ -33,7 +33,7 @@ teardown() { guard_teardown; }
 
 @test "guard-host-exec: normalized cap sets match regardless of order" {
     local ci_root
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     run bash -c "
         source \"$ci_root/lib/guard-drift.sh\"
         a=\$(guard_file_cap_normalize 'cap_chown,cap_setpcap=ep')
@@ -45,7 +45,7 @@ teardown() { guard_teardown; }
 
 @test "guard-host-exec: file cap string is five-cap ep set" {
     local ci_root
-    ci_root="$(cd "$GUARD_ROOT/../CI" && pwd)"
+    ci_root="${CI_ROOT:-/opt/workspace-ci}"
     run bash -c "
         source \"$ci_root/lib/guard-drift.sh\"
         guard_workload_file_cap_string
