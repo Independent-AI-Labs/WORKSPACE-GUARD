@@ -36,7 +36,9 @@ export PATH := $(_HB_PREFIX)/opt/coreutils/libexec/gnubin:$(_HB_PREFIX)/opt/gnu-
 _WORKSPACE_GUARD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
 REPO_ROOT := $(patsubst %/,%,$(dir $(_WORKSPACE_GUARD_MK)))
 # Guard builds and tests use the deployed, sanctioned CI checkout.
-CI_DIR := /opt/workspace-ci
+# Overridable for the Podman harness, where CI is the extracted source
+# checkout at /tmp/WORKSPACE-CI instead of the sealed artifact.
+CI_DIR ?= /opt/workspace-ci
 CI_BOOT_NAME := $(if $(filter Darwin,$(_OS)),.boot-macos,.boot-linux)
 CI_BOOT_BIN := $(CI_DIR)/$(CI_BOOT_NAME)/bin
 export PATH := $(CI_BOOT_BIN):$(PATH)

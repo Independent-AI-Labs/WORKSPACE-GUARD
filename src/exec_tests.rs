@@ -78,23 +78,33 @@ fn raise_child_dac_override_returns_without_panic() {
 #[cfg(feature = "capability-mode")]
 #[test]
 fn raise_ambient_caps_returns_error_without_file_caps() {
-    // When running inside the guard's child process (e.g., pre-push hook
-    // triggered cargo test), git.original inherits CAP_DAC_OVERRIDE in
-    // Ambient, which propagates to all descendants including this test
-    // binary. In that context raise_ambient_caps succeeds. When running
-    // as a standalone process (no ambient caps), it fails.
-    let has_ambient = caps::read(None, caps::CapSet::Ambient)
-        .map(|set| set.contains(&caps::Capability::CAP_DAC_OVERRIDE))
-        .unwrap_or(false);
+    // caps::raise(Inheritable, cap) succeeds iff cap is in Permitted.
+    // Permitted holds the guard caps in three legitimate contexts: a
+    // capped guard child (pre-push hook running the suite), container
+    // root, and a test binary that itself carries file caps. Expect
+    // success exactly when Permitted covers the full guard set (kept in
+    // sync with INHERITABLE_CAPS in src/exec.rs), failure otherwise.
+    let permitted = caps::read(None, caps::CapSet::Permitted).unwrap_or_default();
+    let can_raise = [
+        caps::Capability::CAP_SETPCAP,
+        caps::Capability::CAP_CHOWN,
+        caps::Capability::CAP_DAC_OVERRIDE,
+        caps::Capability::CAP_FOWNER,
+        caps::Capability::CAP_FSETID,
+    ]
+    .iter()
+    .all(|c| permitted.contains(c));
     let result = raise_ambient_caps();
-    if has_ambient {
-        assert!(result.is_ok(), "should succeed with ambient caps");
-    } else if nix::unistd::getuid().is_root() {
-        // Rootful containers can raise Inheritable caps without file caps
-        // on the test binary; production enforcement runs as the capped
-        // guard process, not as container root during `cargo test`.
+    if can_raise {
+        assert!(
+            result.is_ok(),
+            "should succeed with guard caps in Permitted"
+        );
     } else {
-        assert!(result.is_err(), "should fail without file caps");
+        assert!(
+            result.is_err(),
+            "should fail without guard caps in Permitted"
+        );
     }
 }
 
@@ -124,6 +134,17 @@ fn is_guard_binary_detects_self_by_inode() {
 #[test]
 fn host_exec_cap_loan_after_inheritable_promotion() {
     if raise_ambient_caps().is_err() {
+        return;
+    }
+    // The fork child raises CAP_DAC_OVERRIDE into Ambient, which
+    // additionally requires CAP_SETPCAP in Effective. Effective survives
+    // exec only for file-cap binaries (the production guard); a plain
+    // test binary exec'd from a capped ancestor loses it, so the loan
+    // path is not exercisable there. Skip when the precondition is absent.
+    let setpcap_effective = caps::read(None, caps::CapSet::Effective)
+        .map(|set| set.contains(&caps::Capability::CAP_SETPCAP))
+        .unwrap_or(false);
+    if !setpcap_effective {
         return;
     }
     // SAFETY: libc::fork is exercised here intentionally so the test suite

@@ -47,13 +47,20 @@ ensure_testagent
 test "$(runuser -u "$_TESTAGENT_USER" -- id -u)" = "$_TESTAGENT_UID"
 _chown_target_for_testagent
 
+# testagent cannot write /root/.cargo; the harness Makefile isolates
+# Cargo caches per uid (/tmp/workspace-guard-cargo-<uid>), so the
+# capability-mode phases get their own registry home.
+_TESTAGENT_CARGO_HOME="/tmp/workspace-guard-cargo-${_TESTAGENT_UID}"
+mkdir -p "$_TESTAGENT_CARGO_HOME"
+chown -R "$_TESTAGENT_USER:$_TESTAGENT_USER" "$_TESTAGENT_CARGO_HOME"
+
 echo "==> Tier 1: unit tests (capability-mode)"
-runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup RUSTUP_TOOLCHAIN=stable; cd \"$_REPO_ROOT\" && cargo test --workspace --bins -- --skip no_markers_hit_neither --skip lock_scope_skips_unrelated_tmp_repo --skip run_out_of_scope_repo_yields_no_drift"
+runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=\"${_TESTAGENT_CARGO_HOME}\" RUSTUP_HOME=/root/.rustup RUSTUP_TOOLCHAIN=stable; cd \"$_REPO_ROOT\" && cargo test --workspace --bins -- --skip no_markers_hit_neither --skip lock_scope_skips_unrelated_tmp_repo --skip run_out_of_scope_repo_yields_no_drift"
 
 _chown_target_for_testagent
 
 echo "==> Tier 1: integration tests (capability-mode, as $_TESTAGENT_USER)"
-runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup; cd \"$_REPO_ROOT\" && cargo test --test integration_test"
+runuser -u "$_TESTAGENT_USER" -- bash -c "export PATH=\"${_CARGO_BIN}:\$PATH\" CARGO_HOME=\"${_TESTAGENT_CARGO_HOME}\" RUSTUP_HOME=/root/.rustup; cd \"$_REPO_ROOT\" && cargo test --test integration_test"
 
 echo "==> Tier 1: integration tests (root-only, as root)"
 cargo test --no-default-features --features root-only --test integration_test
