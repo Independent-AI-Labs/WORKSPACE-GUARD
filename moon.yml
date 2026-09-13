@@ -25,7 +25,7 @@ tags:
 # per inherited_boot_dirs above. This dependsOn edge MUST
 # match (SPEC §8.2). Reverse direction (CI depending on GUARD) is invalid.
 dependsOn:
-  - 'ci'
+  - 'workspace-ci'
 
 # Tasks wrap the Makefile contract. `inputs:` are declared on cacheable
 # tasks (lint, type-check, test, check) so affected checks can skip
