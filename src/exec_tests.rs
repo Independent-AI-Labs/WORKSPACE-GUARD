@@ -77,14 +77,20 @@ fn raise_child_dac_override_returns_without_panic() {
 
 #[cfg(feature = "capability-mode")]
 #[test]
-fn raise_ambient_caps_returns_error_without_file_caps() {
-    // caps::raise(Inheritable, cap) succeeds iff cap is in Permitted.
-    // Permitted holds the guard caps in three legitimate contexts: a
-    // capped guard child (pre-push hook running the suite), container
-    // root, and a test binary that itself carries file caps. Expect
-    // success exactly when Permitted covers the full guard set (kept in
-    // sync with INHERITABLE_CAPS in src/exec.rs), failure otherwise.
+fn raise_ambient_caps_matches_kernel_inheritable_rule() {
+    // Kernel capset rule for adding to the Inheritable set: the cap must
+    // already be in Inheritable or Permitted, OR CAP_SETPCAP is Effective
+    // and the cap is in the Bounding set. The guard loans its caps to
+    // children through Inheritable (the binary's file caps are +ep:
+    // Effective only), so a capped child - e.g. the pre-push hook running
+    // this suite - carries the loan in Inheritable, NOT Permitted. The
+    // old P-only model mispredicted exactly that context.
+    // Cap list kept in sync with INHERITABLE_CAPS in src/exec.rs.
     let permitted = caps::read(None, caps::CapSet::Permitted).unwrap_or_default();
+    let inheritable = caps::read(None, caps::CapSet::Inheritable).unwrap_or_default();
+    let effective = caps::read(None, caps::CapSet::Effective).unwrap_or_default();
+    let bounding = caps::read(None, caps::CapSet::Bounding).unwrap_or_default();
+    let setpcap_effective = effective.contains(&caps::Capability::CAP_SETPCAP);
     let can_raise = [
         caps::Capability::CAP_SETPCAP,
         caps::Capability::CAP_CHOWN,
@@ -93,17 +99,22 @@ fn raise_ambient_caps_returns_error_without_file_caps() {
         caps::Capability::CAP_FSETID,
     ]
     .iter()
-    .all(|c| permitted.contains(c));
+    .all(|c| {
+        permitted.contains(c)
+            || inheritable.contains(c)
+            || (setpcap_effective && bounding.contains(c))
+    });
+    let dump = format!("P={permitted:?} I={inheritable:?} E={effective:?} B={bounding:?}");
     let result = raise_ambient_caps();
     if can_raise {
         assert!(
             result.is_ok(),
-            "should succeed with guard caps in Permitted"
+            "should succeed when every guard cap is raisable (kernel I-set rule); {dump}"
         );
     } else {
         assert!(
             result.is_err(),
-            "should fail without guard caps in Permitted"
+            "should fail when a guard cap is not raisable (kernel I-set rule); {dump}"
         );
     }
 }
