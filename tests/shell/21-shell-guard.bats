@@ -749,6 +749,13 @@ line2" ]
     [ "$output" -le 65536 ]
 }
 
+@test "shell-guard: NOFILE soft equals the clamped hard limit" {
+    require_root_guard
+    run shg -c 'printf "%s %s" "$(ulimit -Sn)" "$(ulimit -Hn)"'
+    [ "$status" -eq 0 ]
+    [ "${output% *}" = "${output#* }" ]
+}
+
 # ---------- size limits and byte edge cases ----------
 
 @test "shell-guard: -c string over 1 MiB exits 2" {

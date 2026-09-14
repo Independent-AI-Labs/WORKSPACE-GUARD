@@ -140,7 +140,7 @@ Invariants enforced by the current code:
   `PATH`.
 - Config-key glob deny list on `-c` / `--config` / `--config-env`
   (`config/git_guard_policy_matrix.yaml`).
-- `RLIMIT_NOFILE` clamp on guard children (4096, from
+- `RLIMIT_NOFILE` clamp on guard children (65536, from
   `config/git_guard_resource_limits.yaml`).
 - `git fetch` refspecs restricted to ref names; arbitrary URL refspecs are
   blocked.

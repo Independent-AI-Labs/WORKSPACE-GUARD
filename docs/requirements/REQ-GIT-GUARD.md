@@ -821,7 +821,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   may become `String` only after their exact grammar validates the complete byte
   sequence; opaque helper stdout/stderr remains byte evidence. Terminal output
   and audit records use reversible framing and shall decode to the original bytes.
-- **REQ-GGUARD-124**: The binary shall set its own `RLIMIT_NOFILE` to a reasonable limit (e.g., 256) and `RLIMIT_CORE` to 0 (no core dumps) before exec-ing real git, to limit blast radius.
+- **REQ-GGUARD-124**: The binary shall set its own `RLIMIT_NOFILE` to a bounded, policy-defined limit (`config/git_guard_resource_limits.yaml`, compiled in at build time; currently 65536 - history: 256, then 4096, then 65536, each raise on EMFILE evidence from legitimate hook/build chains) and `RLIMIT_CORE` to 0 (no core dumps) before exec-ing real git, to limit blast radius.
 - **REQ-GGUARD-125**: The binary shall NOT open any file descriptors other than `/dev/tty`, `/proc/self/stat`, and the real git binary before exec-ing. No temporary files, no log file open during argument processing.
 
 ### 14. Performance

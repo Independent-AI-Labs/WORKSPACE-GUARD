@@ -514,7 +514,15 @@ Allow-list construction from scratch (same rationale as
 SPEC-GIT-GUARD §5.4): a deny-list of env vars is inherently
 incomplete; the allow-list has a closed surface. The guard reads its
 own environment via `secure_getenv()` only. Before `execve()` it
-sets `RLIMIT_CORE` to 0 and `RLIMIT_NOFILE` to 4096.
+sets `RLIMIT_CORE` to 0 and clamps `RLIMIT_NOFILE` - soft and hard
+alike - to the compiled policy constant `NOFILE_LIMIT`, emitted into
+`shell_guard_config.rs` at build time from
+`config/git_guard_resource_limits.yaml` (currently 65536; raised
+256 -> 4096 -> 65536 as legitimate hook and build chains hit EMFILE,
+the last on 2026-09-14). Both limits are set to the clamped value so
+the child's ceiling does not depend on the launch path's inherited
+soft limit (cap-only `min()` semantics left PAM-launched shells at
+soft=1024 - corrected 2026-09-14).
 
 ---
 

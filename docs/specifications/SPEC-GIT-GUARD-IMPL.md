@@ -174,7 +174,10 @@ copy race, or digest mismatch aborts before capability labeling.
 ### 8.6 Resource Limits
 
 Before `execve()`, the guard sets:
-- `RLIMIT_NOFILE` to 256: limits open file descriptors
+- `RLIMIT_NOFILE` (soft and hard) to the policy value from
+  `config/git_guard_resource_limits.yaml`, compiled in as
+  `NOFILE_LIMIT` (currently 65536 - raised from 256 to 4096 and then
+  65536 as legitimate hook and build chains hit EMFILE)
 - `RLIMIT_CORE` to 0: disables core dumps from the capability-enabled process
 
 Set via `nix::sys::resource::setrlimit()` (safe wrapper over `setrlimit(2)`).
@@ -312,7 +315,7 @@ The guard implements multiple independent layers of defense:
 8. **Pre-commit Hooks**: Second layer of defense at the repo level
 9. **Audit Logging**: All blocks logged with timestamps, UIDs, and commands
 10. **Static Linking**: No shared library injection vectors
-11. **Resource Limits**: RLIMIT_CORE=0, RLIMIT_NOFILE=256 limit blast radius
+11. **Resource Limits**: RLIMIT_CORE=0, RLIMIT_NOFILE=policy value (65536) limit blast radius
 
 ### 9.4 Blast Radius
 
@@ -322,7 +325,7 @@ If the guard binary has a bug that allows arbitrary code execution with its four
 - No network I/O, no file parsing, no deserialisation
 - No heap allocations from untrusted input (argv is bounded)
 - `RLIMIT_CORE=0` prevents core dump analysis
-- `RLIMIT_NOFILE=256` limits file descriptor exhaustion
+- `RLIMIT_NOFILE` policy clamp (65536) limits file descriptor exhaustion
 - The only privileged operation is `execve()` of a known-good binary
 
 The worst-case guard RCE receives `CAP_SETPCAP`, `CAP_CHOWN`,

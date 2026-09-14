@@ -357,12 +357,13 @@ fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
 
 fn set_rlimits() {
     use nix::sys::resource::{getrlimit, setrlimit, Resource};
-    if let Ok((soft, hard)) = getrlimit(Resource::RLIMIT_NOFILE) {
-        let _ = setrlimit(
-            Resource::RLIMIT_NOFILE,
-            soft.min(shell_config::NOFILE_LIMIT),
-            hard.min(shell_config::NOFILE_LIMIT),
-        );
+    if let Ok((_, hard)) = getrlimit(Resource::RLIMIT_NOFILE) {
+        let capped = hard.min(shell_config::NOFILE_LIMIT);
+        // Soft is raised to the clamped hard value: cap-only min()
+        // semantics left PAM-launched shells at soft=1024 and build
+        // tools never raise their own soft limit (2026-09-14 review).
+        // Raising soft is unprivileged and cannot exceed the clamp.
+        let _ = setrlimit(Resource::RLIMIT_NOFILE, capped, capped);
     }
     let _ = setrlimit(Resource::RLIMIT_CORE, 0, 0);
 }
