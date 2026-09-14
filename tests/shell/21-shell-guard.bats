@@ -742,11 +742,11 @@ line2" ]
     [ "$output" = "0" ]
 }
 
-@test "shell-guard: NOFILE is capped at 4096 in the child" {
+@test "shell-guard: NOFILE is capped at the policy limit in the child" {
     require_root_guard
     run shg -c 'ulimit -n'
     [ "$status" -eq 0 ]
-    [ "$output" -le 4096 ]
+    [ "$output" -le 65536 ]
 }
 
 # ---------- size limits and byte edge cases ----------

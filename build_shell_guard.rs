@@ -55,7 +55,7 @@ struct ShellMatrixCase {
     ctx: String,
 }
 
-pub fn emit_shell_guard_config(manifest: &Path) {
+pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
     let config_dir = manifest.join("config");
     let policy_text = fs::read_to_string(config_dir.join("shell_guard_policy.yaml"))
         .expect("build.rs: failed to read shell_guard_policy.yaml");
@@ -145,9 +145,16 @@ pub fn emit_shell_guard_config(manifest: &Path) {
     }
     code.push_str("];\n");
 
+    code.push_str("// --- git_guard_resource_limits.yaml ---\n");
+    code.push_str(&format!(
+        "pub const NOFILE_LIMIT: u64 = {};\n",
+        nofile_limit
+    ));
+
     let out_dir = env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("shell_guard_config.rs"), code).unwrap();
 
     println!("cargo:rerun-if-changed=config/shell_guard_policy.yaml");
     println!("cargo:rerun-if-changed=config/shell_guard_policy_matrix.yaml");
+    println!("cargo:rerun-if-changed=config/git_guard_resource_limits.yaml");
 }

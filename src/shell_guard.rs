@@ -358,7 +358,11 @@ fn build_envp(staged_script: Option<&Path>) -> Vec<CString> {
 fn set_rlimits() {
     use nix::sys::resource::{getrlimit, setrlimit, Resource};
     if let Ok((soft, hard)) = getrlimit(Resource::RLIMIT_NOFILE) {
-        let _ = setrlimit(Resource::RLIMIT_NOFILE, soft.min(4096), hard.min(4096));
+        let _ = setrlimit(
+            Resource::RLIMIT_NOFILE,
+            soft.min(shell_config::NOFILE_LIMIT),
+            hard.min(shell_config::NOFILE_LIMIT),
+        );
     }
     let _ = setrlimit(Resource::RLIMIT_CORE, 0, 0);
 }

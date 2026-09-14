@@ -448,5 +448,5 @@ fn main() {
         build_binary_guard::emit_binary_guard_config(Path::new(&manifest));
     }
 
-    build_shell_guard::emit_shell_guard_config(Path::new(&manifest));
+    build_shell_guard::emit_shell_guard_config(Path::new(&manifest), limits.nofile);
 }
