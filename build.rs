@@ -36,6 +36,11 @@ struct SubcommandsConfig {
     sudo_gated: Vec<String>,
     partial: Vec<String>,
     contract_check: Vec<String>,
+    /// Read-only subcommands eligible for dangerous-config sanitization
+    /// (REQ-GGUARD-043). Empty until the operator populates it: the
+    /// compiled empty list keeps today's block-everything behavior.
+    #[serde(default)]
+    read_only: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -190,11 +195,42 @@ fn emit_u64(buf: &mut String, name: &str, val: u64) {
     buf.push_str(&format!("pub const {}: u64 = {};\n", name, val));
 }
 
+/// Subcommand named by a matrix case argv: first plain token, skipping
+/// global config options and their operands (`-c key=value`).
+fn case_subcommand(argv: &[String]) -> Option<&str> {
+    let mut skip_operand = false;
+    for t in argv.iter().skip(1) {
+        if skip_operand {
+            skip_operand = false;
+        } else if t == "-c" || t == "--config" || t == "--config-env" {
+            skip_operand = true;
+        } else if !t.starts_with('-') {
+            return Some(t);
+        }
+    }
+    None
+}
+
 fn validate_policy_matrix(subcommands: &SubcommandsConfig, matrix: &PolicyMatrixConfig) {
+    let all_categorized: Vec<&String> = subcommands
+        .blocked
+        .iter()
+        .chain(subcommands.sudo_gated.iter())
+        .chain(subcommands.partial.iter())
+        .collect();
+    for sub in subcommands.read_only.iter() {
+        assert!(
+            !all_categorized.contains(&sub),
+            "build.rs: read_only subcommand {:?} also appears in a policy category",
+            sub
+        );
+    }
     let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut sanitized_covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut has_dangerous_c_block = false;
     for case in &matrix.cases {
         assert!(
-            case.expect == "blocked" || case.expect == "allowed",
+            case.expect == "blocked" || case.expect == "allowed" || case.expect == "sanitized",
             "build.rs: policy matrix case {:?} has invalid expect {:?}",
             case.id,
             case.expect
@@ -205,25 +241,45 @@ fn validate_policy_matrix(subcommands: &SubcommandsConfig, matrix: &PolicyMatrix
                 case.id
             );
         }
-        if let Some(sub) = case.argv.get(1) {
-            if !sub.starts_with('-') {
-                covered.insert(sub.clone());
-            }
+        if case.expect == "sanitized" {
+            let sub = case_subcommand(&case.argv)
+                .unwrap_or_else(|| panic!("build.rs: case {:?} names no subcommand", case.id));
+            assert!(
+                subcommands.read_only.iter().any(|s| s == sub),
+                "build.rs: sanitized case {:?} targets non-read-only subcommand {:?}",
+                case.id,
+                sub
+            );
+            sanitized_covered.insert(sub.to_string());
+        }
+        if case.expect == "blocked" && case.argv.get(1).map(String::as_str) == Some("-c") {
+            has_dangerous_c_block = true;
+        }
+        if let Some(sub) = case_subcommand(&case.argv) {
+            covered.insert(sub.to_string());
         }
     }
 
-    for sub in subcommands
-        .blocked
-        .iter()
-        .chain(subcommands.sudo_gated.iter())
-        .chain(subcommands.partial.iter())
-    {
+    for sub in all_categorized {
         if !covered.contains(sub) {
             panic!(
                 "build.rs: git_guard_policy_matrix.yaml missing case for subcommand {:?}",
                 sub
             );
         }
+    }
+    if !subcommands.read_only.is_empty() {
+        for sub in subcommands.read_only.iter() {
+            assert!(
+                sanitized_covered.contains(sub),
+                "build.rs: read_only subcommand {:?} needs a sanitized policy matrix case",
+                sub
+            );
+        }
+        assert!(
+            has_dangerous_c_block,
+            "build.rs: read_only list needs a negative matrix case: dangerous -c on a non-read-only subcommand expecting blocked"
+        );
     }
 }
 
@@ -309,6 +365,7 @@ fn main() {
         "CONTRACT_CHECK_SUBCOMMANDS",
         &subcommands.contract_check,
     );
+    emit_str_list(&mut code, "READ_ONLY_SUBCOMMANDS", &subcommands.read_only);
 
     // F19: abbreviation resolution tables. ABBREV_CANDIDATES is the
     // sorted, deduped union of every policy-bearing subcommand list so

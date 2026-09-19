@@ -4,6 +4,7 @@ use crate::args::ArgState;
 fn empty_state(subcommand: &str) -> ArgState {
     ArgState {
         subcommand: Some(subcommand.to_string()),
+        subcommand_raw: Some(subcommand.to_string()),
         has_amend: false,
         has_force_flag: false,
         has_force_with_lease_flag: false,
@@ -18,6 +19,8 @@ fn empty_state(subcommand: &str) -> ArgState {
         has_cached: false,
         has_delete_flag: false,
         dangerous_config_keys: Vec::new(),
+        config_spans: Vec::new(),
+        no_verify_short_idxs: Vec::new(),
     }
 }
 

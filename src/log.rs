@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process;
@@ -68,6 +69,65 @@ pub fn warn(message: &str) {
     }
 }
 
+/// RFC3339 UTC with a `Z` suffix (REQ-GGUARD-045 report/audit grammar).
+pub fn timestamp_utc_z() -> String {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH);
+    let secs: i64 = match now {
+        Ok(d) => d.as_secs() as i64,
+        Err(_) => 0,
+    };
+    let (year, month, day, hour, minute, second) = civil_from_unix(secs);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hour, minute, second
+    )
+}
+
+/// REQ-GGUARD-091 percent encoding for audit/report values: every byte
+/// outside printable ASCII, plus `|` (field separator) and `%` (escape
+/// prefix), becomes an uppercase two-digit hex escape. Byte-exact and
+/// reversibly decodable.
+pub fn pct_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        let printable = (0x21..=0x7e).contains(&b);
+        if printable && b != b'|' && b != b'%' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+/// Append the sanitize audit record to the home log sink (same sink and
+/// O_NOFOLLOW discipline as block/warn). Unlike block/warn this write is
+/// mandatory: a failure is returned so the caller can fail closed with
+/// GuardUnavailable before real git runs (REQ-GGUARD-045).
+pub fn audit_sanitize(report_fields: &str) -> std::io::Result<()> {
+    let uid = getuid().as_raw();
+    let cwd = std::env::current_dir()
+        .map(|p| pct_encode(p.as_os_str().as_bytes()))
+        .unwrap_or_else(|_| "?".to_string());
+    let home = get_user_home(uid)
+        .ok_or_else(|| std::io::Error::other("no home directory for audit sink"))?;
+    let log_path = Path::new(&home).join(LOG_FILE);
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&log_path)?;
+    writeln!(
+        f,
+        "v=1|ts={}|event=sanitize|exit=0|uid={}|cwd={}|{}|reason=read-only%20config%20sanitization",
+        timestamp_utc_z(),
+        uid,
+        cwd,
+        report_fields
+    )?;
+    Ok(())
+}
+
 fn get_user_home(uid: u32) -> Option<String> {
     User::from_uid(Uid::from_raw(uid))
         .ok()
@@ -129,8 +189,35 @@ fn civil_from_unix(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{civil_from_unix, get_user_home};
+    use super::{civil_from_unix, get_user_home, pct_encode, timestamp_utc_z};
     use nix::unistd::getuid;
+
+    #[test]
+    fn pct_encode_printable_passthrough() {
+        assert_eq!(
+            pct_encode(b"core.hooksPath=/evil-x_1"),
+            "core.hooksPath=/evil-x_1"
+        );
+    }
+
+    #[test]
+    fn pct_encode_separators_and_escape() {
+        assert_eq!(pct_encode(b"a|b%c"), "a%7Cb%25c");
+    }
+
+    #[test]
+    fn pct_encode_space_and_non_ascii() {
+        assert_eq!(pct_encode(b"a b\xff"), "a%20b%FF");
+    }
+
+    #[test]
+    fn timestamp_utc_z_shape() {
+        let ts = timestamp_utc_z();
+        assert_eq!(ts.len(), 20);
+        assert!(ts.ends_with('Z'));
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[10..11], "T");
+    }
 
     #[test]
     fn get_home_for_current_user() {

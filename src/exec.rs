@@ -182,15 +182,12 @@ pub fn execve_real_git(
 ) -> Result<(), GuardError> {
     #[cfg(not(feature = "capability-mode"))]
     let _ = git_dir;
+    #[cfg(not(feature = "capability-mode"))]
+    let _ = state;
+    // Dangerous `-c` config decisions happen in the engine (step 3,
+    // sanitize::decide) before this point; argv arriving here is either
+    // clean or the invocation was blocked (SPEC-GIT-GUARD section 4).
     let sudo = crate::is_sudo();
-    if let Some(s) = state {
-        if !s.dangerous_config_keys.is_empty() {
-            return Err(GuardError::Blocked {
-                reason: format!("dangerous -c config key: {}", s.dangerous_config_keys[0]),
-                hint: "Remove the -c flag with the dangerous config key".into(),
-            });
-        }
-    }
 
     verify_git_original()?;
 

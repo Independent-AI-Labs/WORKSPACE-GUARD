@@ -1,9 +1,14 @@
+use crate::sanitize::ConfigSpan;
 use crate::{is_config_key_blocked, GuardError, ABBREV_CANDIDATES, ABBREV_PREFERRED};
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 
+#[derive(Debug, Clone)]
 pub struct ArgState {
     pub subcommand: Option<String>,
+    /// Raw subcommand token as typed (pre abbreviation resolution);
+    /// sanitization matches this byte-exactly (REQ-GGUARD-043).
+    pub subcommand_raw: Option<String>,
     pub has_amend: bool,
     pub has_force_flag: bool,
     pub has_force_with_lease_flag: bool,
@@ -18,6 +23,12 @@ pub struct ArgState {
     pub has_cached: bool,
     pub has_delete_flag: bool,
     pub dangerous_config_keys: Vec<String>,
+    /// Flagged config-option occurrences (flag and operand argv indexes)
+    /// for the sanitizer to strip (REQ-GGUARD-044).
+    pub config_spans: Vec<ConfigSpan>,
+    /// Argv indexes of `-n`/`-N` tokens; blocked only when the resolved
+    /// subcommand defines `-n` as `--no-verify` (REQ-GGUARD-030).
+    pub no_verify_short_idxs: Vec<usize>,
 }
 
 fn resolve_subcommand_abbreviation(raw: &str) -> String {
@@ -53,12 +64,33 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
     raw.to_string()
 }
 
-fn check_and_record_dangerous_config(key: &str, dangerous_keys: &mut Vec<String>) {
+/// Record a blocked config key and, when the originating option token is
+/// known, the span covering it for later stripping. `operand_idx` is set
+/// for the separate-operand forms (`-c key=value`, `--config key=value`).
+fn note_config_key(
+    state: &mut ArgState,
+    flag_idx: Option<usize>,
+    operand_idx: Option<usize>,
+    key: &str,
+) {
     if key.is_empty() {
         return;
     }
-    if is_config_key_blocked(key, crate::is_config_privileged()) {
-        dangerous_keys.push(key.to_string());
+    if !is_config_key_blocked(key, crate::is_config_privileged()) {
+        return;
+    }
+    state.dangerous_config_keys.push(key.to_string());
+    if let Some(f) = flag_idx {
+        let post = state.subcommand_raw.is_some();
+        match state.config_spans.iter_mut().find(|s| s.flag_idx == f) {
+            Some(span) => span.keys.push(key.to_string()),
+            None => state.config_spans.push(ConfigSpan {
+                flag_idx: f,
+                operand_idx,
+                keys: vec![key.to_string()],
+                post_subcommand: post,
+            }),
+        }
     }
 }
 
@@ -74,6 +106,7 @@ pub fn check_null_bytes(argv: &[&[u8]]) -> Result<(), GuardError> {
 pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     let mut state = ArgState {
         subcommand: None,
+        subcommand_raw: None,
         has_amend: false,
         has_force_flag: false,
         has_force_with_lease_flag: false,
@@ -88,10 +121,13 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         has_cached: false,
         has_delete_flag: false,
         dangerous_config_keys: Vec::new(),
+        config_spans: Vec::new(),
+        no_verify_short_idxs: Vec::new(),
     };
 
     let mut past_separator = false;
     let mut expecting_config = false;
+    let mut pending_config_flag: Option<usize> = None;
     let mut i = 1;
 
     while i < argv.len() {
@@ -110,30 +146,42 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
 
         if expecting_config {
             if let Some(pos) = arg_str.find('=') {
-                let key = arg_str[..pos].trim();
-                check_and_record_dangerous_config(key, &mut state.dangerous_config_keys);
-            } else if is_config_key_blocked(arg_str.trim(), crate::is_config_privileged()) {
-                state.dangerous_config_keys.push(arg_str.to_string());
+                note_config_key(
+                    &mut state,
+                    pending_config_flag,
+                    Some(i),
+                    arg_str[..pos].trim(),
+                );
+            } else {
+                note_config_key(&mut state, pending_config_flag, Some(i), arg_str.trim());
             }
             expecting_config = false;
+            pending_config_flag = None;
             i += 1;
             continue;
         }
 
-        if arg == b"-c" || arg == b"-C" {
+        if arg == b"-c" {
             expecting_config = true;
+            pending_config_flag = Some(i);
             i += 1;
             continue;
         }
 
-        if arg.len() >= 3
-            && (arg[0] == b'-' && (arg[1] == b'c' || arg[1] == b'C') && arg[2] != b'\0')
-        {
+        if arg == b"-C" {
+            // -C changes the working directory; it is never a config
+            // option (REQ-GGUARD-011). Skip the directory operand.
+            i += 2;
+            continue;
+        }
+
+        if arg.len() >= 3 && arg[0] == b'-' && arg[1] == b'c' && arg[2] != b'\0' {
             let rest = &arg[2..];
             if let Ok(rest_str) = std::str::from_utf8(rest) {
                 if let Some(eq_pos) = rest_str.find('=') {
-                    let key = rest_str[..eq_pos].trim();
-                    check_and_record_dangerous_config(key, &mut state.dangerous_config_keys);
+                    note_config_key(&mut state, Some(i), None, rest_str[..eq_pos].trim());
+                } else {
+                    note_config_key(&mut state, Some(i), None, rest_str.trim());
                 }
             }
             i += 1;
@@ -162,11 +210,13 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 }
                 "--config" => {
                     expecting_config = true;
+                    pending_config_flag = Some(i);
                     i += 1;
                     continue;
                 }
                 "--config-env" => {
                     expecting_config = true;
+                    pending_config_flag = Some(i);
                     i += 1;
                     continue;
                 }
@@ -183,8 +233,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 s if s.starts_with("--config=") => {
                     let val = &s["--config=".len()..];
                     if let Some(eq) = val.find('=') {
-                        let key = val[..eq].trim();
-                        check_and_record_dangerous_config(key, &mut state.dangerous_config_keys);
+                        note_config_key(&mut state, Some(i), None, val[..eq].trim());
                     }
                     i += 1;
                     continue;
@@ -192,8 +241,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 s if s.starts_with("--config-env=") => {
                     let val = &s["--config-env=".len()..];
                     if let Some(eq) = val.find('=') {
-                        let key = val[..eq].trim();
-                        check_and_record_dangerous_config(key, &mut state.dangerous_config_keys);
+                        note_config_key(&mut state, Some(i), None, val[..eq].trim());
                     }
                     i += 1;
                     continue;
@@ -221,14 +269,10 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if arg_str.contains('=') && arg_str.starts_with("--") {
                 let eq_pos = arg_str.find('=').unwrap();
                 let flag_key = &arg_str[2..eq_pos];
-                if flag_key == "c" || flag_key == "C" {
+                if flag_key == "c" {
                     let val = &arg_str[eq_pos + 1..];
                     if let Some(val_eq) = val.find('=') {
-                        let cfg_key = val[..val_eq].trim();
-                        check_and_record_dangerous_config(
-                            cfg_key,
-                            &mut state.dangerous_config_keys,
-                        );
+                        note_config_key(&mut state, Some(i), None, val[..val_eq].trim());
                     }
                 }
             }
@@ -240,32 +284,34 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             let flags = &arg[1..];
             for (idx, &ch) in flags.iter().enumerate() {
                 match ch {
-                    b'c' | b'C' => {
+                    b'c' => {
                         let remaining = &flags[idx + 1..];
                         if !remaining.is_empty() {
                             if let Ok(rest_str) = std::str::from_utf8(remaining) {
                                 if let Some(eq_pos) = rest_str.find('=') {
-                                    let key = rest_str[..eq_pos].trim();
-                                    check_and_record_dangerous_config(
-                                        key,
-                                        &mut state.dangerous_config_keys,
+                                    note_config_key(
+                                        &mut state,
+                                        Some(i),
+                                        None,
+                                        rest_str[..eq_pos].trim(),
                                     );
                                 }
                             }
                         } else {
                             expecting_config = true;
+                            pending_config_flag = Some(i);
                         }
                         break;
                     }
+                    b'C' => break, // bundled -C: rest of the bundle is a directory path
                     b'f' => state.has_force_flag = true,
                     b'D' => state.has_branch_d = true,
                     b'M' => state.has_branch_force_rename = true,
                     b'd' => state.has_delete_flag = true,
                     b'n' | b'N' => {
-                        return Err(GuardError::Blocked {
-                            reason: "-n flag (short form of --no-verify)".into(),
-                            hint: "Remove -n: hooks enforce policy".into(),
-                        });
+                        // Blocked post-scan only where the command grammar
+                        // defines -n as --no-verify (REQ-GGUARD-030).
+                        state.no_verify_short_idxs.push(i);
                     }
                     _ => {}
                 }
@@ -277,6 +323,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         if state.subcommand.is_none() && !arg_str.is_empty() && !arg_str.starts_with('-') {
             let resolved = resolve_subcommand_abbreviation(arg_str);
             state.subcommand = Some(resolved.clone());
+            state.subcommand_raw = Some(arg_str.to_string());
 
             if resolved == "stash" {
                 let mut past_dash = false;
@@ -383,6 +430,27 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 hint: "Remove --hard from the command".into(),
             });
         }
+    }
+
+    // REQ-GGUARD-030: `-n` is the `--no-verify` short alias only on the
+    // subcommands whose grammar defines it (commit, am). Elsewhere it is
+    // a different option (log -n <max-count>, push -n dry-run, tag -n,
+    // revert/cherry-pick -n no-commit) and stays allowed. Category-
+    // blocked subcommands keep the pinned -n block reason from the
+    // attack surface matrix (the invocation is dead either way).
+    let no_verify_sub = state
+        .subcommand
+        .as_deref()
+        .map(|s| {
+            crate::sanitize::NO_VERIFY_SHORT_SUBCOMMANDS.contains(&s)
+                || crate::BLOCKED_SUBCOMMANDS.contains(&s)
+        })
+        .unwrap_or(false);
+    if no_verify_sub && !state.no_verify_short_idxs.is_empty() {
+        return Err(GuardError::Blocked {
+            reason: "-n flag (short form of --no-verify)".into(),
+            hint: "Remove -n: hooks enforce policy (commit/am)".into(),
+        });
     }
 
     Ok(state)

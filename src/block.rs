@@ -7,7 +7,63 @@ use crate::{
     PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, SUDO_GATED_SUBCOMMANDS, VALUE_TAKING_OPTS,
 };
 
+/// Full policy check (categories plus subcommand rules) for test
+/// harnesses; the engine in main.rs runs the two halves separately with
+/// sanitize::decide between them (SPEC-GIT-GUARD section 4 order).
+#[cfg(test)]
 pub fn check_blocked(
+    state: &ArgState,
+    subcommand: &str,
+    argv_os: &[OsString],
+    git_path: &str,
+    cwd: Option<&str>,
+) -> Result<(), GuardError> {
+    check_categories(subcommand, argv_os)?;
+    check_subcommand_rules(state, subcommand, argv_os, git_path, cwd)
+}
+
+/// Engine step 1: category dispatch (blocked / sudo-gated / partial).
+/// The `config` branch is NOT here: its dangerous-key checks are the
+/// dangerous-config decision of step 3 plus subcommand rules of step 4,
+/// so the whole branch lives in check_subcommand_rules.
+pub fn check_categories(subcommand: &str, argv_os: &[OsString]) -> Result<(), GuardError> {
+    let operator_root = crate::is_config_privileged();
+    if SUDO_GATED_SUBCOMMANDS.contains(&subcommand) {
+        // Destructive checkout/switch before sudo-gate: agents must see the
+        // discard reason, not a generic non-root denial.
+        if let Some(kind) = destructive_checkout_or_switch(subcommand, argv_os) {
+            return Err(GuardError::Blocked {
+                reason: format!("git {} ({})", subcommand, kind),
+                hint: "Destructive checkout/switch is forbidden for all users".into(),
+            });
+        }
+        if !operator_root {
+            return Err(GuardError::Blocked {
+                reason: format!(
+                    "sudo-gated subcommand: git {} (non-root denied)",
+                    subcommand
+                ),
+                hint: format!(
+                    "Run with sudo: 'sudo git {}' (root-only operation)",
+                    subcommand
+                ),
+            });
+        }
+    } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
+        return Err(GuardError::Blocked {
+            reason: format!("destructive subcommand: git {}", subcommand),
+            hint: format!(
+                "Use a non-destructive git command instead of {}",
+                subcommand
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Engine steps 4-6: subcommand-specific rules, protected-branch checks,
+/// env bypass vars.
+pub fn check_subcommand_rules(
     state: &ArgState,
     subcommand: &str,
     argv_os: &[OsString],
@@ -55,35 +111,6 @@ pub fn check_blocked(
                 });
             }
         }
-    } else if SUDO_GATED_SUBCOMMANDS.contains(&subcommand) {
-        // Destructive checkout/switch before sudo-gate: agents must see the
-        // discard reason, not a generic non-root denial.
-        if let Some(kind) = destructive_checkout_or_switch(subcommand, argv_os) {
-            return Err(GuardError::Blocked {
-                reason: format!("git {} ({})", subcommand, kind),
-                hint: "Destructive checkout/switch is forbidden for all users".into(),
-            });
-        }
-        if !operator_root {
-            return Err(GuardError::Blocked {
-                reason: format!(
-                    "sudo-gated subcommand: git {} (non-root denied)",
-                    subcommand
-                ),
-                hint: format!(
-                    "Run with sudo: 'sudo git {}' (root-only operation)",
-                    subcommand
-                ),
-            });
-        }
-    } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
-        return Err(GuardError::Blocked {
-            reason: format!("destructive subcommand: git {}", subcommand),
-            hint: format!(
-                "Use a non-destructive git command instead of {}",
-                subcommand
-            ),
-        });
     }
 
     if subcommand == "rm" && !state.has_cached {

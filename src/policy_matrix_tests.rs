@@ -58,7 +58,7 @@ fn evaluate_case(case: &PolicyMatrixCase) -> Result<(), String> {
     let bytes = argv_bytes(&case.argv);
     args::check_null_bytes(&bytes).map_err(|e| format!("null-byte check: {e:?}"))?;
 
-    let state = match args::parse_args(&bytes) {
+    let mut state = match args::parse_args(&bytes) {
         Ok(s) => s,
         Err(GuardError::Blocked { reason, .. }) => {
             if case.expect == "blocked" {
@@ -80,20 +80,51 @@ fn evaluate_case(case: &PolicyMatrixCase) -> Result<(), String> {
         Err(e) => return Err(format!("case {}: parse_args error: {e:?}", case.id)),
     };
 
+    // Engine step 3 (pure core): sanitize read-only invocations, block
+    // dangerous config everywhere else.
+    let os = argv_os(&case.argv);
+    let mut sanitized = false;
+    let os_effective = match crate::sanitize::plan(crate::READ_ONLY_SUBCOMMANDS, &state, &os) {
+        Ok(Some(p)) => {
+            sanitized = true;
+            state.dangerous_config_keys.clear();
+            state.config_spans.clear();
+            p.argv
+        }
+        Ok(None) => os,
+        Err(GuardError::Blocked { reason, .. }) => {
+            if case.expect == "blocked" {
+                if let Some(needle) = &case.reason_contains {
+                    if !reason.to_lowercase().contains(&needle.to_lowercase()) {
+                        return Err(format!(
+                            "case {}: expected reason containing {:?}, got {:?}",
+                            case.id, needle, reason
+                        ));
+                    }
+                }
+                return Ok(());
+            }
+            return Err(format!(
+                "case {}: sanitize blocked unexpectedly: {}",
+                case.id, reason
+            ));
+        }
+        Err(e) => return Err(format!("case {}: sanitize error: {e:?}", case.id)),
+    };
+
     let sub = state
         .subcommand
         .as_deref()
         .or_else(|| case.argv.get(1).map(String::as_str))
         .unwrap_or("");
-    let os = argv_os(&case.argv);
-    let block_result = check_blocked(&state, sub, &os, "/nonexistent-git", None);
+    let block_result = check_blocked(&state, sub, &os_effective, "/nonexistent-git", None);
 
     match block_result {
         Err(GuardError::Blocked { reason, .. }) => {
             if case.expect != "blocked" {
                 return Err(format!(
-                    "case {}: expected allowed, blocked: {}",
-                    case.id, reason
+                    "case {}: expected {}, blocked: {}",
+                    case.id, case.expect, reason
                 ));
             }
             if let Some(needle) = &case.reason_contains {
@@ -107,13 +138,23 @@ fn evaluate_case(case: &PolicyMatrixCase) -> Result<(), String> {
             Ok(())
         }
         Ok(()) => {
-            if case.expect == "allowed" {
-                Ok(())
-            } else {
+            if case.expect == "blocked" {
                 Err(format!(
                     "case {}: expected blocked, command was allowed",
                     case.id
                 ))
+            } else if case.expect == "sanitized" && !sanitized {
+                Err(format!(
+                    "case {}: expected sanitized, nothing was stripped",
+                    case.id
+                ))
+            } else if case.expect == "allowed" && sanitized {
+                Err(format!(
+                    "case {}: expected allowed without sanitization",
+                    case.id
+                ))
+            } else {
+                Ok(())
             }
         }
         Err(e) => Err(format!("case {}: unexpected error: {e:?}", case.id)),

@@ -73,6 +73,34 @@ fn parse_args_n_short_blocked() {
 }
 
 #[test]
+fn parse_args_n_short_blocked_on_am() {
+    let args = bytes(&["git", "am", "-n", "patch.mbox"]);
+    assert!(parse_args(&args).is_err());
+}
+
+#[test]
+fn parse_args_n_short_allowed_on_log_max_count() {
+    // REQ-GGUARD-030: -n is --max-count under log, not --no-verify.
+    let args = bytes(&["git", "log", "-n", "5"]);
+    let state = parse_args(&args).unwrap();
+    assert_eq!(state.subcommand.as_deref(), Some("log"));
+}
+
+#[test]
+fn parse_args_n_short_allowed_on_push_dry_run() {
+    let args = bytes(&["git", "push", "-n", "origin", "main"]);
+    let state = parse_args(&args).unwrap();
+    assert!(!state.has_delete_flag);
+}
+
+#[test]
+fn parse_args_n_short_allowed_on_cherry_pick_no_commit() {
+    let args = bytes(&["git", "cherry-pick", "-n", "HEAD"]);
+    let state = parse_args(&args).unwrap();
+    assert_eq!(state.subcommand.as_deref(), Some("cherry-pick"));
+}
+
+#[test]
 fn parse_args_n_upper_blocked() {
     let args = bytes(&["git", "commit", "-N", "-m", "msg"]);
     let result = parse_args(&args);
@@ -106,9 +134,58 @@ fn parse_args_c_standalone_dangerous_config() {
 
 #[test]
 fn parse_args_c_attached_dangerous_fsmonitor() {
-    let args = bytes(&["git", "-Ccore.fsmonitor=/evil", "status"]);
+    let args = bytes(&["git", "-ccore.fsmonitor=/evil", "status"]);
     let state = parse_args(&args).unwrap();
     assert!(!state.dangerous_config_keys.is_empty());
+}
+
+#[test]
+fn parse_args_capital_c_is_directory_not_config() {
+    // REQ-GGUARD-011: -C changes directory; the operand is a path and
+    // must never be parsed as a config key.
+    let args = bytes(&["git", "-Ccore.fsmonitor=/evil", "status"]);
+    let state = parse_args(&args).unwrap();
+    assert!(state.dangerous_config_keys.is_empty());
+    assert!(state.config_spans.is_empty());
+    let args = bytes(&["git", "-C", "core.fsmonitor=/evil", "status"]);
+    let state = parse_args(&args).unwrap();
+    assert!(state.dangerous_config_keys.is_empty());
+}
+
+#[test]
+fn parse_args_config_span_separate_operand() {
+    let args = bytes(&["git", "-c", "core.hooksPath=/evil", "log"]);
+    let state = parse_args(&args).unwrap();
+    assert_eq!(state.config_spans.len(), 1);
+    let span = &state.config_spans[0];
+    assert_eq!(span.flag_idx, 1);
+    assert_eq!(span.operand_idx, Some(2));
+    assert!(!span.post_subcommand);
+    assert_eq!(span.keys, vec!["core.hooksPath".to_string()]);
+    assert_eq!(state.subcommand_raw.as_deref(), Some("log"));
+}
+
+#[test]
+fn parse_args_config_span_post_subcommand_flagged() {
+    let args = bytes(&["git", "log", "-c", "core.hooksPath=/evil"]);
+    let state = parse_args(&args).unwrap();
+    assert_eq!(state.config_spans.len(), 1);
+    assert!(state.config_spans[0].post_subcommand);
+}
+
+#[test]
+fn parse_args_config_span_attached_and_benign_untouched() {
+    let args = bytes(&[
+        "git",
+        "-ccore.hooksPath=/evil",
+        "-c",
+        "color.ui=auto",
+        "status",
+    ]);
+    let state = parse_args(&args).unwrap();
+    assert_eq!(state.config_spans.len(), 1);
+    assert_eq!(state.config_spans[0].flag_idx, 1);
+    assert!(state.config_spans[0].operand_idx.is_none());
 }
 
 #[test]

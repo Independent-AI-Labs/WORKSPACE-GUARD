@@ -19,6 +19,7 @@ mod gitdir;
 #[cfg(feature = "capability-mode")]
 mod reconcile;
 mod remote;
+mod sanitize;
 #[cfg(feature = "capability-mode")]
 mod sealed_repo;
 mod vendored;
@@ -42,8 +43,14 @@ pub enum GuardError {
     GitOriginalMissing,
     GitOriginalBadPerms,
     NullByteInArg,
-    Blocked { reason: String, hint: String },
+    Blocked {
+        reason: String,
+        hint: String,
+    },
     ContractFailed(String),
+    /// The guard cannot deliver a sanitize report or persist its audit
+    /// record; real git must not run (REQ-GGUARD-045, exit 3).
+    GuardUnavailable(String),
 }
 
 mod guard_config {
@@ -122,6 +129,10 @@ fn main() {
         Err(GuardError::ContractFailed(msg)) => {
             eprintln!("{}", msg);
             process::exit(4);
+        }
+        Err(GuardError::GuardUnavailable(msg)) => {
+            eprintln!("FATAL: {}", msg);
+            process::exit(3);
         }
         Err(GuardError::MissingCap) => {
             eprintln!(
@@ -324,12 +335,35 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     args::check_null_bytes(&argv)?;
 
     let t = trace_start("parse_args");
-    let state = args::parse_args(&argv)?;
+    let mut state = args::parse_args(&argv)?;
     trace_end(t, "parse_args");
+
+    // SPEC-GIT-GUARD section 4 engine order: 1 categories, 2 destructive
+    // options (parse_args), 3 dangerous -c (sanitize-or-block), then the
+    // subcommand-specific rules on the possibly-rewritten argv.
+    if let Some(ref sub) = state.subcommand {
+        let t = trace_start("check_categories");
+        block::check_categories(sub, argv_os)?;
+        trace_end(t, "check_categories");
+    }
+
+    let t = trace_start("sanitize");
+    let stripped = sanitize::decide(&mut state, argv_os)?;
+    trace_end(t, "sanitize");
+    let argv_effective: Vec<OsString> = match stripped {
+        Some(v) => v,
+        None => argv_os.to_vec(),
+    };
 
     if let Some(ref sub) = state.subcommand {
         let t = trace_start("check_blocked");
-        block::check_blocked(&state, sub, argv_os, crate::GIT_ORIGINAL_PATH, None)?;
+        block::check_subcommand_rules(
+            &state,
+            sub,
+            &argv_effective,
+            crate::GIT_ORIGINAL_PATH,
+            None,
+        )?;
         trace_end(t, "check_blocked");
 
         // Capability-mode ownership lock: claim all paths declared in
@@ -343,7 +377,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         #[cfg(feature = "capability-mode")]
         let git_dir = {
             let t = trace_start("resolve_git_dir+lock");
-            let gd = gitdir::resolve_git_dir(argv_os);
+            let gd = gitdir::resolve_git_dir(&argv_effective);
             if let Some(ref g) = gd {
                 gitdir::lock(g);
                 let t = trace_start("check_sealed_repo");
@@ -356,15 +390,15 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 
         if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
             let t = trace_start("ci_contract_check");
-            exec::check_workspace_ci_contract(sub, argv_os)?;
+            exec::check_workspace_ci_contract(sub, &argv_effective)?;
             trace_end(t, "ci_contract_check");
         }
 
         #[cfg(feature = "capability-mode")]
-        return exec::execve_real_git(argv_os, Some(&state), git_dir.as_deref());
+        return exec::execve_real_git(&argv_effective, Some(&state), git_dir.as_deref());
     }
 
-    exec::execve_real_git(argv_os, Some(&state), None)
+    exec::execve_real_git(&argv_effective, Some(&state), None)
 }
 
 #[cfg(test)]
