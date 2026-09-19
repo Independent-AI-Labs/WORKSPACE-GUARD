@@ -3,8 +3,8 @@ use std::fs;
 use std::os::unix::process::ExitStatusExt;
 
 use crate::{
-    args::ArgState, is_config_key_blocked, GuardError, BLOCKED_BYPASS_VARS, BLOCKED_SUBCOMMANDS,
-    PROTECTED_BRANCHES, PROTECTED_BRANCH_PREFIXES, SUDO_GATED_SUBCOMMANDS, VALUE_TAKING_OPTS,
+    args::ArgState, GuardError, BLOCKED_BYPASS_VARS, BLOCKED_SUBCOMMANDS, PROTECTED_BRANCHES,
+    PROTECTED_BRANCH_PREFIXES, SUDO_GATED_SUBCOMMANDS,
 };
 
 /// Full policy check (categories plus subcommand rules) for test
@@ -85,32 +85,9 @@ pub fn check_subcommand_rules(
                 hint: "Remove the -c flag with the dangerous config key".into(),
             });
         }
-        // Check positional key argument (git config <key> <value>)
-        // Also catches keys after value-taking options like --file <path> <key>
-        let mut skip_next = false;
-        for arg in argv_os.iter().skip(1) {
-            let s = arg.to_string_lossy();
-            if s == "config" {
-                continue;
-            }
-            if skip_next {
-                skip_next = false;
-                continue;
-            }
-            if s.starts_with('-') {
-                let opt = s.split('=').next().unwrap_or(&s);
-                if VALUE_TAKING_OPTS.contains(&opt) {
-                    skip_next = true;
-                }
-                continue;
-            }
-            if is_config_key_blocked(&s, config_privileged) {
-                return Err(GuardError::Blocked {
-                    reason: format!("git config: dangerous config key: {}", s),
-                    hint: "Use a non-dangerous config key instead".into(),
-                });
-            }
-        }
+        // Positional keys: read shapes pass, write shapes block
+        // (policy details in sanitize::config_write_key_check).
+        crate::sanitize::config_write_key_check(argv_os, config_privileged)?;
     }
 
     if subcommand == "rm" && !state.has_cached {

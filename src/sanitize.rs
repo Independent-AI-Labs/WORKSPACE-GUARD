@@ -213,22 +213,88 @@ fn append_liveaudit(dir: &std::path::Path, report: &str) -> std::io::Result<()> 
     writeln!(f, "{}", report)
 }
 
+/// `git config` options that turn the invocation into a write (shared
+/// with block.rs: writes keep the dangerous/sudo-gated key block; a
+/// read shape like `git config user.name` or `--get user.email` only
+/// displays a value and must pass).
+pub const CONFIG_WRITE_OPTS: &[&str] = &[
+    "--add",
+    "--unset",
+    "--unset-all",
+    "--replace-all",
+    "--rename-section",
+    "--remove-section",
+    "--edit",
+];
+
+/// `git config` positional-key policy (engine step 4): only a WRITE
+/// shape blocks. `git config user.name` and `config --get user.email`
+/// are reads (value display, nothing is persisted); a write is any
+/// CONFIG_WRITE_OPTS verb or a second positional (key + value). Under a
+/// write shape the first positional is the key being written and is
+/// blocked retroactively; keys named under a write verb block directly.
+pub fn config_write_key_check(argv_os: &[OsString], privileged: bool) -> Result<(), GuardError> {
+    let block_key = |key: &str| -> Option<GuardError> {
+        if crate::is_config_key_blocked(key, privileged) {
+            Some(GuardError::Blocked {
+                reason: format!("git config: dangerous config key: {}", key),
+                hint: "Use a non-dangerous config key instead".into(),
+            })
+        } else {
+            None
+        }
+    };
+    let mut skip_next = false;
+    let mut write_shape = false;
+    let mut pending_read_key: Option<String> = None;
+    let mut saw_positional = false;
+    for arg in argv_os.iter().skip(1) {
+        let s = arg.to_string_lossy();
+        if s == "config" {
+            continue;
+        }
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if s.starts_with('-') {
+            let opt = s.split('=').next().unwrap_or(&s);
+            if CONFIG_WRITE_OPTS.contains(&opt) {
+                write_shape = true;
+            } else if crate::VALUE_TAKING_OPTS.contains(&opt) {
+                skip_next = true;
+            }
+            continue;
+        }
+        if write_shape {
+            if let Some(e) = block_key(&s) {
+                return Err(e);
+            }
+            continue;
+        }
+        if saw_positional {
+            // second positional: the first was the key of a write
+            if let Some(k) = pending_read_key.take() {
+                if let Some(e) = block_key(&k) {
+                    return Err(e);
+                }
+            }
+            write_shape = true;
+            continue;
+        }
+        saw_positional = true;
+        pending_read_key = Some(s.to_string());
+    }
+    Ok(())
+}
+
 /// Read shape for `git config` (REQ-GGUARD-043): listing and get forms
 /// with display modifiers only. Any write option, unknown option, or a
 /// second positional (key plus value) disqualifies.
 fn config_read_shape(argv_os: &[OsString]) -> bool {
-    // Disqualifying options: write verbs plus --fixed-value (valid with
-    // get forms, but rare; failing closed here only blocks sanitization).
-    const WRITE_OPTS: &[&str] = &[
-        "--add",
-        "--unset",
-        "--unset-all",
-        "--replace-all",
-        "--rename-section",
-        "--remove-section",
-        "--edit",
-        "--fixed-value",
-    ];
+    // --fixed-value is valid with get forms but rare; failing closed
+    // here only blocks sanitization.
+    const WRITE_OPTS: &[&str] = &["--fixed-value"];
     const READ_OPTS: &[&str] = &[
         "--list",
         "-l",
@@ -276,7 +342,7 @@ fn config_read_shape(argv_os: &[OsString]) -> bool {
                 Some((n, _)) => (n, true),
                 None => (s.as_ref(), false),
             };
-            if WRITE_OPTS.contains(&name) {
+            if CONFIG_WRITE_OPTS.contains(&name) || WRITE_OPTS.contains(&name) {
                 return false;
             }
             if !READ_OPTS.contains(&name) {

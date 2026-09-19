@@ -339,6 +339,51 @@ fn config_dangerous_key_blocked() {
     assert!(matches!(result, Err(GuardError::Blocked { .. })));
 }
 
+#[test]
+fn config_read_shape_allows_key_display() {
+    // Reads display a value and persist nothing: sudo-gated identity
+    // keys and dangerous keys must pass as single positionals or under
+    // get forms (Claude Code probes these constantly).
+    for args in [
+        vec!["git", "config", "user.name"],
+        vec!["git", "config", "--get", "user.email"],
+        vec!["git", "config", "core.hooksPath"],
+        vec!["git", "config", "--file", "/tmp/x", "user.name"],
+    ] {
+        let state = empty_state("config");
+        let argv_os = argv(&args);
+        let result = check_blocked(&state, "config", &argv_os, "/nonexistent-git", None);
+        assert!(result.is_ok(), "read should pass: {:?}", args);
+    }
+}
+
+#[test]
+fn config_write_shape_blocks_keys() {
+    for args in [
+        vec!["git", "config", "user.email", "x@y"],
+        vec!["git", "config", "core.hooksPath", "/evil"],
+        vec!["git", "config", "--unset", "user.email"],
+        vec!["git", "config", "--add", "core.hooksPath", "/evil"],
+        vec![
+            "git",
+            "config",
+            "--file",
+            "/tmp/x",
+            "core.hooksPath",
+            "/evil",
+        ],
+    ] {
+        let state = empty_state("config");
+        let argv_os = argv(&args);
+        let result = check_blocked(&state, "config", &argv_os, "/nonexistent-git", None);
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "write should block: {:?}",
+            args
+        );
+    }
+}
+
 #[path = "block_protected_branch_tests.rs"]
 mod protected_branch_tests;
 
