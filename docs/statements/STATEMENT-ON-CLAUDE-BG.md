@@ -1,13 +1,21 @@
 # Декларация на WORKSPACE за Claude и Claude Code
 
+Федеративната репо система WORKSPACE е паркът от независимо
+версионирани, договорно свързани инженерни репозитория на
+организацията, хостван на
+[github.com/orgs/Independent-AI-Labs/repositories](https://github.com/orgs/Independent-AI-Labs/repositories).
+
 - Идентификатор: WS-STATEMENT-2026-09-19-01
 - Дата: 2026-09-19
 - Статус: ПРИЕТА
 - Операторски преглед: Local Admin (root), 2026-09-19
 - Език: български (авторитетна версия на английски:
   `STATEMENT-ON-CLAUDE.md`)
-- Доказателствена база: `../research/RES-ANTHROPIC-LEGAL-REVIEW.md` и
-  `../research/evidence/anthropic/` (дословни снимки с контролни суми)
+- Доказателствена база:
+  [RES-ANTHROPIC-LEGAL-REVIEW.md](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/research/RES-ANTHROPIC-LEGAL-REVIEW.md)
+  и
+  [evidence/anthropic/](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/tree/main/docs/research/evidence/anthropic)
+  (дословни снимки с контролни суми)
 
 ## Решение
 
@@ -40,7 +48,9 @@ WORKSPACE. Това е окончателна позиция относно ин
    `--no-verify` / `-n`, когато куките се противопоставят. Това е
    документирано в собствения багтракер на Anthropic (тикети 40117 и
    66069) и беше наблюдавано директно срещу git стражата
-   WORKSPACE-GUARD на 2026-09-19. Качествената политика на WORKSPACE
+   WORKSPACE-GUARD
+   (https://github.com/Independent-AI-Labs/WORKSPACE-GUARD) на
+   2026-09-19. Качествената политика на WORKSPACE
    се налага чрез куки по замисъл; инструмент, чиято подразбирана
    позиция е да заобикаля куките, е несъвместим с нея. Стражата
    блокира това по подразбиране и ще продължи да го прави за всеки
@@ -68,21 +78,15 @@ WORKSPACE. Това е окончателна позиция относно ин
 
 ## Последствия
 
-- WORKSPACE-GATEWAY е транспортно прокси. Работата по доставчика
-  Anthropic в него (claude-gw.sh, REQ-PROVIDER-ANTHROPIC,
-  SPEC-PROVIDER-ANTHROPIC, свързаните OAuth плъгини) е прокси
-  инфраструктура, а не инструмент за разработка, и НЕ се засяга от
-  тази декларация; може да се разширява, свързва и merge-ва като
-  всеки друг доставчик.
+- [WORKSPACE-GATEWAY](https://github.com/Independent-AI-Labs/WORKSPACE-GATEWAY)
+  е транспортно прокси; работата по доставчиците в
+  него е инфраструктура и е извън обхвата на тази декларация.
 - Моделите Claude, Claude Code и зависещите от Anthropic асистенти за
   програмиране не трябва да се използват за писане, преглед,
   изменение или commit-ване на код на WORKSPACE и не трябва да се
-  включват в инженерните процеси или в границата на git. Ревютата
-  отхвърлят такива промени.
-- Работата по санитизация на read-only git команди от стражата
-  (REQ-GGUARD-043..046) ПРОДЪЛЖАВА непроменена: заплахата от
-   заобикаляне на куки е обща за инструменти на трети страни и
-   укрепването не е специфично за Claude.
+  включват в инженерните процеси на WORKSPACE.
+- Read-only, санитизираните git заявки на интерактивни инструменти са
+  транспорт, а не интеграция, и остават извън забраната по-горе.
 - Тази декларация се преразглежда само ако Anthropic публикува условия,
   които премахват ограничението за конкуриращи се продукти, предоставя
   реални права на инспекция и предлага отказ от воден знак. Докато
@@ -96,8 +100,10 @@ WORKSPACE. Това е окончателна позиция относно ин
 - Съобщение на Anthropic за воден знак от 2026-08-14: снимка от
   2026-09-19.
 - Тикети 40117 и 66069 в anthropics/claude-code: снимки от 2026-09-19.
-- Дневник на инцидента с git стражата WORKSPACE-GUARD: RESEARCH.md,
+- Дневник на инцидента с git стражата
+  [WORKSPACE-GUARD](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD):
+  RESEARCH.md,
   раздел 8.
 
 Всички снимки са с контролни суми в
-`../research/evidence/anthropic/README.md`.
+[индекса на доказателствата](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/research/evidence/anthropic/README.md).

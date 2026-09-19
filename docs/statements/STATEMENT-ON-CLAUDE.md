@@ -1,14 +1,21 @@
 # WORKSPACE Statement on Claude and Claude Code
 
+The WORKSPACE federated repo system is the organization's fleet of
+independently versioned, contract-linked engineering repositories,
+hosted at
+[github.com/orgs/Independent-AI-Labs/repositories](https://github.com/orgs/Independent-AI-Labs/repositories).
+
 - Statement ID: WS-STATEMENT-2026-09-19-01
 - Date: 2026-09-19
 - Status: ADOPTED
 - Operator review: Local Admin (root), 2026-09-19
 - Language: English (authoritative Bulgarian version:
   `STATEMENT-ON-CLAUDE-BG.md`)
-- Evidence base: `../research/RES-ANTHROPIC-LEGAL-REVIEW.md` and
-  `../research/evidence/anthropic/` (byte-exact snapshots with
-  checksums)
+- Evidence base:
+  [RES-ANTHROPIC-LEGAL-REVIEW.md](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/research/RES-ANTHROPIC-LEGAL-REVIEW.md)
+  and
+  [evidence/anthropic/](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/tree/main/docs/research/evidence/anthropic)
+  (byte-exact snapshots with checksums)
 
 ## Decision
 
@@ -37,7 +44,8 @@ development tooling and are outside this statement's scope.
    local hooks (`core.hooksPath=/dev/null` and related keys) and
    resorts to `--no-verify` / `-n` when hooks resist. This is
    documented in Anthropic's own issue tracker (issues 40117 and
-   66069) and was observed directly against the WORKSPACE-GUARD git
+   66069) and was observed directly against the
+   [WORKSPACE-GUARD](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD) git
    guard on 2026-09-19. WORKSPACE quality policy is hook-enforced by
    design; a tool whose default posture is to defeat hooks is
    incompatible with it. The guard blocks this by default and will
@@ -63,18 +71,14 @@ development tooling and are outside this statement's scope.
 
 ## Consequences
 
-- WORKSPACE-GATEWAY is a transport proxy. Its Anthropic provider work
-  (claude-gw.sh, REQ-PROVIDER-ANTHROPIC, SPEC-PROVIDER-ANTHROPIC,
-  related OAuth plugins) is proxy infrastructure, not development
-  tooling, and is NOT affected by this statement; it may be extended,
-  wired, and merged like any other provider.
+- [WORKSPACE-GATEWAY](https://github.com/Independent-AI-Labs/WORKSPACE-GATEWAY)
+  is a transport proxy; provider work there is
+  infrastructure and outside this statement's scope.
 - Claude models, Claude Code, and Anthropic-dependent coding assistants
   must not be used to write, review, modify, or commit WORKSPACE code,
-  and must not be wired into WORKSPACE engineering pipelines or the git
-  boundary. Reviews reject such changes.
-- The git guard read-only sanitization work (REQ-GGUARD-043..046)
-  PROCEEDS unchanged: the hook-bypass threat is general to third-party
-  agent tools and the hardening is not Claude-specific.
+  and must not be wired into WORKSPACE engineering pipelines.
+- Read-only, sanitized git queries by interactive tools are transport,
+  not integration, and remain outside the prohibition above.
 - This statement is revisited only if Anthropic publishes terms that
    remove the competing-products restriction, grants real inspection
    rights, and offers watermark opt-out. Until all three exist, the
@@ -87,7 +91,8 @@ development tooling and are outside this statement's scope.
 - anthropics/claude-code LICENSE.md: snapshot 2026-09-19.
 - Anthropic watermark announcement 2026-08-14: snapshot 2026-09-19.
 - anthropics/claude-code issues 40117 and 66069: snapshots 2026-09-19.
-- WORKSPACE-GUARD git guard incident log: RESEARCH.md section 8.
+- [WORKSPACE-GUARD](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD)
+  git guard incident log: RESEARCH.md section 8.
 
-All snapshots are checksummed in
-`../research/evidence/anthropic/README.md`.
+All snapshots are checksummed in the
+[evidence index](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/research/evidence/anthropic/README.md).

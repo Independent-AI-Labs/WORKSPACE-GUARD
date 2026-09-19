@@ -5,8 +5,11 @@
 - Operator review: Local Admin (root), 2026-09-19
 - Evidence: `evidence/anthropic/` (byte-exact snapshots, base64-encoded
   text, checksummed)
-- Result document: `../statements/STATEMENT-ON-CLAUDE.md` (EN),
-  `../statements/STATEMENT-ON-CLAUDE-BG.md` (BG)
+- Result document:
+  [STATEMENT-ON-CLAUDE.md](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/statements/STATEMENT-ON-CLAUDE.md)
+  (EN),
+  [STATEMENT-ON-CLAUDE-BG.md](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/statements/STATEMENT-ON-CLAUDE-BG.md)
+  (BG)
 
 ## Purpose
 
@@ -151,7 +154,8 @@ control. Combined with Claim 3 (no lawful license posture) and Claim 1
 ## Conclusion
 
 All four operator claims are verified against primary sources. The
-resulting decision is recorded in `../statements/STATEMENT-ON-CLAUDE.md`
+resulting decision is recorded in
+[STATEMENT-ON-CLAUDE.md](https://github.com/Independent-AI-Labs/WORKSPACE-GUARD/blob/main/docs/statements/STATEMENT-ON-CLAUDE.md)
 and its Bulgarian counterpart. Guard hardening work (REQ-GGUARD-043..046)
 proceeds independently of this decision because the hook-bypass threat
 is general to third-party agent tools, not specific to Claude Code.
