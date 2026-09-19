@@ -1,7 +1,7 @@
 # Requirements: WORKSPACE-GUARD SUID Guard Framework
 
 **Date:** 2026-05-19  
-**Status:** DRAFT  
+**Status:** SUPERSEDED — see `docs/requirements/REQ-GIT-GUARD.md` (ACTIVE)  
 **Type:** Requirements
 
 ---

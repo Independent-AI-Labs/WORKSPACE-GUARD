@@ -284,6 +284,32 @@ allowed control so wildcard overreach is visible. The pinned Git upgrade
 procedure inventories new configuration keys and requires an explicit threat
 classification before the upgrade is accepted.
 
+#### Read-Only Sanitization (REQ-GGUARD-043..046)
+
+When the byte-exact subcommand qualifies for the compiled `read_only`
+category (including the `config` read-shape and `remote`
+`get-url`/`list` shape checks), a dangerous-class key in a leading
+config-bearing global option no longer blocks. Instead the guard removes each
+complete offending option (flag token plus separate operand token) from the
+forwarded argv, forwards every retained byte unchanged, emits the §4.1
+`SANITIZED:` report, appends the §7.1 `sanitize` audit record, and executes
+real Git. The decision is identical for root and non-root.
+
+Qualification is deliberately narrow: a command shape may enter the category
+only when that shape cannot execute any configured program, contact a
+transport, write a ref or config, or mutate the working tree beyond taking or
+refreshing the index lock. This excludes transport-capable queries such as
+`ls-remote` and index-writing commands such as `add`. Sudo-gated flagged keys
+still block for non-root; only dangerous-class keys are strippable. Anything
+not provably in the category keeps the unconditional block: a failed or
+ambiguous shape check never sanitizes (fail closed).
+
+Why strip rather than pass through: a pass-through allowance would let values
+like `core.fsmonitor=<path>` reach Git, and Git spawns a configured fsmonitor
+helper during `status` index refresh, so "read-only" is not "non-executing" for
+every catalog key. Stripping guarantees the stronger invariant: no
+dangerous-config byte reaches real Git on any invocation.
+
 ### 3.4 Subcommand Recognition
 
 The guard does not maintain a catalog of every harmless Git command. It
@@ -292,6 +318,7 @@ classifies only commands carrying policy:
 - `blocked`: unconditional denial;
 - `sudo_gated`: denied to non-root and allowed to the operator path;
 - `partial`: requires command-specific argument policy;
+- `read_only`: qualifies dangerous-class config options for §3.3 sanitization;
 - `contract_check`: invokes the immutable WORKSPACE-CI policy engine;
 - `capability_loan`: may receive Ambient `CAP_DAC_OVERRIDE` while real Git
   executes;
@@ -361,7 +388,13 @@ The guard applies checks in this order. The first block wins: later checks are n
    unconditional destructive-form checks before allowing root. Exact
    subcommand in `partial`? → run its command-specific policy.
 2. Destructive option in the identified command's parsed option state? → BLOCK.
-3. Dangerous `-c`/`--config-env` key? → BLOCK (core.hooksPath, core.sshCommand, etc.)
+3. Dangerous `-c`/`--config-env` key?
+   3a. Subcommand byte-exact in compiled `read_only` category (after its
+       §3.3 shape check) and every flagged key is dangerous-class? →
+       SANITIZE: remove those complete options from the forwarded argv,
+       emit the §4.1 `SANITIZED:` report, append the §7.1 `sanitize` audit
+       record, and continue.
+   3b. Otherwise → BLOCK (core.hooksPath, core.sshCommand, etc.)
 4. Subcommand-specific block?
    4a. branch -D? → BLOCK
    4b. push force option, including `--force-with-lease=<value>`? → BLOCK
@@ -377,6 +410,12 @@ The guard applies checks in this order. The first block wins: later checks are n
    non-success exits 4 and is not an exit-1 policy block.
 8. ALL CLEAR → execve real git
 ```
+
+Sanitize ordering: a 3a decision's §4.1 `SANITIZED:` delivery and §7.1
+`sanitize` audit append both complete before real Git starts; a report or
+persistence failure before Git is typed `GuardUnavailable` exit 3, so the
+guard never executes an argv rewrite it could not report or persist, and
+never reports a rewrite it did not perform.
 
 `stash` is an unconditional category-1 block. The decision occurs before stash
 operation parsing, so bare `stash`, all named operations, unknown future
@@ -475,6 +514,24 @@ UTC `YYYY-MM-DDTHH:MM:SSZ`.
 If the signed system time cannot be represented in that grammar, formatting
 returns a typed failure under REQ-GGUARD-110/092 rather than fabricating the Unix
 epoch or emitting a malformed block/audit record; the policy denial still stands.
+
+Allowed-but-rewritten invocations (§3.3 sanitization, REQ-GGUARD-044) use the
+parallel non-blocking grammar:
+
+```text
+SANITIZED: ts=<RFC3339-UTC-Z>|subcommand=<name>|drops=<decimal>|drop0=<encoded>|...|dropM=<encoded>|argc=<decimal>|arg0=<encoded>|...|argN=<encoded>
+```
+
+One final newline and no other bytes. `drops` counts removed argv tokens; one
+removed token per `dropK` field, exact original bytes, original order;
+`argc`/`argK` carry the complete pre-strip argv with empty arguments and
+boundaries preserved. Encoding, timestamp, and formatter rules are identical
+to `BLOCKED:` above, and the same immutable-evidence-object discipline
+applies so terminal and audit destinations cannot diverge. There is no hint
+line and no exit-code change: delivery follows this section's stderr and
+distinct-terminal rules, and real Git's outcome propagates unchanged under
+REQ-GGUARD-100. Report or audit failure before Git starts is typed exit 3
+with no execution (REQ-GGUARD-045).
 
 The first block in §4's ordered decision engine supplies the sole reason and
 hint; later matching checks are not evaluated and cannot append competing text.
@@ -713,7 +770,8 @@ No other runtime condition may be relabeled as a warning to avoid its policy,
 validation, guard-unavailable, contract, audit, or reconciliation outcome. Trace
 lines, helper stderr, contract streams, and installer output retain their own
 contracts. In particular, background-push detection failure remains an exit-1
-policy denial.
+policy denial. §3.3 read-only sanitization is likewise not a warning: its
+report and audit duties are fixed by §4.1, §7.1, and REQ-GGUARD-045.
 
 Each warning is one immutable byte payload with this exact grammar:
 
@@ -749,8 +807,10 @@ WORKSPACE-CI stdout under §6.2. Contract stderr is likewise streamed under its
 contract and is not helper framing or a guard diagnostic.
 
 Guard diagnostics, warning records, trace records, helper-stderr chunks, and
-post-Git reconcile reports use stderr. Enforced failure reports additionally use
-the distinct-tty rules in §4.1. Successful audit persistence emits no terminal
+post-Git reconcile reports use stderr. Read-only sanitize reports (§4.1) are
+guard diagnostics under this rule and are never written to stdout. Enforced
+failure reports additionally use the
+distinct-tty rules in §4.1. Successful audit persistence emits no terminal
 output. Successful helper protocol stdout remains internal.
 
 Causal ordering is mandatory: pre-Git warnings, trace records, and helper
@@ -939,13 +999,23 @@ Example:
 v=1|ts=2026-05-18T14:32:01Z|event=block|exit=1|uid=1000|cwd=%2Fworkspace|argc=2|arg0=git|arg1=reset|reason=destructive%20subcommand
 ```
 
+`sanitize` example (allowed, argv rewritten under §3.3; original argv plus the
+exact removed tokens):
+
+```
+v=1|ts=2026-09-19T05:32:53Z|event=sanitize|exit=0|uid=1000|cwd=%2Fhome%2Fagent%2FWORKSPACE-VM|argc=4|arg0=git|arg1=-c|arg2=core.hooksPath%3D%2Fdev%2Fnull|arg3=log|subcommand=log|drops=2|drop0=-c|drop1=core.hooksPath%3D%2Fdev%2Fnull|reason=read-only%20config%20sanitization
+```
+
 Fields are fixed-order ASCII `name=value` pairs separated by raw `|`, followed
 by exactly one newline. Values preserve only the approved unreserved ASCII set;
 `%`, delimiters, spaces, CR/LF, controls, and bytes `>=0x7f` use canonical
 uppercase `%HH`. Encoding is fully reversible and performs no redaction. `argc` plus contiguous
 `arg0..argN` fields preserves empty arguments and boundaries; space-joined argv
 is never audited. Event classes are `block`, `contract-reject`,
-`contract-unavailable`, and, only when a separate authoritative sink
+`contract-unavailable`, `sanitize` (allowed invocation, argv rewritten under
+§3.3: `exit=0`, with `subcommand`, `drops`, and indexed `dropK` fields
+carrying the exact removed tokens between the argv fields and the final
+`reason`), and, only when a separate authoritative sink
 successfully stores it, `audit-failure`. Version, names/order,
 decimal forms, and event vocabulary are parser-enforced. Unsupported versions,
 bad escapes, duplicate/missing/reordered fields, count mismatch, unknown classes,
@@ -967,7 +1037,9 @@ per-UID file may be created only inside the verified root-owned directory and is
 immediately secured before any record is accepted. Audit failure never changes
 the denial but is reported through stderr and a distinct tty; it is not silent.
 Exit-1 policy blocks and exit-4 contract failures use this same sink.
-Runtime warnings never open or append this sink.
+Runtime warnings never open or append this sink. `sanitize` events (§7.1) are
+not runtime warnings and use this sink under the same locked append
+discipline as denials.
 
 Audit append returns a typed stage error rather than exiting or discarding an
 error. Parent verification, open/create, metadata, lock, encode, write, sync,

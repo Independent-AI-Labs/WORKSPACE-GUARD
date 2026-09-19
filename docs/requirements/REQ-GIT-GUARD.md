@@ -85,8 +85,9 @@ This document specifies the requirements for the Rust binary. The installation/d
   evade classification.
 - **REQ-GGUARD-012**: The binary shall exactly classify every policy-relevant
   Git subcommand declared in `config/git_guard_subcommands.yaml`: blocked,
-  sudo-gated, partial, contract-check, capability-loan, and
-  mutating/reconciliation categories.
+  sudo-gated, partial, contract-check, capability-loan,
+  mutating/reconciliation, and read-only sanitization (REQ-GGUARD-043)
+  categories.
   Harmless standard commands need no registry entry. Subcommand matching shall
   be byte-exact after valid global-option parsing; the guard shall not invent
   abbreviations or prefix expansion because Git may resolve an unmatched name
@@ -218,6 +219,80 @@ This document specifies the requirements for the Rust binary. The installation/d
   argv-preservation rule does not disable mandatory inherited-environment
   sanitization and does not override REQ-GGUARD-041 rejection of malformed or
   uninspectable keys.
+
+### 5A. Read-Only Invocation Sanitization
+
+- **REQ-GGUARD-043**: The exact-subcommand `read_only` category in
+  `config/git_guard_subcommands.yaml` shall be the sole authority for
+  read-only sanitization qualification. A command shape may be listed only
+  when, in that shape, real Git can execute no configured program (no hooks,
+  aliases, filters, fsmonitor/query helpers, transport or remote helpers, or
+  diff/merge/textconv/pager drivers beyond the sanitized environment), can
+  contact no transport, can write no ref and no config, and can mutate no
+  working-tree or index state other than taking or refreshing the index lock.
+  The initial inventory is exactly: `log`, `show`, `status`, `diff`,
+  `rev-parse`, `ls-files`, `cat-file`, `blame`, `shortlog`, `describe`,
+  `var`, `for-each-ref`, `show-ref`, `name-rev`, `whatchanged`, `grep`,
+  `check-ignore`, `check-attr`; `config` only in read shape (`--list`/`-l`,
+  or `--get`/`--get-all`/`--get-regexp`/`--get-urlmatch`, or exactly one key
+  positional, with display modifiers only); `remote` only bare, `list`, or
+  `get-url`. A `config` shape carrying any write option (`--add`, `--unset`,
+  `--unset-all`, `--replace-all`, `--rename-section`, `--remove-section`,
+  `--edit`) or two or more positionals is not read-only. Qualification is
+  byte-exact on the parsed subcommand with no abbreviation or prefix
+  expansion and follows the pinned command grammar for shape
+  classification; a failed or ambiguous shape check disqualifies the
+  invocation. Build-time validation and the policy matrix shall cover every
+  entry with a positive sanitize case and a negative non-read-only block
+  case, and every pinned Git upgrade shall re-audit the inventory.
+- **REQ-GGUARD-044**: When the identified subcommand qualifies as `read_only`
+  under REQ-GGUARD-043 and the leading global-option region contains
+  config-bearing options whose keys match the dangerous class of
+  REQ-GGUARD-040, the guard shall remove each complete offending option (the
+  flag token and, for separate-operand forms, its operand token) from
+  the argv forwarded to real Git, shall forward every retained argument
+  byte-identically in the original order, and shall proceed without
+  blocking, identically for root and non-root. Only dangerous-class keys
+  qualify: any flagged sudo-gated key retains REQ-GGUARD-068 treatment for
+  non-root, and every repeated flagged occurrence is removed. No byte of a
+  removed option shall reach real Git. Options after subcommand discovery or
+  the applicable `--` separator are command-scoped and shall never be
+  removed. The subcommand and all command-scoped arguments always survive.
+  An invocation with no flagged dangerous key shall be forwarded completely
+  unchanged, with no report and no audit record.
+- **REQ-GGUARD-045**: Every sanitized invocation shall produce exactly one
+  `SANITIZED:` report before real Git starts, delivered to stderr and, when
+  distinct under the REQ-GGUARD-021 terminal-identity rule, to the
+  controlling terminal, using this exact ASCII grammar followed by exactly
+  one final newline:
+  `SANITIZED: ts=<RFC3339-UTC-Z>|subcommand=<name>|drops=<decimal>|drop0=<encoded>|...|dropM=<encoded>|argc=<decimal>|arg0=<encoded>|...|argN=<encoded>`.
+  `drops` counts removed argv tokens; each `dropK` field carries one removed
+  token's exact original bytes in original order; `argc`/`argK` carry the
+  complete pre-strip argv with boundaries preserved; dynamic values use the
+  REQ-GGUARD-091 uppercase `%HH` encoding. The guard shall never emit this
+  or any report to stdout (REQ-GGUARD-113). The guard shall additionally
+  attempt exactly one authoritative audit append under the
+  REQ-GGUARD-090..093 contract with event class `sanitize`, `exit=0`, and
+  the same evidence fields; a `sanitize` event is not a REQ-GGUARD-112
+  runtime warning. Delivery is evidence-mandatory: a report or audit failure
+  before real Git starts shall fail closed as typed `GuardUnavailable` exit
+  3 with no Git execution, and shall never permit an unreported or
+  unpersisted rewrite.
+- **REQ-GGUARD-046**: Read-only sanitization shall not weaken any other
+  rule. The following shall remain exact policy-matrix obligations:
+  dangerous-class config keys on every subcommand not qualifying under
+  REQ-GGUARD-043, including `fetch`, `clone`, `ls-remote`, `push`,
+  `commit`, and every hook-running or transport command; sudo-gated keys for
+  non-root in all shapes; `--no-verify` on every command defining it and its
+  command-grammar short aliases per REQ-GGUARD-030; `git config
+  <dangerous-key> <value>` writes in every shape; and
+  `--upload-pack`/`--receive-pack`/`--exec`. An invocation whose subcommand
+  did not resolve, or whose qualification is ambiguous, shall never
+  sanitize: flagged dangerous keys block under the existing rules (fail
+  closed). The strip shall only remove complete options; it shall never
+  add, reorder, rewrite, or re-encode retained bytes, and the forwarded argv
+  minus the removed options shall be the only difference from the caller's
+  argv.
 
 ### 6. Subcommand-Specific Blocks
 
@@ -531,7 +606,10 @@ This document specifies the requirements for the Rust binary. The installation/d
   line with fixed-order pipe-delimited `name=value` fields:
   `v=1|ts=<RFC3339-Z>|event=<class>|exit=<decimal>|uid=<decimal>|cwd=<encoded>|argc=<decimal>|arg0=<encoded>|...|reason=<encoded>\n`.
   Required event classes include `block`, `contract-reject`,
-  `contract-unavailable`, and `audit-failure`. Runtime warnings are stderr-only
+  `contract-unavailable`, `audit-failure`, and `sanitize` (the last for
+  allowed invocations whose argv the guard rewrote under REQ-GGUARD-044:
+  `exit=0`, with `subcommand`, `drops`, and indexed `dropK` fields carrying
+  the exact removed tokens between the argv fields and the final `reason`). Runtime warnings are stderr-only
   under REQ-GGUARD-112 and shall not create audit records. Raw byte values shall
   be percent-encoded before insertion: preserve only the approved unreserved
   ASCII set and encode every `%`, `|`, `=`, space, CR/LF, control byte, and byte

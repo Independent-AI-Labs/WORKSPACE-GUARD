@@ -251,3 +251,44 @@ WORKSPACE-GUARD's function in an autonomous-agent context:
 8. Agent Sandbox SIG: `kubernetes-sigs/agent-sandbox` (Nov 2025)
 9. Elastic Security: Copy Fail detection rule (Apr 2026)
 10. glibc `dl-fixup.c`: Dynamic linker resolution internals
+
+---
+
+## 8. Incident Analysis: Third-Party Tool Git Boilerplate (2026-09-19)
+
+Claude Code (Anthropic CLI v2.1.278) spawns `git` for its internal
+repository-context queries with a fixed side-effect-suppression prefix:
+
+```text
+git -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.askPass= \
+    -c protocol.ext.allow=never -c submodule.recurse=false \
+    -c log.showSignature=false -c gc.auto=0 -c maintenance.auto=false \
+    [--no-optional-locks] <read-only subcommand>
+```
+
+Five of those keys are in the dangerous catalog (`core.fsmonitor`,
+`core.hooksPath`, `core.askpass`, `protocol.ext.allow`,
+`submodule.recurse`), every one set to a deactivating value. All observed
+subcommands were reads (`log`, `status`, `config --get`, `remote get-url`,
+`ls-files`). Two guard rules rejected them: the subcommand-blind `-n`
+short-flag block (`log -n 5`) and the subcommand-blind dangerous-`-c` block.
+The `-n` behavior already violated REQ-GGUARD-030 and SPEC §3.1 Phase 3:
+`-n` abbreviates `--no-verify` only for hook-running commands, while it is
+`--max-count` for `log`, sort-by-count for `shortlog`, annotation display
+for `tag`, `--no-commit` for `cherry-pick`, and `--no-tags` for `fetch`.
+The deployed parser predates the requirement.
+
+Why not allow-list the keys on read-only subcommands: "read-only" is not
+"non-executing". `core.fsmonitor=<path>` makes Git spawn a configured
+fsmonitor helper during `status` index refresh, so a value-blind
+pass-through would reintroduce command execution on reads.
+`protocol.ext.allow` on transport-capable queries (`ls-remote`, `fetch`,
+`clone`) is the `ext::` arbitrary-command path. REQ-GGUARD-043..046
+therefore chose argv sanitization: dangerous-class options are REMOVED from
+the forwarded argv, so no dangerous-config byte reaches real Git on any
+invocation (the zero-tolerance invariant is unchanged), while the
+deactivating semantics the tool intended are already provided by the
+guard's own hardened child environment (`core.fsmonitor` forced empty,
+global/system config nulled). Every rewrite is reported (`SANITIZED:`
+with the exact removed tokens) and audited (`event=sanitize`); a rewrite
+that cannot be reported or persisted is not executed (exit 3).
