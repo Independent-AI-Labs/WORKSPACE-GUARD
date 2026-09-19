@@ -244,16 +244,22 @@ pub fn config_write_key_check(argv_os: &[OsString], privileged: bool) -> Result<
             None
         }
     };
+    let mut seen = false;
     let mut skip_next = false;
     let mut write_shape = false;
     let mut pending_read_key: Option<String> = None;
     let mut saw_positional = false;
     for arg in argv_os.iter().skip(1) {
         let s = arg.to_string_lossy();
-        if s == "config" {
+        // Global preamble (-c key value, -C dir, ...) is not part of the
+        // config invocation; positionals are counted only after the
+        // subcommand marker. A literal "config" AFTER the marker is an
+        // ordinary positional (a value being written).
+        if s == "config" && !seen {
+            seen = true;
             continue;
         }
-        if skip_next {
+        if !seen || skip_next {
             skip_next = false;
             continue;
         }

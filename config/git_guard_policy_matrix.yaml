@@ -493,3 +493,154 @@ cases:
     expect: blocked
     reason_contains: stash
     sudo_only: true
+  - id: ro-sanitize-log
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - log
+    expect: sanitized
+  - id: ro-sanitize-show
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - show
+    expect: sanitized
+  - id: ro-sanitize-status
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - status
+    expect: sanitized
+  - id: ro-sanitize-diff
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - diff
+    expect: sanitized
+  - id: ro-sanitize-rev-parse
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - rev-parse
+    expect: sanitized
+  - id: ro-sanitize-ls-files
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - ls-files
+    expect: sanitized
+  - id: ro-sanitize-cat-file
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - cat-file
+    expect: sanitized
+  - id: ro-sanitize-blame
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - blame
+    expect: sanitized
+  - id: ro-sanitize-shortlog
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - shortlog
+    expect: sanitized
+  - id: ro-sanitize-describe
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - describe
+    expect: sanitized
+  - id: ro-sanitize-var
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - var
+    expect: sanitized
+  - id: ro-sanitize-for-each-ref
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - for-each-ref
+    expect: sanitized
+  - id: ro-sanitize-show-ref
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - show-ref
+    expect: sanitized
+  - id: ro-sanitize-name-rev
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - name-rev
+    expect: sanitized
+  - id: ro-sanitize-whatchanged
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - whatchanged
+    expect: sanitized
+  - id: ro-sanitize-grep
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - grep
+    expect: sanitized
+  - id: ro-sanitize-check-ignore
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - check-ignore
+    expect: sanitized
+  - id: ro-sanitize-check-attr
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - check-attr
+    expect: sanitized
+  - id: ro-sanitize-config
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - config
+      - '--get'
+      - core.bare
+    expect: sanitized
+  - id: ro-sanitize-remote
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - remote
+      - get-url
+      - origin
+    expect: sanitized
+  - id: ro-sanitize-negative
+    argv:
+      - git
+      - '-c'
+      - core.hooksPath
+      - push
+    expect: blocked

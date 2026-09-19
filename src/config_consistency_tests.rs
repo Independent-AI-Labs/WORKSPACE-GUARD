@@ -187,7 +187,7 @@ fn git_guard_policy_matrix_cases_have_unique_ids() {
         assert!(seen.insert(id), "duplicate policy matrix id: {id}");
         let expect = entry.get("expect").and_then(|v| v.as_str()).unwrap();
         assert!(
-            expect == "blocked" || expect == "allowed",
+            expect == "blocked" || expect == "allowed" || expect == "sanitized",
             "invalid expect on {id}: {expect}"
         );
         let argv = entry.get("argv").and_then(|v| v.as_sequence()).unwrap();

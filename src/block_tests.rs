@@ -358,6 +358,61 @@ fn config_read_shape_allows_key_display() {
 }
 
 #[test]
+fn config_read_passes_with_benign_dash_c_preamble() {
+    // Exact Claude Code shapes: dangerous -c keys are stripped by the
+    // sanitizer, benign pairs REMAIN in argv, and the surviving
+    // operands must not be miscounted as config positionals.
+    let preamble = [
+        "-c",
+        "submodule.recurse=false",
+        "-c",
+        "log.showSignature=false",
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "maintenance.auto=false",
+    ];
+    for tail in [
+        vec!["config", "user.name"],
+        vec!["config", "--get", "user.email"],
+    ] {
+        let mut args = vec!["git".to_string()];
+        args.extend(preamble.iter().map(|s| s.to_string()));
+        args.extend(tail.iter().map(|s| s.to_string()));
+        let argv_os: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
+        let state = empty_state("config");
+        let result = check_blocked(&state, "config", &argv_os, "/nonexistent-git", None);
+        assert!(result.is_ok(), "read should pass: {:?}", args);
+    }
+    // -C preamble must not leak a positional either
+    let args: Vec<std::ffi::OsString> = ["git", "-C", "/tmp/ws-repo", "config", "user.name"]
+        .iter()
+        .map(std::ffi::OsString::from)
+        .collect();
+    let state = empty_state("config");
+    let result = check_blocked(&state, "config", &args, "/nonexistent-git", None);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn config_write_blocks_with_benign_dash_c_preamble() {
+    let args: Vec<std::ffi::OsString> = [
+        "git",
+        "-c",
+        "gc.auto=0",
+        "config",
+        "core.hooksPath",
+        "/evil",
+    ]
+    .iter()
+    .map(std::ffi::OsString::from)
+    .collect();
+    let state = empty_state("config");
+    let result = check_blocked(&state, "config", &args, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
 fn config_write_shape_blocks_keys() {
     for args in [
         vec!["git", "config", "user.email", "x@y"],

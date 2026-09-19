@@ -66,3 +66,24 @@ contract_check:
   - cherry-pick
   - apply
   - am
+read_only:
+  - log
+  - show
+  - status
+  - diff
+  - rev-parse
+  - ls-files
+  - cat-file
+  - blame
+  - shortlog
+  - describe
+  - var
+  - for-each-ref
+  - show-ref
+  - name-rev
+  - whatchanged
+  - grep
+  - check-ignore
+  - check-attr
+  - config
+  - remote
