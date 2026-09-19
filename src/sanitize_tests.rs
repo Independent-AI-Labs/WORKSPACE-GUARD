@@ -35,12 +35,136 @@ fn strips_flag_and_operand_on_read_only_subcommand() {
 }
 
 #[test]
-fn strips_attached_form_single_token() {
-    let p = plan_argv(LIST, &["git", "-ccore.hooksPath=/evil", "status"])
+fn config_read_shape_get_qualifies() {
+    let p = plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "core.hooksPath=/e",
+            "config",
+            "--get",
+            "core.bare",
+        ],
+    )
+    .expect("plan ok")
+    .expect("stripped");
+    assert_eq!(p.argv, os(&["git", "config", "--get", "core.bare"]));
+}
+
+#[test]
+fn config_type_and_file_value_forms_qualify() {
+    let p = plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "core.hooksPath=/e",
+            "config",
+            "--type=bool",
+            "--get",
+            "core.bare",
+        ],
+    )
+    .expect("plan ok")
+    .expect("stripped");
+    assert_eq!(
+        p.argv,
+        os(&["git", "config", "--type=bool", "--get", "core.bare"])
+    );
+    let p = plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "core.hooksPath=/e",
+            "config",
+            "-f",
+            "/tmp/x.cfg",
+            "--list",
+        ],
+    )
+    .expect("plan ok")
+    .expect("stripped");
+    assert_eq!(p.argv, os(&["git", "config", "-f", "/tmp/x.cfg", "--list"]));
+}
+
+#[test]
+fn config_get_urlmatch_two_positionals_qualify() {
+    plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "core.hooksPath=/e",
+            "config",
+            "--get-urlmatch",
+            "http",
+            "https://x",
+        ],
+    )
+    .expect("plan ok")
+    .expect("stripped");
+}
+
+#[test]
+fn config_unknown_option_blocks() {
+    let err = plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "core.hooksPath=/e",
+            "config",
+            "--int-to-bool",
+            "--list",
+        ],
+    )
+    .unwrap_err();
+    assert!(matches!(err, GuardError::Blocked { .. }));
+}
+
+#[test]
+fn remote_verbose_listing_qualifies() {
+    plan_argv(LIST, &["git", "-c", "core.hooksPath=/e", "remote", "-v"])
         .expect("plan ok")
         .expect("stripped");
-    assert_eq!(p.argv, os(&["git", "status"]));
-    assert_eq!(p.dropped, vec![b"-ccore.hooksPath=/evil".to_vec()]);
+    let err = plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "core.hooksPath=/e",
+            "remote",
+            "rename",
+            "a",
+            "b",
+        ],
+    )
+    .unwrap_err();
+    assert!(matches!(err, GuardError::Blocked { .. }));
+}
+
+#[test]
+fn mixed_benign_and_dangerous_strips_only_dangerous() {
+    let p = plan_argv(
+        LIST,
+        &[
+            "git",
+            "-c",
+            "color.ui=auto",
+            "-c",
+            "core.hooksPath=/evil",
+            "log",
+        ],
+    )
+    .expect("plan ok")
+    .expect("stripped");
+    assert_eq!(p.argv, os(&["git", "-c", "color.ui=auto", "log"]));
+    assert_eq!(
+        p.dropped,
+        vec![b"-c".to_vec(), b"core.hooksPath=/evil".to_vec()]
+    );
 }
 
 #[test]
@@ -106,24 +230,6 @@ fn sudo_gated_key_is_not_strippable() {
 fn no_subcommand_blocks() {
     let err = plan_argv(LIST, &["git", "-c", "core.hooksPath=/evil"]).unwrap_err();
     assert!(matches!(err, GuardError::Blocked { .. }));
-}
-
-#[test]
-fn config_read_shape_get_qualifies() {
-    let p = plan_argv(
-        LIST,
-        &[
-            "git",
-            "-c",
-            "core.hooksPath=/e",
-            "config",
-            "--get",
-            "core.bare",
-        ],
-    )
-    .expect("plan ok")
-    .expect("stripped");
-    assert_eq!(p.argv, os(&["git", "config", "--get", "core.bare"]));
 }
 
 #[test]
