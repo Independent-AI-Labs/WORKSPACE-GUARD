@@ -12,10 +12,12 @@
 
 ## Decision
 
-Claude models, the Claude Code agent tool, and any component that
-routes WORKSPACE workloads to Anthropic services are NOT APPROVED for
-use anywhere in the WORKSPACE federated system. This is a final
-position, not a temporary suspension.
+Claude models and the Claude Code agent tool are NOT APPROVED as
+development tooling for the WORKSPACE federated system: no WORKSPACE
+code may be written, reviewed, modified, or committed with them. This
+is a final position on tooling, not a temporary suspension. Transport
+components that merely proxy requests to Anthropic services are not
+development tooling and are outside this statement's scope.
 
 ## Grounds
 
@@ -45,9 +47,11 @@ position, not a temporary suspension.
    Section D.4(a), forbids accessing the services "to build a
    competing product or service, including to train competing AI
    models". WORKSPACE is a federated AI delivery platform with its own
-   gateway, providers, and agents; under that clause the project sits
-   in the restricted category. A license that presumes against the
-   project's own existence cannot govern any part of it.
+   providers and agents; developing it while consuming Anthropic
+   services sits in the restricted category of that clause. A license
+   that presumes against the project's own existence cannot govern its
+   development. (Proxying requests to Anthropic is ordinary customer
+   use, not development; see Consequences.)
 
 4. **Watermarking.** Since 2026-08-02 Claude output carries a
    SynthID-Text style watermark applied globally, with no opt-out, and
@@ -59,13 +63,15 @@ position, not a temporary suspension.
 
 ## Consequences
 
-- The Anthropic provider work in WORKSPACE-GATEWAY (claude-gw.sh,
-  REQ-PROVIDER-ANTHROPIC, SPEC-PROVIDER-ANTHROPIC, related OAuth
-  plugins) is HALTED. It must not be extended, wired, or merged. The
-  operator decides whether to archive or remove it.
-- No WORKSPACE component may add, call, or depend on Anthropic APIs,
-  Claude binaries, or Claude Code plugins. Reviews must reject such
-  changes.
+- WORKSPACE-GATEWAY is a transport proxy. Its Anthropic provider work
+  (claude-gw.sh, REQ-PROVIDER-ANTHROPIC, SPEC-PROVIDER-ANTHROPIC,
+  related OAuth plugins) is proxy infrastructure, not development
+  tooling, and is NOT affected by this statement; it may be extended,
+  wired, and merged like any other provider.
+- Claude models, Claude Code, and Anthropic-dependent coding assistants
+  must not be used to write, review, modify, or commit WORKSPACE code,
+  and must not be wired into WORKSPACE engineering pipelines or the git
+  boundary. Reviews reject such changes.
 - The git guard read-only sanitization work (REQ-GGUARD-043..046)
   PROCEEDS unchanged: the hook-bypass threat is general to third-party
   agent tools and the hardening is not Claude-specific.

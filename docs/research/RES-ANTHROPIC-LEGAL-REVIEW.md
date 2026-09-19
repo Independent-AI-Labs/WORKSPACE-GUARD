@@ -101,15 +101,21 @@ D.4 (Use Restrictions), verbatim from the downloaded snapshot:
 > support any third party's attempt at any of the conduct restricted in
 > this sentence."
 
-WORKSPACE is a federated AI delivery system with its own gateway,
-provider abstraction, agents, and model serving. Building and
-operating it while consuming Anthropic services places the project in
-the restricted category by the plain text of D.4(a): WORKSPACE is a
+WORKSPACE is a federated AI delivery system with its own provider
+abstraction, agents, and model serving. Building and operating it
+while consuming Anthropic services places that development use in the
+restricted category by the plain text of D.4(a): WORKSPACE is a
 competing product or service in the sense of that clause, or at
 minimum cannot prove it is not. A license under which the project's
 own existence is presumptively restricted is disqualified for
 sovereign infrastructure; there is no review-friendly interpretation
 worth betting the project on.
+
+Scope note: proxying requests to Anthropic (the WORKSPACE-GATEWAY
+provider layer) is ordinary customer use of the services, not
+building a product with them, and is therefore not restricted by
+D.4(a). The restriction bears on development use, which is what the
+statement prohibits.
 
 ## Claim 4: Watermarking, combined with the license, is a final no-go
 
