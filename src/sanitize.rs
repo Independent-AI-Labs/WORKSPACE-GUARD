@@ -159,12 +159,12 @@ pub const SANITIZED_SINK_ENV: &str = "WORKSPACE_GUARD_SANITIZED_SINK";
 pub const LIVEAUDIT_NAME: &str = ".liveaudit";
 
 #[derive(Debug, PartialEq, Eq)]
-enum SanitizedSink {
+pub(crate) enum SanitizedSink {
     Stderr,
     Liveaudit,
 }
 
-fn parse_sink(val: Option<&std::ffi::OsStr>) -> Result<SanitizedSink, String> {
+pub(crate) fn parse_sink(val: Option<&std::ffi::OsStr>) -> Result<SanitizedSink, String> {
     let Some(v) = val else {
         return Ok(SanitizedSink::Stderr);
     };
@@ -203,7 +203,7 @@ fn deliver_stderr(report: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn append_liveaudit(dir: &std::path::Path, report: &str) -> std::io::Result<()> {
+pub(crate) fn append_liveaudit(dir: &std::path::Path, report: &str) -> std::io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = std::fs::OpenOptions::new()
         .create(true)

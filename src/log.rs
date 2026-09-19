@@ -10,6 +10,27 @@ use nix::unistd::{getuid, Uid, User};
 
 use crate::LOG_FILE;
 
+/// Routes BLOCKED user-facing output (REQ-GGUARD-046): `stderr` (default)
+/// keeps the historical stderr + /dev/tty display; `liveaudit` writes the
+/// message to ./.liveaudit only, for agent-driven sessions where the
+/// message must not land on top of the tool's own UI. The home-sink
+/// audit line is written in BOTH modes; the block decision and exit
+/// code never change. Unknown values keep stderr and add a FATAL note.
+pub const BLOCK_SINK_ENV: &str = "WORKSPACE_GUARD_BLOCK_SINK";
+
+fn block_msg_sink() -> crate::sanitize::SanitizedSink {
+    match crate::sanitize::parse_sink(std::env::var_os(BLOCK_SINK_ENV).as_deref()) {
+        Ok(sink) => sink,
+        Err(e) => {
+            eprintln!(
+                "FATAL: {} must be stderr or liveaudit: {}",
+                BLOCK_SINK_ENV, e
+            );
+            crate::sanitize::SanitizedSink::Stderr
+        }
+    }
+}
+
 pub fn block(reason: &str, hint: &str, cmd: &str) -> ! {
     let ts = timestamp();
     let cwd = std::env::current_dir()
@@ -20,10 +41,19 @@ pub fn block(reason: &str, hint: &str, cmd: &str) -> ! {
 
     let msg = format!("BLOCKED: {} ({})\n  -> Hint: {}", cmd, ts, hint);
 
-    eprintln!("{}", msg);
-
-    if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
-        let _ = writeln!(&tty, "{}", msg);
+    match block_msg_sink() {
+        crate::sanitize::SanitizedSink::Liveaudit => {
+            if let Err(e) = crate::sanitize::append_liveaudit(Path::new("."), &msg) {
+                eprintln!("{}", msg);
+                eprintln!("FATAL: block report liveaudit sink failed: {}", e);
+            }
+        }
+        crate::sanitize::SanitizedSink::Stderr => {
+            eprintln!("{}", msg);
+            if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
+                let _ = writeln!(&tty, "{}", msg);
+            }
+        }
     }
 
     let home = get_user_home(uid);
@@ -189,8 +219,20 @@ fn civil_from_unix(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{civil_from_unix, get_user_home, pct_encode, timestamp_utc_z};
+    use super::{
+        block_msg_sink, civil_from_unix, get_user_home, pct_encode, timestamp_utc_z, BLOCK_SINK_ENV,
+    };
     use nix::unistd::getuid;
+
+    #[test]
+    fn block_sink_defaults_to_stderr_without_env() {
+        // No test may set env vars (Rule 8); unset is the suite default.
+        assert!(std::env::var_os(BLOCK_SINK_ENV).is_none());
+        assert!(matches!(
+            block_msg_sink(),
+            crate::sanitize::SanitizedSink::Stderr
+        ));
+    }
 
     #[test]
     fn pct_encode_printable_passthrough() {
