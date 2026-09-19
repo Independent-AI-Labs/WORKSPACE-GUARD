@@ -116,8 +116,7 @@ pub fn decide(
         Some(p) => {
             let raw = state.subcommand_raw.clone().unwrap_or_default();
             let report = build_report(&log::timestamp_utc_z(), &raw, &p.dropped, argv_os);
-            deliver_report(&report)
-                .map_err(|e| GuardError::GuardUnavailable(format!("sanitize report: {}", e)))?;
+            deliver_report(&report)?;
             log::audit_sanitize(&report)
                 .map_err(|e| GuardError::GuardUnavailable(format!("sanitize audit: {}", e)))?;
             state.dangerous_config_keys.clear();
@@ -149,7 +148,51 @@ pub fn build_report(ts: &str, raw_sub: &str, dropped: &[Vec<u8>], argv: &[OsStri
     s
 }
 
-fn deliver_report(report: &str) -> std::io::Result<()> {
+/// Sink selector for the SANITIZED terminal report (operator flag).
+/// `WORKSPACE_GUARD_SANITIZED_SINK=stderr` (default/unset) keeps the
+/// stderr + /dev/tty delivery; `liveaudit` appends the report to a
+/// `.liveaudit` file in the working directory instead, keeping tool
+/// stderr clean. Only the terminal report moves: the home-sink audit
+/// record stays mandatory in both modes (REQ-GGUARD-045). Any other
+/// value fails closed as GuardUnavailable.
+pub const SANITIZED_SINK_ENV: &str = "WORKSPACE_GUARD_SANITIZED_SINK";
+pub const LIVEAUDIT_NAME: &str = ".liveaudit";
+
+#[derive(Debug, PartialEq, Eq)]
+enum SanitizedSink {
+    Stderr,
+    Liveaudit,
+}
+
+fn parse_sink(val: Option<&std::ffi::OsStr>) -> Result<SanitizedSink, String> {
+    let Some(v) = val else {
+        return Ok(SanitizedSink::Stderr);
+    };
+    let b = v.as_bytes();
+    if b.eq_ignore_ascii_case(b"stderr") {
+        Ok(SanitizedSink::Stderr)
+    } else if b.eq_ignore_ascii_case(b"liveaudit") {
+        Ok(SanitizedSink::Liveaudit)
+    } else {
+        Err(format!(
+            "{} must be stderr or liveaudit, got {:?}",
+            SANITIZED_SINK_ENV,
+            String::from_utf8_lossy(b)
+        ))
+    }
+}
+
+fn deliver_report(report: &str) -> Result<(), GuardError> {
+    let sink = parse_sink(std::env::var_os(SANITIZED_SINK_ENV).as_deref())
+        .map_err(GuardError::GuardUnavailable)?;
+    let io_result = match sink {
+        SanitizedSink::Stderr => deliver_stderr(report),
+        SanitizedSink::Liveaudit => append_liveaudit(std::path::Path::new("."), report),
+    };
+    io_result.map_err(|e| GuardError::GuardUnavailable(format!("sanitize report: {}", e)))
+}
+
+fn deliver_stderr(report: &str) -> std::io::Result<()> {
     let mut err = std::io::stderr();
     err.write_all(report.as_bytes())?;
     err.write_all(b"\n")?;
@@ -158,6 +201,16 @@ fn deliver_report(report: &str) -> std::io::Result<()> {
         let _ = writeln!(tty, "{}", report);
     }
     Ok(())
+}
+
+fn append_liveaudit(dir: &std::path::Path, report: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(dir.join(LIVEAUDIT_NAME))?;
+    writeln!(f, "{}", report)
 }
 
 /// Read shape for `git config` (REQ-GGUARD-043): listing and get forms

@@ -340,3 +340,27 @@ fn report_encodes_dynamic_values() {
 fn no_verify_short_scope_constant() {
     assert_eq!(NO_VERIFY_SHORT_SUBCOMMANDS, &["am", "commit"]);
 }
+
+#[test]
+fn sink_flag_parses() {
+    use std::ffi::OsStr;
+    assert_eq!(parse_sink(None), Ok(SanitizedSink::Stderr));
+    assert_eq!(
+        parse_sink(Some(OsStr::new("stderr"))),
+        Ok(SanitizedSink::Stderr)
+    );
+    assert_eq!(
+        parse_sink(Some(OsStr::new("LIVEAUDIT"))),
+        Ok(SanitizedSink::Liveaudit)
+    );
+    assert!(parse_sink(Some(OsStr::new("file"))).is_err());
+}
+
+#[test]
+fn liveaudit_appends_lines() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    append_liveaudit(dir.path(), "SANITIZED: one").expect("first append");
+    append_liveaudit(dir.path(), "SANITIZED: two").expect("second append");
+    let content = std::fs::read_to_string(dir.path().join(LIVEAUDIT_NAME)).expect("read");
+    assert_eq!(content, "SANITIZED: one\nSANITIZED: two\n");
+}

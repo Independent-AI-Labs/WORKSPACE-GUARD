@@ -277,7 +277,13 @@ This document specifies the requirements for the Rust binary. The installation/d
   runtime warning. Delivery is evidence-mandatory: a report or audit failure
   before real Git starts shall fail closed as typed `GuardUnavailable` exit
   3 with no Git execution, and shall never permit an unreported or
-  unpersisted rewrite.
+  unpersisted rewrite. Operator reroute: the environment variable
+  `WORKSPACE_GUARD_SANITIZED_SINK` selects the terminal-report channel only,
+  `stderr` (default, also when unset) or `liveaudit` (append the report to a
+  `.liveaudit` file in the working directory, keeping tool stderr clean);
+  any other value is a `GuardUnavailable` failure. The reroute affects only
+  the terminal report; the REQ-GGUARD-090..093 audit append stays mandatory
+  in both modes, and stdout is never used.
 - **REQ-GGUARD-046**: Read-only sanitization shall not weaken any other
   rule. The following shall remain exact policy-matrix obligations:
   dangerous-class config keys on every subcommand not qualifying under
