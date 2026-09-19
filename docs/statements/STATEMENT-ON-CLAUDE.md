@@ -22,10 +22,13 @@ position, not a temporary suspension.
 1. **Proprietary core.** Claude models are closed-weight proprietary
    services. The Claude Code repository license is "© Anthropic PBC.
    All rights reserved." with use deferred to Anthropic's Commercial
-   Terms of Service; the CLI ships as a minified bundle whose readable
-   source became public only by accident. WORKSPACE requires
-   inspectable tooling at every trust boundary; a tool we cannot
-   lawfully inspect cannot occupy one.
+   Terms of Service. A public repository does not make software
+   open-source: that status comes only from a license grant, and there
+   is none. At best Claude Code is source-available under proprietary
+   terms, with reverse engineering and competing use forbidden by
+   Section D.4 of the Terms. WORKSPACE requires inspectable tooling at
+   every trust boundary; a tool we cannot lawfully inspect cannot
+   occupy one.
 
 2. **Hostile default behavior at the git boundary.** Claude Code
    prefixes internal git calls with configuration that neutralizes

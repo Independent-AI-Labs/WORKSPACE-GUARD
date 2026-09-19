@@ -28,13 +28,20 @@ Findings:
    no open-source license. Its LICENSE.md reads, in full:
    "© Anthropic PBC. All rights reserved. Use is subject to Anthropic's
    Commercial Terms of Service." (snapshot: 2026-09-19)
-3. The distributed CLI was shipped as a minified bundle; its readable
-   TypeScript source became public only through an accidental npm
-   source-map exposure on 2026-03-31. Community effort to reconstruct a
-   readable tree exists (PR anthropics/claude-code#41518, open since
-   2026-03-31, titled "Fully Open Source Claude Code"), which is itself
-   evidence that the official artifact is not source-available under an
-   open license.
+3. Classification test: open-source status derives solely from a
+   license grant (OSI Open Source Definition), never from repository
+   visibility. The grant here reserves all rights and gates use behind
+   the Commercial Terms of Service, which forbid reverse engineering
+   and competing use; the correct classification is therefore
+   proprietary software with publicly visible source, at best
+   source-available under proprietary terms.
+4. Secondary history: the distributed CLI artifact shipped as a
+   minified bundle, and readable TypeScript source surfaced publicly
+   on 2026-03-31 through an accidental npm source-map exposure
+   (community reconstruction: PR anthropics/claude-code#41518, open
+   since 2026-03-31, titled "Fully Open Source Claude Code"). This
+   history is secondary; the license analysis in findings 2 and 3
+   decides the classification regardless of source readability.
 
 WORKSPACE impact: every trust boundary in this repository system
 (boot binaries, podman guard, git guard) follows the rule "single
