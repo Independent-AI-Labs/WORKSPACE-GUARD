@@ -136,7 +136,7 @@ sudo make install-auditd            # optional
 
 ### 4.1 Program I ,  what it covers
 
-Source: [src/block.rs](../src/block.rs), [config/git_guard_subcommands.yaml](../config/git_guard_subcommands.yaml), [config/git_guard_environment.yaml](../config/git_guard_environment.yaml).
+Source: [git-guard/src/block.rs](../git-guard/src/block.rs), [config/git_guard_subcommands.yaml](../config/git_guard_subcommands.yaml), [config/git_guard_environment.yaml](../config/git_guard_environment.yaml).
 
 - Destructive git subcommands and plumbing bypasses
 - Global flags (`--no-verify`, force push, etc.)
@@ -229,7 +229,7 @@ Gaps are numbered for traceability. Severity: **C** = critical (OS destruction o
 | **GAP-H03** | `~/.gitconfig` direct write without home-lock (documented CI incident) | [REQ-HOME-LOCK.md](requirements/REQ-HOME-LOCK.md) Background | III |
 | **GAP-H04** | `~/.bashrc` / `~/.profile` never locked ,  PATH/alias persistence | [REQ-HOME-LOCK.md](requirements/REQ-HOME-LOCK.md) REQ-HL-NG-02 | III extension or host |
 | **GAP-H05** | Child `PATH` includes `/usr/local/bin` for git subprocesses | [config/shared_paths.yaml](../config/shared_paths.yaml) | I (subprocess scope only) |
-| **GAP-H06** | Transient `CAP_DAC_OVERRIDE` on host-exec git invocation | [src/main.rs](../src/main.rs), [src/exec.rs](../src/exec.rs) | I design tradeoff |
+| **GAP-H06** | Transient `CAP_DAC_OVERRIDE` on host-exec git invocation | [git-guard/src/main.rs](../git-guard/src/main.rs), [git-guard/src/exec.rs](../git-guard/src/exec.rs) | I design tradeoff |
 
 ### 5.4 MEDIUM ,  operational / deployment
 
@@ -240,7 +240,7 @@ Gaps are numbered for traceability. Severity: **C** = critical (OS destruction o
 | **GAP-M03** | auditd has no block-device write rules | [config/auditd/99-workspace-guard.rules](../config/auditd/99-workspace-guard.rules) |
 | **GAP-M04** | `chattr +i` lock failure does not abort install | [SPEC-GIT-GUARD-HARDENING.md](specifications/SPEC-GIT-GUARD-HARDENING.md) |
 | **GAP-M05** | Network exfil / remote destructive pulls out of scope | [REQUIREMENTS.md](../REQUIREMENTS.md) |
-| **GAP-M06** (closed) | Contract check now fails closed on timeout and on missing script | [src/exec.rs](../src/exec.rs) |
+| **GAP-M06** (closed) | Contract check now fails closed on timeout and on missing script | [git-guard/src/exec.rs](../git-guard/src/exec.rs) |
 
 ---
 
@@ -538,7 +538,7 @@ WORKSPACE-GUARD **correctly protects git abuse** on `vm-ws` but **does not prote
 
 | Topic | Path |
 |-------|------|
-| Git blocks | [src/block.rs](../src/block.rs), [config/git_guard_subcommands.yaml](../config/git_guard_subcommands.yaml) |
+| Git blocks | [git-guard/src/block.rs](../git-guard/src/block.rs), [config/git_guard_subcommands.yaml](../config/git_guard_subcommands.yaml) |
 | Binary catalog | [res/binary-lock.yaml](../res/binary-lock.yaml), [config/binary_guard_policy_rules.yaml](../config/binary_guard_policy_rules.yaml) |
 | SUID baseline | [res/suid-baseline.yaml](../res/suid-baseline.yaml) |
 | Sandbox unit | [config/systemd/workspace-agent@.service](../config/systemd/workspace-agent@.service) |

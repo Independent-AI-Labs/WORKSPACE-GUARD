@@ -226,7 +226,7 @@ The lock is idempotent (skips the `chown`/`chmod` syscall when the path is
 already `root:root` with the target mode) and non-blocking: a lock failure
 never rejects a git invocation that already passed the policy engine. The lock is
 skipped under `sudo` (real UID 0): root already owns the paths. Root-only mode
-does NOT apply the lock (`src/gitdir.rs` is gated by
+does NOT apply the lock (`git-guard/src/gitdir.rs` is gated by
 `#[cfg(feature = "capability-mode")]`).
 
 ### 11.7.1 Config-Driven Locked Paths

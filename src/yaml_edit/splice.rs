@@ -15,7 +15,7 @@
 
 use serde_yaml::Value;
 
-use crate::yaml_edit_emit::{emit_dash_item, emit_kv};
+use crate::emit::{emit_dash_item, emit_kv};
 
 /// One parsed `key: value # comment` line. `head` is the verbatim
 /// text up to and including the colon, so rewrites keep the original

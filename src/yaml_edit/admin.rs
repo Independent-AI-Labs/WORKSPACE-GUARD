@@ -1,8 +1,8 @@
 use serde_yaml::Value;
 
-use crate::yaml_edit_engine as engine;
-use crate::yaml_edit_ops::{fail, mutate, Cli};
-use crate::yaml_edit_splice as splice;
+use crate::engine;
+use crate::ops::{fail, mutate, Cli};
+use crate::splice;
 
 pub fn run_bootstrap(cli: &Cli) {
     let key = cli.key.as_deref().unwrap_or_default();
@@ -40,7 +40,7 @@ pub fn run_unset(cli: &Cli) {
     mutate(cli, &mut |doc, original| {
         let (expected, concrete) = engine::unset_fields(doc, path)?;
         removed = concrete.len();
-        crate::yaml_edit_unset::splice_unset(original, &concrete).map(|out| (out, expected))
+        crate::unset::splice_unset(original, &concrete).map(|out| (out, expected))
     });
     println!("yaml-edit: removed {removed} fields");
 }
@@ -49,7 +49,7 @@ pub fn run_remove_comment(cli: &Cli) {
     let text = cli.value.as_deref().unwrap_or_default();
     let mut removed = 0;
     mutate(cli, &mut |doc, original| {
-        let (out, count) = crate::yaml_edit_comment::remove_exact_comments(original, text)?;
+        let (out, count) = crate::comment::remove_exact_comments(original, text)?;
         removed = count;
         Ok((out, doc.clone()))
     });
@@ -57,5 +57,5 @@ pub fn run_remove_comment(cli: &Cli) {
 }
 
 pub fn run_delete(cli: &Cli) {
-    crate::yaml_edit_delete::run(cli);
+    crate::delete::run(cli);
 }

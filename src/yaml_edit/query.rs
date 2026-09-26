@@ -1,17 +1,17 @@
 use serde_yaml::Value;
 use std::process;
 
-use crate::yaml_edit_diff as diff;
-use crate::yaml_edit_engine as engine;
-use crate::yaml_edit_install::install;
-use crate::yaml_edit_ops::{
+use crate::diff;
+use crate::engine;
+use crate::install::install;
+use crate::ops::{
     acquire_lock, audit, basename, check_override_owner, check_schema, fail, key_err, parse_doc,
     require_root, verify, Cli,
 };
-use crate::yaml_edit_schema as schema;
-use crate::yaml_edit_shape as shape;
-use crate::yaml_edit_splice as splice;
-use crate::yaml_edit_target::{normalize_terminal, Target};
+use crate::schema;
+use crate::shape;
+use crate::splice;
+use crate::target::{normalize_terminal, Target};
 
 pub fn run_get(cli: &Cli) {
     let target = Target::open(&cli.file, false).unwrap_or_else(|e| fail(2, &e));

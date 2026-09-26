@@ -12,38 +12,20 @@
 
 use std::process;
 
-#[path = "yaml_edit_admin.rs"]
-mod yaml_edit_admin;
-#[path = "yaml_edit_comment.rs"]
-mod yaml_edit_comment;
-#[path = "yaml_edit_delete.rs"]
-mod yaml_edit_delete;
-#[path = "yaml_edit_diff.rs"]
-mod yaml_edit_diff;
-#[path = "yaml_edit_emit.rs"]
-mod yaml_edit_emit;
-#[path = "yaml_edit_engine.rs"]
-mod yaml_edit_engine;
-#[path = "yaml_edit_install.rs"]
-mod yaml_edit_install;
-#[path = "yaml_edit_ops.rs"]
-mod yaml_edit_ops;
-#[path = "yaml_edit_query.rs"]
-mod yaml_edit_query;
-#[path = "yaml_edit_schema.rs"]
-mod yaml_edit_schema;
-#[path = "yaml_edit_shape.rs"]
-mod yaml_edit_shape;
-#[path = "yaml_edit_splice.rs"]
-mod yaml_edit_splice;
-#[path = "yaml_edit_target.rs"]
-mod yaml_edit_target;
-#[path = "yaml_edit_unset.rs"]
-mod yaml_edit_unset;
-
-use yaml_edit_admin as admin;
-use yaml_edit_ops as ops;
-use yaml_edit_query as query;
+mod admin;
+mod comment;
+mod delete;
+mod diff;
+mod emit;
+mod engine;
+mod install;
+mod ops;
+mod query;
+mod schema;
+mod shape;
+mod splice;
+mod target;
+mod unset;
 
 fn usage() -> ! {
     eprintln!(
@@ -85,22 +67,16 @@ fn main() {
 }
 
 #[cfg(test)]
-#[path = "yaml_edit_emit_tests.rs"]
 mod emit_tests;
 #[cfg(test)]
-#[path = "yaml_edit_engine_tests.rs"]
 mod engine_tests;
 #[cfg(test)]
-#[path = "yaml_edit_ops_tests.rs"]
 mod ops_tests;
 #[cfg(test)]
-#[path = "yaml_edit_schema_tests.rs"]
 mod schema_tests;
 #[cfg(test)]
-#[path = "yaml_edit_shape_tests.rs"]
 mod shape_tests;
 #[cfg(test)]
-#[path = "yaml_edit_splice_tests.rs"]
 mod splice_tests;
 
 #[cfg(test)]
@@ -110,7 +86,7 @@ mod tests {
 
     #[test]
     fn audit_log_name_matches_guard_config() {
-        let raw = include_str!("../config/shared_paths.yaml");
+        let raw = include_str!("../../config/shared_paths.yaml");
         let doc: Value = serde_yaml::from_str(raw).expect("shared_paths.yaml must parse");
         let configured = doc
             .get("log_file")

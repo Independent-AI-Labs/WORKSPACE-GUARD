@@ -7,15 +7,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECTS_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
-if [ -x "/opt/workspace-ci/.boot-linux/bin/real-podman" ]; then
-    PODMAN="/opt/workspace-ci/.boot-linux/bin/real-podman"
-elif [ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]; then
-    PODMAN="/opt/workspace-ci/.boot-linux/bin/podman"
-elif command -v real-podman; then
-    PODMAN=real-podman
-elif command -v podman; then
-    PODMAN=podman
-else
+PODMAN="/opt/workspace-ci/.boot-linux/bin/real-podman"
+if [[ ! -x "$PODMAN" ]]; then
     echo "ERROR: podman is required for non-root shell tests" >&2
     exit 1
 fi

@@ -9,29 +9,17 @@ _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
-resolve_podman() {
-    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
-        echo "/opt/workspace-ci/.boot-linux/bin/podman"
-        return 0
-    fi
-    if command -v real-podman; then
-        echo "real-podman"
-        return 0
-    fi
-    if command -v podman; then
-        echo "podman"
-        return 0
-    fi
-    echo "ERROR: podman not found" >&2
-    return 1
-}
+PODMAN="/opt/workspace-ci/.boot-linux/bin/podman"
+if [[ ! -x "$PODMAN" ]]; then
+    echo "ERROR: podman not found at $PODMAN" >&2
+    exit 1
+fi
 
 if [[ ! -d "$_PROJECTS_ROOT/WORKSPACE-CI" ]]; then
     echo "ERROR: WORKSPACE-CI not found at $_PROJECTS_ROOT/WORKSPACE-CI" >&2
     exit 1
 fi
 
-PODMAN="$(resolve_podman)"
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}"
 CARGO_VOLUME_PREFIX="${WORKSPACE_GUARD_CARGO_VOLUME_PREFIX:-workspace-guard}"
 for volume in registry git target; do

@@ -13,11 +13,8 @@ use regex::bytes::Regex;
 mod shell_config {
     include!(concat!(env!("OUT_DIR"), "/shell_guard_config.rs"));
 }
-mod shell_guard_fd;
-mod shell_guard_report;
-
-use shell_guard_fd as shg_fd;
-use shell_guard_report as report;
+mod fd;
+mod report;
 
 const REAL_SHELL: &str = "/bin/bash.real";
 const MAX_TEXT: usize = 1 << 20;
@@ -197,8 +194,8 @@ fn classify_script(path: &OsString) -> ScriptClass {
     // fd-delivered sources are real content the regular open path
     // cannot see (O_NOFOLLOW rejects /proc/self/fd symlinks). Accept
     // only our own sealed staging memfd; block everything else.
-    if shg_fd::is_fd_path(&spath) {
-        return match shg_fd::read_staged_fd(&spath) {
+    if fd::is_fd_path(&spath) {
+        return match fd::read_staged_fd(&spath) {
             Some(buf) => ScriptClass::Untrusted(buf),
             None => ScriptClass::ForeignFd,
         };
@@ -492,7 +489,7 @@ fn main() {
                     let excerpt = report::excerpt(&content, hit.start, hit.end, true);
                     block(hit.rule, &display, &excerpt);
                 }
-                let fdpath = shg_fd::memfd_exec_path(&content);
+                let fdpath = fd::memfd_exec_path(&content);
                 let orig =
                     fs::canonicalize(Path::new(&path)).unwrap_or_else(|_| PathBuf::from(&path));
                 exec_real(&args, Some((idx, fdpath, orig)));
@@ -502,5 +499,4 @@ fn main() {
 }
 
 #[cfg(test)]
-#[path = "shell_guard_tests.rs"]
 mod tests;

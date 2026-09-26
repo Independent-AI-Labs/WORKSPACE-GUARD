@@ -149,7 +149,7 @@ Invariants enforced by the current code:
 - Workspace detection fails closed: incomplete workspace markers or a
   workspace clone outside the workspace tree block enforcement bypass.
 - CI deployment integrity at `/opt/workspace-ci` is verified by content, not
-  just ownership (`src/ci_integrity.rs`).
+  just ownership (`git-guard/src/ci_integrity.rs`).
 - Provisioned SSH key material is kept off agent-readable disk and offered
   through the guard-managed ssh wrapper (`config/git_ssh_allowlist.yaml`).
 
@@ -336,6 +336,34 @@ Run from the workspace root; full detail in
 | `make yaml-list FILE=..` / `make yaml-validate FILE=..` | Print / schema-validate a YAML policy file                                |
 
 ---
+
+## Repository layout
+
+Two Rust packages. The privileged Git guard is a standalone package with its own
+lockfile and no path dependency on the rest of the repo, so dependencies needed
+by the other tools cannot enter its closure. The top-level package builds the
+four non-privileged binaries, each with its submodules grouped under a directory
+named for its bin root so no module exceeds the structural limits in
+`config/file_length_limits.yaml`.
+
+```text
+git-guard/                 # standalone privileged package (own Cargo.lock)
+├── build.rs
+├── .cargo/config.toml
+├── src/                   # main.rs, linux_ffi.rs, args/block/sanitize,
+│                          #   exec/gitdir/sealed_repo/reconcile, remote/fetch,
+│                          #   vendored, agent_identity/ci_integrity, ...
+└── tests/integration_test.rs
+
+src/                       # non-privileged package
+├── shell_guard/           # main.rs (bin root) + fd.rs, report.rs, tests.rs
+├── binary_guard/          # main.rs (bin root) + policy_types.rs, tests.rs
+├── yaml_edit/             # main.rs (bin root) + engine, schema, splice, ...
+└── git_ssh.rs
+```
+
+`git-guard/src/linux_ffi.rs` is the sole reviewed `unsafe` boundary; see
+[SPEC-GIT-GUARD-IMPL](docs/specifications/SPEC-GIT-GUARD-IMPL.md) section 8.3.
 
 ## Building and testing
 

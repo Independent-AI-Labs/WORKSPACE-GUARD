@@ -12,7 +12,7 @@
 // key order, and scalar spelling survive byte-for-byte except for the
 // inserted indentation (REQ-YE-103).
 
-use crate::yaml_edit_splice::{is_content, leading_spaces, parse_key_line};
+use crate::splice::{is_content, leading_spaces, parse_key_line};
 
 /// A top-level block sequence whose dash items sit at or above its key
 /// indent and is therefore not splice-editable.

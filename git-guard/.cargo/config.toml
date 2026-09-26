@@ -1,0 +1,9 @@
+[build]
+# Bare cargo calls (agent dev loop) build into this package's agent-owned
+# dev dir; git-guard/target/ stays root-owned and is only used via explicit
+# CARGO_TARGET_DIR in root-gated make targets.
+target-dir = "target/agent"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "/usr/bin/gcc"
+rustflags = ["-C", "link-arg=-B/usr/bin", "-C", "link-arg=-B/usr/x86_64-linux-gnu/bin"]

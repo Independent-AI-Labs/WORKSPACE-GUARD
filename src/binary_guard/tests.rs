@@ -1,4 +1,4 @@
-use super::binary_policy_types::{BinaryPolicy, RejectKind, RejectRule};
+use super::policy_types::{BinaryPolicy, RejectKind, RejectRule};
 use super::*;
 use std::ffi::OsString;
 

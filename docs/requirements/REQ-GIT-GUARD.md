@@ -945,14 +945,16 @@ This document specifies the requirements for the Rust binary. The installation/d
   3. Running `git --version` as the current user and confirming it succeeds
   4. Running `git reset --hard` as the current user and confirming it is blocked
 - **REQ-GGUARD-147**: If any step of the installation fails, the script shall attempt to restore the original state: copy `/usr/bin/git.original` back to `/usr/bin/git` and set permissions to 0755. A clear error message shall be displayed.
-- **REQ-GGUARD-148**: `make install-guard-host-exec` shall be idempotent for the host-exec class: it reconciles drift when `deployment-class` is `host-exec` or missing after legacy uninstall, including stale guard binary hash, stale `git-ssh-wrapper` or `agent-git-identity` hash, wrong file caps on `/usr/bin/git` or `git-ssh-wrapper`, pam artifacts, missing `dpkg-divert`, apt hook, or immutable flags. Drift detection shall read `/usr/lib/workspace-guard/deployment-class` only (not infer from CapAmb or pam state). Functional verify shall use `runuser`, not `su -`. The script shall skip re-installation only when **fully healthy**. `make reconcile-guard-host-exec` with `GUARD_FORCE_RECONCILE=1` shall always reconcile.
+- **REQ-GGUARD-148**: `make install-guard-host-exec` shall be idempotent for the host-exec class: it reconciles drift when `deployment-class` is `host-exec` or missing after legacy uninstall, including stale guard binary hash, stale `git-ssh-wrapper` or `agent-git-identity` hash, wrong file caps on `/usr/bin/git` or `git-ssh-wrapper`, pam artifacts, missing `dpkg-divert` (for `/usr/bin/git` or `/usr/lib/git-core/git`), a missing or incorrect `/usr/lib/git-core/git` guard symlink, apt hook, or immutable flags. Drift detection shall read `/usr/lib/workspace-guard/deployment-class` only (not infer from CapAmb or pam state). Functional verify shall use `runuser`, not `su -`. The script shall skip re-installation only when **fully healthy**. `make reconcile-guard-host-exec` with `GUARD_FORCE_RECONCILE=1` shall always reconcile.
 - **REQ-GGUARD-149**: An uninstall procedure shall be available via `make uninstall-guard` which:
   1. Removes `/usr/bin/git` (the guard)
   2. Restores `/usr/bin/git.original` to `/usr/bin/git` with mode 0755
   3. Restores the dpkg diversion (removes it, returning `/usr/bin/git` to dpkg control)
-  4. Removes git-install artifacts (`deployment-class`, `git-ssh-wrapper`, apt hook) but **preserves** host-provision state (`host-provision.ok`, `ssh-keys/`, `agent-git-identity`)
-  5. Confirms `git --version` works
-- **REQ-GGUARD-150**: The installation script shall configure a `dpkg-divert` for `/usr/bin/git` to prevent the `git` apt package from overwriting the guard binary during `apt install git` or `apt upgrade`. The diversion shall redirect `/usr/bin/git` → `/usr/bin/git.distrib`.
+  4. Removes the `/usr/lib/git-core/git` guard symlink and removes its `dpkg-divert`, restoring the real exec-path binary
+  5. Removes git-install artifacts (`deployment-class`, `git-ssh-wrapper`, apt hook) but **preserves** host-provision state (`host-provision.ok`, `ssh-keys/`, `agent-git-identity`)
+  6. Confirms `git --version` works
+- **REQ-GGUARD-150**: The installation script shall configure a `dpkg-divert` for `/usr/bin/git` to prevent the `git` apt package from overwriting the guard binary during `apt install git` or `apt upgrade`. The diversion shall redirect `/usr/bin/git` → `/usr/bin/git.distrib`. The script shall additionally divert `/usr/lib/git-core/git` → `/usr/lib/git-core/git.distrib` (mode 0700 root:root) and symlink `/usr/lib/git-core/git` → `/usr/bin/git`: git prefixes its exec path to `PATH` when spawning hooks and child processes, so the hook-side `git` resolves to the exec-path name ahead of `/usr/bin/git`, and that path must resolve to the guard. The prior inheritable-only `setcap` on the real exec-path binary shall not be used; capability delivery happens on the guard at `/usr/bin/git`.
+- **REQ-GGUARD-159**: When invoked through a multi-call helper name (`argv[0]` basename `git-<cmd>`, reached via the `/usr/lib/git-core/git-*` symlinks), the binary shall normalise the invocation to the `git <cmd>` dispatcher form before policy evaluation and execution, so the same rules apply as the `/usr/bin/git` path and real git resolves the helper identically. The original invocation bytes shall remain the basis of the audit/block record.
 - **REQ-GGUARD-151**: The installation script shall remove the older bash wrapper at `.boot-linux/bin/git` to prevent PATH-based bypass. If `.boot-linux/bin/git` exists, it shall be removed during guard installation.
 - **REQ-GGUARD-152**: If the guard detects that `/usr/bin/git` has been replaced (e.g., by a manual override or failed divert), the guard binary shall refuse to `execve()` real git if the inode of `/usr/bin/git` does not match its own. This prevents a scenario where an attacker replaces the capability-enabled guard binary at the filesystem level.
 - **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `make install-guard-host-exec`. The hook shall NOT reinstall the guard on its own; it only warns.
@@ -971,7 +973,13 @@ This document specifies the requirements for the Rust binary. The installation/d
   standalone package required by REQ-GGUARD-122:
   ```text
   projects/WORKSPACE-GUARD/
-  ├── Cargo.toml                    # unrelated tools package/workspace
+  ├── Cargo.toml                    # workspace: non-privileged tools only
+  ├── build.rs                      # shell/binary/git-ssh config codegen
+  ├── src/                          # non-privileged package
+  │   ├── shell_guard/main.rs       # bin root; fd.rs, report.rs, tests.rs
+  │   ├── binary_guard/main.rs      # bin root; policy_types.rs, tests.rs
+  │   ├── yaml_edit/main.rs         # bin root; engine, schema, splice, ...
+  │   └── git_ssh.rs                # bin root
   └── git-guard/                    # standalone; not a workspace member
       ├── Cargo.toml
       ├── Cargo.lock
@@ -981,13 +989,22 @@ This document specifies the requirements for the Rust binary. The installation/d
       ├── src/
       │   ├── main.rs
       │   ├── linux_ffi.rs
-      │   ├── block.rs
-      │   ├── exec.rs
-      │   ├── args.rs
-      │   └── log.rs
+      │   ├── args.rs  block.rs  sanitize.rs
+      │   ├── exec.rs  gitdir.rs  sealed_repo.rs  reconcile.rs
+      │   ├── remote.rs  fetch.rs  vendored.rs
+      │   ├── agent_identity.rs  ci_integrity.rs  ci_hook_identity.rs
+      │   ├── config_keys.rs  child.rs  log.rs  wsroot.rs
+      │   └── *_tests.rs            # unit tests colocated with their module
       └── tests/
           └── integration_test.rs
   ```
+
+  The non-privileged bins (`workspace-shell-guard`, `workspace-binary-guard`,
+  `workspace-yaml-edit`, `workspace-git-ssh`) remain in the top-level package;
+  each bin root keeps its YAML/config codegen in the top-level `build.rs` and
+  groups its submodules under a directory named for that bin root. The
+  privileged Git guard's config codegen moves to `git-guard/build.rs`, and no
+  top-level module enters the Git guard's dependency closure.
 - **REQ-GGUARD-171**: `git-guard/Cargo.toml` shall specify edition `2021`; release
   `panic = "abort"`, `overflow-checks = true`, `opt-level = "z"`, `lto = true`,
   `codegen-units = 1`, and `strip = true`; and development

@@ -9,24 +9,11 @@ _SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 
-resolve_podman() {
-    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
-        echo "/opt/workspace-ci/.boot-linux/bin/podman"
-        return 0
-    fi
-    if _podman_probe="$(command -v real-podman 2>&1)"; then
-        echo "real-podman"
-        return 0
-    fi
-    if _podman_probe="$(command -v podman 2>&1)"; then
-        echo "podman"
-        return 0
-    fi
-    echo "ERROR: podman not found. Run: make init" >&2
-    return 1
-}
-
-PODMAN="$(resolve_podman)"
+PODMAN="/opt/workspace-ci/.boot-linux/bin/podman"
+if [[ ! -x "$PODMAN" ]]; then
+    echo "ERROR: podman not found at $PODMAN. Run: make init" >&2
+    exit 1
+fi
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
     _info_rc=0

@@ -798,18 +798,21 @@ New binary in `Cargo.toml`:
 ```toml
 [[bin]]
 name = "workspace-shell-guard"
-path = "src/shell_guard.rs"
+path = "src/shell_guard/main.rs"
 ```
 
 ```
-src/shell_guard.rs          # the whole guard: argv classification,
-                            # text acquisition, trust tiers, pattern
-                            # scan, env allow-list, memfd/path exec
+src/shell_guard/main.rs     # bin root: argv classification, text
+                            # acquisition, trust tiers, pattern scan,
+                            # env allow-list, memfd/path exec
+src/shell_guard/fd.rs       # sealed-memfd and raw-fd helpers
+src/shell_guard/report.rs   # block report framing and audit sink
+src/shell_guard/tests.rs    # unit tests
 ```
 
-Single-file design (~500 lines): the scanner is a regex-table loop,
-so the tokenizer/policy/env modules of earlier drafts collapse into
-one auditable unit. `build.rs` parses
+The bin root is the auditable core; `fd` and `report` are small
+supporting submodules, and `tests` is compiled only under
+`#[cfg(test)]`. `build.rs` parses
 `config/shell_guard_policy.yaml` into a compiled
 `SHELL_PATTERNS` table (`&[(&str /*id*/, &str /*regex*/, &str /*hint*/)]`)
 and validates `config/shell_guard_policy_matrix.yaml`

@@ -13,7 +13,7 @@ audit traceability that motivated the rewrite)
 ## 1. Architecture Overview
 
 The git guard keeps every policy YAML `root:root` via its
-per-invocation ownership lock (`src/gitdir.rs` `lock()`). Legitimate
+per-invocation ownership lock (`git-guard/src/gitdir.rs` `lock()`). Legitimate
 edits go through one root-gated Rust binary that edits YAML contents
 directly, generically, atomically, and fail-closed:
 
@@ -223,15 +223,15 @@ Error messages distinguish "key missing", "key is not a list", and
 
 ## 4. Transform Engine
 
-Module layout (512-line house cap; `#[path]` mod pattern of
-`binary_guard.rs`):
+Module layout (512-line house cap; the bin root `src/yaml_edit/main.rs` declares
+its submodules, which live beside it under `src/yaml_edit/`):
 
 | file | role |
 |---|---|
-| `src/yaml_edit.rs` | bin: CLI parse, root gate, preflight, flock, orchestration, chattr, audit |
-| `src/yaml_edit_engine.rs` | spec parsing, entry build/match, line-splice transform, verification |
-| `src/yaml_edit_schema.rs` | schema registry: built-in table + override file, `validate` |
-| `src/yaml_edit_diff.rs` | minimal unified diff for `--dry-run` |
+| `src/yaml_edit/main.rs` | bin: CLI parse, root gate, preflight, flock, orchestration, chattr, audit |
+| `src/yaml_edit/engine.rs` | spec parsing, entry build/match, line-splice transform, verification |
+| `src/yaml_edit/schema.rs` | schema registry: built-in table + override file, `validate` |
+| `src/yaml_edit/diff.rs` | minimal unified diff for `--dry-run` |
 
 ### 4.1 add
 
@@ -511,8 +511,8 @@ root-owned CI repo.
 
 ## 10. Testing
 
-- Rust unit tests (`src/yaml_edit_tests.rs`,
-  `src/yaml_edit_engine_tests.rs`, `src/yaml_edit_schema_tests.rs`):
+- Rust unit tests (`src/yaml_edit/*_tests.rs`, including `engine_tests.rs`
+  and `schema_tests.rs`):
   engine, grammar, matching, emission, verification, schemas, and one
   regression test per section-9 finding.
 - bats `tests/shell/20-yaml-edit.bats`: usage/exit codes, non-root

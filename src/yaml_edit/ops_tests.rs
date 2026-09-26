@@ -1,4 +1,4 @@
-use super::yaml_edit_target::is_deployed_ci_path;
+use super::target::is_deployed_ci_path;
 use std::path::Path;
 
 #[test]

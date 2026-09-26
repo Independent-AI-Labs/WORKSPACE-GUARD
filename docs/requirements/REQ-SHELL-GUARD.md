@@ -588,7 +588,7 @@ handled by `make install-shell-guard`.
   removal policy do not survive.
 
 - **REQ-SHG-804**: Config consistency tests in
-  `src/config_consistency_tests.rs` shall verify
+  `git-guard/src/config_consistency_tests.rs` shall verify
   `config/shell_guard_policy.yaml` parses, every pattern compiles as
   a valid bytes-regex, every entry carries a non-empty hint, and
   every matrix case references a known rule id.

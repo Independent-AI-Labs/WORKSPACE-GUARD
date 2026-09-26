@@ -3,7 +3,7 @@
 // short reasons, missing fields) and stay open for unknown basenames
 // so the tool remains generic.
 
-use super::yaml_edit_schema as schema;
+use super::schema;
 use serde_yaml::Value;
 use std::io::Write;
 

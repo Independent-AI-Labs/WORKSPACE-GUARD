@@ -340,7 +340,7 @@ this table directly.
 
 ## 7. Config Consistency Tests
 
-`src/config_consistency_tests.rs` adds three tests:
+`git-guard/src/config_consistency_tests.rs` adds three tests:
 
 1. `home_lock_paths_parses`: the YAML loads without error.
 2. `home_lock_paths_are_absolute_or_tilde_prefixed`: every key is

@@ -2,8 +2,8 @@
 // dotted-key resolution. Each test names the audit finding it
 // regresses where one applies.
 
-use super::yaml_edit_engine as engine;
-use super::yaml_edit_engine::Spec;
+use super::engine;
+use super::engine::Spec;
 use serde_yaml::Value;
 
 fn sv(s: &str) -> Value {

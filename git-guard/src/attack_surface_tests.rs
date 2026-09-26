@@ -31,11 +31,18 @@ struct AttackSurfaceConfig {
 
 fn load_matrix() -> AttackSurfaceConfig {
     let path = format!(
-        "{}/config/git_guard_attack_surface_matrix.yaml",
+        "{}/../config/git_guard_attack_surface_matrix.yaml",
         env!("CARGO_MANIFEST_DIR")
     );
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
     serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {path}: {e}"))
+}
+
+/// Repo root (the git-guard package's parent). Matrix fixture paths such as
+/// `Makefile` / `src` are repo-root-relative; pin the guard's path-existence
+/// base to it so the suite is independent of the test process CWD.
+fn repo_root() -> String {
+    format!("{}/..", env!("CARGO_MANIFEST_DIR"))
 }
 
 fn argv_bytes(argv: &[String]) -> Vec<&[u8]> {
@@ -113,7 +120,8 @@ fn evaluate_case_inner(case: &AttackSurfaceCase) -> Result<(), String> {
         .or_else(|| case.argv.get(1).map(String::as_str))
         .unwrap_or("");
     let os = argv_os(&case.argv);
-    let block_result = check_blocked(&state, sub, &os, "/nonexistent-git", None);
+    let root = repo_root();
+    let block_result = check_blocked(&state, sub, &os, "/nonexistent-git", Some(&root));
 
     match block_result {
         Err(GuardError::Blocked { reason, .. }) => {

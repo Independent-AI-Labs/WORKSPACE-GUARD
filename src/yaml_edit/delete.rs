@@ -1,8 +1,6 @@
-use crate::yaml_edit_install::{is_immutable, set_immutable};
-use crate::yaml_edit_ops::{
-    acquire_lock, audit, check_override_owner, fail, parse_doc, require_root, Cli,
-};
-use crate::yaml_edit_target::Target;
+use crate::install::{is_immutable, set_immutable};
+use crate::ops::{acquire_lock, audit, check_override_owner, fail, parse_doc, require_root, Cli};
+use crate::target::Target;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek};
 

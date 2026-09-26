@@ -13,24 +13,24 @@ fn excerpt_marks_matching_line_with_context() {
 
 #[test]
 fn fd_path_classification() {
-    assert!(shg_fd::is_fd_path("/proc/self/fd/3"));
-    assert!(shg_fd::is_fd_path("/dev/fd/63"));
-    assert!(shg_fd::is_fd_path("/dev/stdin"));
-    assert!(!shg_fd::is_fd_path("/tmp/script.sh"));
-    assert!(!shg_fd::is_fd_path("relative.sh"));
+    assert!(fd::is_fd_path("/proc/self/fd/3"));
+    assert!(fd::is_fd_path("/dev/fd/63"));
+    assert!(fd::is_fd_path("/dev/stdin"));
+    assert!(!fd::is_fd_path("/tmp/script.sh"));
+    assert!(!fd::is_fd_path("relative.sh"));
 }
 
 #[test]
 fn staged_memfd_roundtrip_verifies_seals_and_rewinds() {
-    let path = shg_fd::memfd_exec_path(b"echo hello\n");
-    let body = shg_fd::read_staged_fd(&path).expect("staged memfd must verify");
+    let path = fd::memfd_exec_path(b"echo hello\n");
+    let body = fd::read_staged_fd(&path).expect("staged memfd must verify");
     assert_eq!(body, b"echo hello\n");
 }
 
 #[test]
 fn read_staged_fd_rejects_regular_paths_and_pipes() {
-    assert!(shg_fd::read_staged_fd("/tmp").is_none());
-    assert!(shg_fd::read_staged_fd("/proc/self/fd/0").is_none());
+    assert!(fd::read_staged_fd("/tmp").is_none());
+    assert!(fd::read_staged_fd("/proc/self/fd/0").is_none());
 }
 
 fn rules() -> Vec<Rule> {

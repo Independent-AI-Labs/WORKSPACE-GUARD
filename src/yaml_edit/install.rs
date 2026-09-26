@@ -13,8 +13,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process;
 
-use crate::yaml_edit_ops::fail;
-use crate::yaml_edit_target::Target;
+use crate::ops::fail;
+use crate::target::Target;
 
 const LSATTR: &str = "/usr/bin/lsattr";
 const CHATTR: &str = "/usr/bin/chattr";

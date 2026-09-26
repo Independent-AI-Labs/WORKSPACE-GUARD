@@ -18,10 +18,9 @@ use std::process;
 
 use nix::unistd::{execve, getuid};
 
-#[path = "binary_policy_types.rs"]
-mod binary_policy_types;
+mod policy_types;
 
-use binary_policy_types::{find_policy, PolicyKind};
+use policy_types::{find_policy, PolicyKind};
 
 /// Exit codes. 126 = "found but not executable" (matches sh); we use it for
 /// "blocked by policy". 127 = "not found" (matches sh); we use it for "no
@@ -83,7 +82,7 @@ enum Decision {
 }
 
 fn decide(
-    policy: &binary_policy_types::BinaryPolicy,
+    policy: &policy_types::BinaryPolicy,
     invoked_name: &str,
     argv_rest: &[OsString],
     is_root: bool,
@@ -136,7 +135,7 @@ fn decide(
 }
 
 fn check_arg_validate(
-    policy: &binary_policy_types::BinaryPolicy,
+    policy: &policy_types::BinaryPolicy,
     invoked_name: &str,
     argv_rest: &[OsString],
     is_root: bool,
@@ -152,7 +151,7 @@ fn check_arg_validate(
 
     for rp in policy.reject_patterns {
         match rp.kind {
-            binary_policy_types::RejectKind::Flag => {
+            policy_types::RejectKind::Flag => {
                 if let Some(flag) = rp.flag {
                     for a in argv_rest {
                         if a.to_string_lossy() == flag {
@@ -161,7 +160,7 @@ fn check_arg_validate(
                     }
                 }
             }
-            binary_policy_types::RejectKind::Regex => {
+            policy_types::RejectKind::Regex => {
                 if let Some(pat) = rp.pattern {
                     let subcommand_ok = rp
                         .subcommand
@@ -248,7 +247,7 @@ fn real_binary_path(invoked_name: &str) -> String {
 }
 
 fn build_sanitized_env(
-    policy: &binary_policy_types::BinaryPolicy,
+    policy: &policy_types::BinaryPolicy,
     _is_root: bool,
 ) -> Vec<(OsString, OsString)> {
     use std::collections::HashSet;
@@ -312,5 +311,4 @@ fn log_block(invoked_name: &str, target: &str, reason: &str) {
 }
 
 #[cfg(test)]
-#[path = "binary_guard_tests.rs"]
 mod tests;

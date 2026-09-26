@@ -162,21 +162,31 @@ sync: ## Sync dependencies + reinstall hooks
 # target/release stays root-owned (build targets are root-gated) so an agent
 # cannot stage a trojaned binary for a later root install to consume.
 _AGENT_TARGET := $(REPO_ROOT)/target/agent
+# The privileged Git guard is a standalone package (git-guard/). Its agent
+# dev-loop target dir is kept separate from the top-level tools package.
+_GG_DIR := $(REPO_ROOT)/git-guard
+_GG_AGENT_TARGET := $(_GG_DIR)/target/agent
 
 .PHONY: check
 check: ## Run cargo check (all feature combinations)
 	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --workspace
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --no-default-features --features root-only
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --workspace --features binary-guard
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --workspace
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --no-default-features --features root-only
 
 .PHONY: lint
 lint: ## Run cargo fmt --check + clippy
 	$(CARGO) fmt --all -- --check
+	cd "$(_GG_DIR)" && $(CARGO) fmt --all -- --check
 	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) clippy --workspace --all-targets -- -D warnings
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) clippy --no-default-features --features root-only --all-targets -- -D warnings
+	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) clippy --workspace --all-targets --features binary-guard -- -D warnings
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) clippy --workspace --all-targets -- -D warnings
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) clippy --all-targets --no-default-features --features root-only -- -D warnings
 
 .PHONY: type-check
 type-check: ## Rust has no separate type-check; run cargo check
 	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --workspace
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --workspace
 
 .PHONY: test test-unit test-integration-cap test-integration-root
 test: ## Run cargo test (all feature combinations; integration gated by euid)
@@ -200,21 +210,25 @@ test-unit: ## Unit/binary tests only (both feature combinations)
 	if [ "$(_OS)" != "Darwin" ]; then \
 		if command -v cargo-nextest; then \
 			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --workspace --bins; \
-			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --no-default-features --features root-only --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --workspace --bins --features binary-guard; \
+			cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) nextest run --workspace --bins; \
+			cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) nextest run --no-default-features --features root-only --bins; \
 		else \
 			echo "NOTE: cargo-nextest not found; using cargo test (per-test timeouts disabled)."; \
 			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --workspace --bins; \
-			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --no-default-features --features root-only --bins; \
+			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --workspace --bins --features binary-guard; \
+			cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) test --workspace --bins; \
+			cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) test --no-default-features --features root-only --bins; \
 		fi; \
 	else \
 		echo "SKIP: cargo unit tests on Darwin (Linux-only; use make test-podman)"; \
 	fi
 
 test-integration-cap: ## Capability-mode integration tests (non-root)
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --test integration_test
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) test --test integration_test
 
 test-integration-root: ## Root-only integration tests (root)
-	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) test --no-default-features --features root-only --test integration_test
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) test --no-default-features --features root-only --test integration_test
 
 .PHONY: test-shell
 test-shell: ## Run the bats shell test suite (gated in check-push).
@@ -263,12 +277,13 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (RO
 		echo "ERROR: build-guard needs root (install consumes target/ artifacts): sudo make build-guard" >&2; \
 		exit 1; \
 	fi
-	rm -f "$(REPO_ROOT)/target/release/workspace-guard" \
-		"$(REPO_ROOT)/target/release/workspace-guard.mode" \
-		"$(REPO_ROOT)/target/x86_64-unknown-linux-musl/release/workspace-guard" \
-		"$(REPO_ROOT)/target/x86_64-unknown-linux-musl/release/workspace-guard.mode"
-	WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" CARGO_TARGET_DIR="$(REPO_ROOT)/target" RUSTUP_HOME="$(RUSTUP_HOME)" CARGO_HOME="$(CARGO_HOME)" PATH="$(_CARGO_BOOT):$$PATH" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+	rm -f "$(_GG_DIR)/target/release/workspace-guard" \
+		"$(_GG_DIR)/target/release/workspace-guard.mode" \
+		"$(_GG_DIR)/target/x86_64-unknown-linux-musl/release/workspace-guard" \
+		"$(_GG_DIR)/target/x86_64-unknown-linux-musl/release/workspace-guard.mode"
+	WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" CARGO_TARGET_DIR="$(_GG_DIR)/target" RUSTUP_HOME="$(RUSTUP_HOME)" CARGO_HOME="$(CARGO_HOME)" PATH="$(_CARGO_BOOT):$$PATH" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
 	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(REPO_ROOT)/target/agent"
+	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(_GG_DIR)/target/agent"
 
 build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-guard once (provision phase 5)
 
@@ -276,9 +291,9 @@ build-host-stack: build-guard build-binary-guard ## Build git-guard + binary-gua
 INSTALL_LOCK ?= false
 INSTALL_AUDITD ?= false
 
-_GUARD_RELEASE_BIN := $(REPO_ROOT)/target/release/workspace-guard
+_GUARD_RELEASE_BIN := $(_GG_DIR)/target/release/workspace-guard
 _GUARD_RELEASE_SSH := $(REPO_ROOT)/target/release/workspace-git-ssh
-_GUARD_RELEASE_MODE := $(REPO_ROOT)/target/release/workspace-guard.mode
+_GUARD_RELEASE_MODE := $(_GG_DIR)/target/release/workspace-guard.mode
 
 _install-guard-stack-build:
 	if [ "$(GUARD_SKIP_BUILD)" = "1" ]; then \
@@ -337,14 +352,17 @@ shell-guard-check: ## Read-only shell guard health check (modes, caps, divert, +
 # =============================================================================
 
 .PHONY: build
-build: ## Build release binary (default + root-only) (ROOT)
+build: ## Build release binaries (top-level tools + privileged git guard) (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: build needs root (install consumes target/ artifacts): sudo make build" >&2; \
 		exit 1; \
 	fi
 	$(CARGO) build --release
-	$(CARGO) build --release --no-default-features --features root-only
-	chown -R root:root "$(REPO_ROOT)/target"
+	$(CARGO) build --release --features binary-guard
+	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_DIR)/target" $(CARGO) build --release
+	chown root:root "$(REPO_ROOT)/target" "$(_GG_DIR)/target"
+	find "$(REPO_ROOT)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
+	find "$(_GG_DIR)/target" -mindepth 1 -maxdepth 1 ! -name agent -exec chown -R root:root {} +
 
 .PHONY: build-binary-guard
 build-binary-guard: ## Build the generic binary guard (one binary, full GTFOBins table) (ROOT)
@@ -372,11 +390,13 @@ build-shell-guard: ## Build the shell guard binary (release) (ROOT)
 
 .PHONY: clean
 clean: ## Clean build artifacts
-	rm -rf target
+	rm -rf target git-guard/target
 
 .PHONY: clippy
 clippy: ## Run cargo clippy
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	$(CARGO) clippy --workspace --all-targets --features binary-guard -- -D warnings
+	cd "$(_GG_DIR)" && $(CARGO) clippy --workspace --all-targets -- -D warnings
 
 .PHONY: compliance
 compliance: ## Run the WORKSPACE-CI compliance audit on this repo

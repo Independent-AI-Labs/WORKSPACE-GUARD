@@ -3,7 +3,7 @@
 // YAML 1.1 consumer downstream can never see a different type
 // (audit findings 6, 14, 31).
 
-use super::yaml_edit_emit::{emit_dash_item, emit_kv, render_scalar};
+use super::emit::{emit_dash_item, emit_kv, render_scalar};
 use serde_yaml::Value;
 
 fn roundtrip(v: &Value) {

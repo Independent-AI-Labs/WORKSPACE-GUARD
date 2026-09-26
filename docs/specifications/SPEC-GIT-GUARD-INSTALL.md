@@ -171,7 +171,7 @@ Before modifying `/usr/bin/git`, `make install-guard` (via `bootstrap-workspace-
 [INFO] Reconciling git guard installation...
 ```
 
-Drift dimensions checked (capability mode): `/usr/bin/git.original` mode 0700; `/usr/bin/git` mode 0755 with no file caps; installed binary sha256 matches built binary; `dpkg-divert` active; `pam_cap` ambient grant in `/etc/security/capability.conf` with `^cap_*` IAB prefix; `auth optional pam_cap.so defer` in `/etc/pam.d/common-auth` (not `session` - pam_cap is auth-only); no stale `session optional pam_cap.so` lines; apt hook present; immutable flags on `/usr/bin/git` and `/usr/bin/git.original`.
+Drift dimensions checked (capability mode): `/usr/bin/git.original` mode 0700; `/usr/bin/git` mode 0755 with no file caps; installed binary sha256 matches built binary; `dpkg-divert` active for `/usr/bin/git` and `/usr/lib/git-core/git`; `/usr/lib/git-core/git` is a symlink to `/usr/bin/git` with `/usr/lib/git-core/git.distrib` at 0700 root:root; `pam_cap` ambient grant in `/etc/security/capability.conf` with `^cap_*` IAB prefix; `auth optional pam_cap.so defer` in `/etc/pam.d/common-auth` (not `session` - pam_cap is auth-only); no stale `session optional pam_cap.so` lines; apt hook present; immutable flags on `/usr/bin/git` and `/usr/bin/git.original`.
 
 ### 5.1.1 pam_cap ambient delivery (capability mode)
 
@@ -204,6 +204,21 @@ dpkg-divert --list /usr/bin/git | grep -q "git.distrib"
 ```
 
 After this, any future `apt install git` will place the real git at `/usr/bin/git.distrib` (which is already mode 0700 root:root as a safeguard, though dpkg will try to set its own permissions).
+
+### 5.2.1 Configure the exec-path diversion
+
+Git prefixes its exec path (`/usr/lib/git-core`) to `PATH` when spawning hooks and child processes, so a hook or tool that runs `git` resolves to `/usr/lib/git-core/git` ahead of `/usr/bin/git`. That path must resolve to the guard; leaving the real binary there lets hook-side and unsandboxed callers bypass it (observed: `fatal: detected dubious ownership` from a caller that never received the guard's `safe.directory` injection).
+
+```bash
+# Relocate the real exec-path binary and point the name at the guard
+dpkg-divert --local --divert /usr/lib/git-core/git.distrib --rename --add /usr/lib/git-core/git
+chmod 0700 /usr/lib/git-core/git.distrib
+chown root:root /usr/lib/git-core/git.distrib
+setcap -r /usr/lib/git-core/git.distrib
+ln -sfn /usr/bin/git /usr/lib/git-core/git
+```
+
+The `git-*` multi-call symlinks in `/usr/lib/git-core` continue to point at `git` and therefore route through the guard, which normalises `git-<cmd>` to the `git <cmd>` dispatcher form before policy evaluation (REQ-GGUARD-159).
 
 ### 5.3 Verify the Copy
 

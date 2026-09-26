@@ -16,7 +16,7 @@ Policy YAML files (`*_exceptions.yaml`, `coverage_thresholds.yaml`,
 `file_length_limits.yaml`, `dead_code.yaml`, `*_excludes.yaml`,
 `banned_words.yaml`, `guard_*.yaml`, consumer quality-gate and
 content-filter configs, ...) are locked to `root:root` by the git
-guard's per-invocation ownership lock (`src/gitdir.rs`), so a non-root
+guard's per-invocation ownership lock (`git-guard/src/gitdir.rs`), so a non-root
 agent cannot tamper with them. That ownership lock is sound and stays.
 
 Legitimate edits go through a single root-gated tool. The first

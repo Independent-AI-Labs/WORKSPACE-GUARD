@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 #[cfg(all(target_os = "linux", not(feature = "root-only")))]
 use std::os::linux::fs::MetadataExt;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::process;
 
 use nix::unistd::geteuid;
@@ -321,11 +321,52 @@ pub(crate) fn trace_end(t: Option<PhaseTrace>, phase: &str) {
     }
 }
 
+/// Basename of an arbitrary argv byte string (no allocation).
+fn basename(bytes: &[u8]) -> &[u8] {
+    match bytes.iter().rposition(|&b| b == b'/') {
+        Some(i) => &bytes[i + 1..],
+        None => bytes,
+    }
+}
+
+/// Normalise git's multi-call form (`git-foo ...`, argv[0] basename
+/// `git-foo`) to the dispatcher form (`git foo ...`) so the SAME policy
+/// applies whether git is reached as `/usr/bin/git` or through a
+/// `/usr/lib/git-core/git-foo` symlink. /usr/lib/git-core/git is the
+/// guard itself, and git prefixes its exec path to PATH when spawning
+/// hooks, so hook/child `git-foo` invocations land here. Without this,
+/// `git-commit --amend` would reach real git as argv[1]=`--amend` and
+/// slip past the commit rule, and `git-upload-pack` would be misparsed
+/// as a repo path.
+fn normalize_multicall(argv: &[OsString]) -> Vec<OsString> {
+    let Some(first) = argv.first() else {
+        return Vec::new();
+    };
+    let base = basename(first.as_bytes());
+    let Some(suffix) = base.strip_prefix(b"git-") else {
+        return argv.to_vec();
+    };
+    if suffix.is_empty() || suffix.contains(&b'/') {
+        return argv.to_vec();
+    }
+    let mut out = Vec::with_capacity(argv.len() + 1);
+    out.push(first.clone());
+    out.push(OsString::from_vec(suffix.to_vec()));
+    out.extend_from_slice(&argv[1..]);
+    out
+}
+
 fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     let t = trace_start("check_privileges");
     check_privileges()?;
     trace_end(t, "check_privileges");
     exec::set_resource_limits();
+
+    // Multi-call normalisation must precede parsing and exec: real git is
+    // invoked via a fixed pathname with argv[0] replaced, so the subcommand
+    // must already be present at argv[1].
+    let normalized = normalize_multicall(argv_os);
+    let argv_os: &[OsString] = &normalized;
 
     if argv_os.len() <= 1 {
         return exec::execve_real_git(argv_os, None, None);
@@ -343,7 +384,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     // subcommand-specific rules on the possibly-rewritten argv.
     if let Some(ref sub) = state.subcommand {
         let t = trace_start("check_categories");
-        block::check_categories(sub, argv_os)?;
+        block::check_categories(sub, argv_os, None)?;
         trace_end(t, "check_categories");
     }
 
@@ -419,3 +460,7 @@ mod policy_matrix_tests;
 #[cfg(test)]
 #[path = "attack_surface_tests.rs"]
 mod attack_surface_tests;
+
+#[cfg(test)]
+#[path = "multicall_tests.rs"]
+mod multicall_tests;

@@ -3,7 +3,7 @@
 // 2026-09-06 incident shape (Python yaml.safe_dump output) that made
 // every list edit fail with "expected N entries, found none".
 
-use crate::yaml_edit_shape::{indentless_lists, reindent};
+use crate::shape::{indentless_lists, reindent};
 
 const INDENTLESS: &str = concat!(
     "# header comment\n",
@@ -127,15 +127,14 @@ fn splice_region_maps_after_reindent() {
     // input and succeeds after the canonicalizing reindent.
     let once = reindent(INDENTLESS).expect("pass").expect("changed");
     let lines: Vec<&str> = once.lines().collect();
-    let (ki, kl) = crate::yaml_edit_splice::find_top_key(&lines, "exceptions")
-        .expect("key found after reindent");
-    let rend = crate::yaml_edit_splice::region_end(&lines, ki, kl.indent);
+    let (ki, kl) =
+        crate::splice::find_top_key(&lines, "exceptions").expect("key found after reindent");
+    let rend = crate::splice::region_end(&lines, ki, kl.indent);
     let dashes = lines[ki + 1..rend]
         .iter()
         .filter(|l| {
             let t = l.trim_start_matches(' ');
-            crate::yaml_edit_splice::leading_spaces(l) > kl.indent
-                && (t == "-" || t.starts_with("- "))
+            crate::splice::leading_spaces(l) > kl.indent && (t == "-" || t.starts_with("- "))
         })
         .count();
     assert_eq!(dashes, 3);

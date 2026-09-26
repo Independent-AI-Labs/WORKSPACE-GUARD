@@ -3,7 +3,7 @@
 // keys) byte-for-byte, and every result must re-parse with
 // serde_yaml to the intended document (REQ-YE-006/103).
 
-use super::yaml_edit_splice as splice;
+use super::splice;
 use serde_yaml::Value;
 
 fn doc(yaml: &str) -> Value {
@@ -122,7 +122,7 @@ fn remove_last_item_collapses_to_empty_flow() {
     let seq = seq_of(&out, "exceptions");
     assert!(seq.is_empty());
     assert_eq!(parse(&out).get("next"), Some(&Value::from(2)));
-    let normalized = super::yaml_edit_target::normalize_terminal(&out);
+    let normalized = super::target::normalize_terminal(&out);
     assert!(normalized.ends_with("next: 2\n"));
     assert!(!normalized.ends_with("\n\n"));
 }

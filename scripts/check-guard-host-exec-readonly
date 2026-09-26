@@ -68,6 +68,21 @@ else
     bad "dpkg diversion missing for /usr/bin/git"
 fi
 
+if [[ -e /usr/lib/git-core/git ]]; then
+    if [[ -L /usr/lib/git-core/git && "$(readlink /usr/lib/git-core/git)" == "/usr/bin/git" ]]; then
+        ok "/usr/lib/git-core/git is the guard symlink"
+    else
+        bad "/usr/lib/git-core/git is not the guard symlink to /usr/bin/git"
+    fi
+    if dpkg-divert --list /usr/lib/git-core/git | grep -q 'git.distrib'; then
+        ok "dpkg diversion active for /usr/lib/git-core/git"
+    else
+        bad "dpkg diversion missing for /usr/lib/git-core/git"
+    fi
+else
+    note "/usr/lib/git-core/git absent; exec-path guard not applicable"
+fi
+
 if [[ -f /etc/apt/apt.conf.d/99workspace-guard ]]; then
     ok "apt post-invoke hook present"
 else

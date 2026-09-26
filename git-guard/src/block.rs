@@ -18,7 +18,7 @@ pub fn check_blocked(
     git_path: &str,
     cwd: Option<&str>,
 ) -> Result<(), GuardError> {
-    check_categories(subcommand, argv_os)?;
+    check_categories(subcommand, argv_os, cwd)?;
     check_subcommand_rules(state, subcommand, argv_os, git_path, cwd)
 }
 
@@ -26,12 +26,16 @@ pub fn check_blocked(
 /// The `config` branch is NOT here: its dangerous-key checks are the
 /// dangerous-config decision of step 3 plus subcommand rules of step 4,
 /// so the whole branch lives in check_subcommand_rules.
-pub fn check_categories(subcommand: &str, argv_os: &[OsString]) -> Result<(), GuardError> {
+pub fn check_categories(
+    subcommand: &str,
+    argv_os: &[OsString],
+    cwd: Option<&str>,
+) -> Result<(), GuardError> {
     let operator_root = crate::is_config_privileged();
     if SUDO_GATED_SUBCOMMANDS.contains(&subcommand) {
         // Destructive checkout/switch before sudo-gate: agents must see the
         // discard reason, not a generic non-root denial.
-        if let Some(kind) = destructive_checkout_or_switch(subcommand, argv_os) {
+        if let Some(kind) = destructive_checkout_or_switch_cwd(subcommand, argv_os, cwd) {
             return Err(GuardError::Blocked {
                 reason: format!("git {} ({})", subcommand, kind),
                 hint: "Destructive checkout/switch is forbidden for all users".into(),
@@ -337,7 +341,17 @@ fn is_protected_branch(git_path: &str, cwd: Option<&str>) -> bool {
 ///
 /// Mirrors git checkout.c cases (2) and (3): restore from index/tree-ish and
 /// `checkout <tree-ish>` plus pathspecs (with or without `--`) overwrite the worktree.
+/// Test-only entry point: path resolution falls back to the process CWD.
+#[cfg(test)]
 fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Option<&'static str> {
+    destructive_checkout_or_switch_cwd(subcommand, argv_os, None)
+}
+
+fn destructive_checkout_or_switch_cwd(
+    subcommand: &str,
+    argv_os: &[OsString],
+    cwd: Option<&str>,
+) -> Option<&'static str> {
     if subcommand != "checkout" && subcommand != "switch" {
         return None;
     }
@@ -407,7 +421,7 @@ fn destructive_checkout_or_switch(subcommand: &str, argv_os: &[OsString]) -> Opt
         }
         if positionals_before_sep.len() == 1
             && (looks_like_pathspec(&positionals_before_sep[0])
-                || path_exists_on_disk(&positionals_before_sep[0]))
+                || path_exists_on_disk(&positionals_before_sep[0], cwd))
         {
             // checkout.c case (2): restore tracked paths from index.
             // Ambiguous single names (Makefile, LICENSE, src/init) are
@@ -441,11 +455,17 @@ fn looks_like_pathspec(s: &str) -> bool {
     false
 }
 
-/// True when `s` names a file that exists relative to the current
-/// directory (where git resolves pathspecs). symlink_metadata so dangling
-/// symlinks still count.
-fn path_exists_on_disk(s: &str) -> bool {
-    std::fs::symlink_metadata(s).is_ok()
+/// True when `s` names a file that exists relative to `cwd` (where git
+/// resolves pathspecs). `cwd == None` means the process working directory.
+/// symlink_metadata so dangling symlinks still count.
+fn path_exists_on_disk(s: &str, cwd: Option<&str>) -> bool {
+    match cwd {
+        Some(base) => std::path::Path::new(base)
+            .join(s)
+            .symlink_metadata()
+            .is_ok(),
+        None => std::fs::symlink_metadata(s).is_ok(),
+    }
 }
 
 fn extract_revert_target(argv_os: &[OsString]) -> String {

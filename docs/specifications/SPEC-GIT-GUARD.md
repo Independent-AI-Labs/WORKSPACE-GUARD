@@ -360,7 +360,7 @@ Git uses `--` to separate options from pathspecs. For example:
 
 ```
 git checkout -- myfile.txt    # checkout the file "myfile.txt", not a branch
-git log -- src/main.rs        # show log for this file only
+git log -- git-guard/src/main.rs   # show log for this file only
 ```
 
 The guard identifies the separator in the applicable Git command context and

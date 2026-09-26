@@ -6,9 +6,9 @@ requirement decisions.
 
 ## REQ-GGUARD-001: Four-Capability Host-Exec Model
 
-- [ ] Remove `CAP_FSETID` from `src/main.rs` required workload capabilities
+- [ ] Remove `CAP_FSETID` from `git-guard/src/main.rs` required workload capabilities
   and diagnostics.
-- [ ] Remove `CAP_FSETID` from `src/exec.rs` inheritable capability setup.
+- [ ] Remove `CAP_FSETID` from `git-guard/src/exec.rs` inheritable capability setup.
 - [ ] Change `GUARD_WORKLOAD_FILE_CAP_STRING` in
   `WORKSPACE-CI/lib/guard-drift.sh` to
   `cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep`.
@@ -43,7 +43,7 @@ requirement decisions.
 
 - [ ] Map missing or incomplete capability sets, untrusted deployment classes,
   host-exec `NoNewPrivileges=1`, ambient-to-effective promotion failure, and
-  non-root root-only execution to exit code 3 in `src/main.rs`.
+  non-root root-only execution to exit code 3 in `git-guard/src/main.rs`.
 - [ ] Keep exit code 2 reserved for malformed arguments.
 - [ ] Replace generic privilege-error handling with a dedicated error variant
   whose process mapping is exit 3.
@@ -72,7 +72,7 @@ requirement decisions.
 
 ## REQ-GGUARD-007: Trusted Contract Runner
 
-- [ ] Replace `format!("{}/{}", wsroot, CONTRACT_SCRIPT)` in `src/exec.rs` with
+- [ ] Replace `format!("{}/{}", wsroot, CONTRACT_SCRIPT)` in `git-guard/src/exec.rs` with
   the fixed absolute `/opt/workspace-ci/lib/checks_quality.sh` constant.
 - [ ] Keep `/bin/bash` as the sole shell executable and pass the contract script
   as `argv[1]`; prohibit `-c`, stdin program text, `source`, and generated code.
@@ -115,7 +115,7 @@ requirement decisions.
 
 ## REQ-GGUARD-010: Option Separator Semantics
 
-- [ ] Remove the post-parse global `--hard` scan from `src/args.rs`; it
+- [ ] Remove the post-parse global `--hard` scan from `git-guard/src/args.rs`; it
   incorrectly reclassifies post-separator data as an option.
 - [ ] Replace `parse_args_hard_after_separator_blocked` with a pass-through
   assertion.
@@ -130,7 +130,7 @@ requirement decisions.
 
 ## REQ-GGUARD-011: Operand-Aware Subcommand Discovery
 
-- [ ] Replace first-non-dash subcommand discovery in `src/args.rs` with a
+- [ ] Replace first-non-dash subcommand discovery in `git-guard/src/args.rs` with a
   global-option arity table covering terminal, modifier, and value-taking
   options.
 - [ ] Consume separate, attached, and equals-form operands for `-C`, `-c`,
@@ -197,7 +197,7 @@ requirement decisions.
 
 ## REQ-GGUARD-014: Byte-Exact Argument Conversion
 
-- [ ] Replace the `"<binary-arg>"` fallback in `src/exec.rs` with a propagated
+- [ ] Replace the `"<binary-arg>"` fallback in `git-guard/src/exec.rs` with a propagated
   conversion error mapped to exit code 2.
 - [ ] Consolidate the redundant null-byte pre-scan and `CString` construction
   so one fallible byte-preserving conversion owns the invariant.
@@ -361,7 +361,7 @@ requirement decisions.
 
 ## REQ-GGUARD-050: Unconditional Stash Block
 
-- [ ] Remove unreachable drop/clear-only handling from `src/block.rs`, including
+- [ ] Remove unreachable drop/clear-only handling from `git-guard/src/block.rs`, including
   its unsafe recommendation to use `git stash pop`.
 - [ ] Remove `has_stash_drop` and `has_stash_clear` plus their operation scan
   from `ArgState`, parser initialization, and parser/block tests; the compiled
@@ -480,7 +480,7 @@ requirement decisions.
 
 ## REQ-GGUARD-055: Allow Forward-Only Revert
 
-- [ ] Remove the revert target/branch/ancestry block from `src/block.rs`; no
+- [ ] Remove the revert target/branch/ancestry block from `git-guard/src/block.rs`; no
   remote-tracking state shall affect whether revert executes.
 - [ ] Remove `extract_revert_target` and remove `run_git` if the ancestry block
   is its final caller.
@@ -602,7 +602,7 @@ requirement decisions.
 
 ## REQ-GGUARD-070: Child Environment Allow-List
 
-- [ ] Replace inherited-environment collection in `src/exec.rs` with one shared
+- [ ] Replace inherited-environment collection in `git-guard/src/exec.rs` with one shared
   sanitizer that starts empty and consults the compiled environment catalog.
 - [ ] Migrate `config/git_guard_environment.schema.yaml` and its policy through
   the sudo-gated YAML editor to structured allowed exact/prefix, root-only,
@@ -772,7 +772,7 @@ requirement decisions.
   malformed content, replacement, and canonicalization failures to a surfaced
   fail-closed result before contract-eligible Git execution.
 - [ ] Remove workspace-marker existence from contract scope decisions in
-  `src/wsroot.rs`, `src/exec.rs`, locking, and reconciliation; retain marker
+  `git-guard/src/wsroot.rs`, `git-guard/src/exec.rs`, locking, and reconciliation; retain marker
   checks only if they produce non-authoritative, non-swallowed drift diagnostics.
 - [ ] Add root/non-root tests for exact roots, descendants, outside roots,
   lexical-prefix near matches, nested registered roots, non-UTF-8 components,
@@ -1357,7 +1357,7 @@ requirement decisions.
 
 ## REQ-GGUARD-121: Centralized Unsafe Boundary
 
-- [ ] Add one `src/linux_ffi.rs` module and move the four approved production
+- [ ] Add one `git-guard/src/linux_ffi.rs` module and move the four approved production
   operations into minimal wrappers: `getauxval(AT_SECURE)`, `fork`, `_exit`, and
   `ioctl(FS_IOC_GETFLAGS)`.
 - [ ] Add crate-level `#![deny(unsafe_code)]` to every binary/library root and a
@@ -1397,7 +1397,7 @@ requirement decisions.
   examples, benches, and tests for unsafe blocks/functions/traits, inline asm,
   direct `libc::*`, lint allowances, and approved call count/location drift.
 - [ ] Update `config/banned_words_exceptions.yaml` only through the sudo-gated
-  YAML editor so the unsafe exception names exactly `src/linux_ffi.rs` and the
+  YAML editor so the unsafe exception names exactly `git-guard/src/linux_ffi.rs` and the
   dedicated raw-fork test module; remove broad historical FFI descriptions and
   every retired source path.
 - [ ] Add wrapper tests for auxv values/errors, immutable flag set/clear/error,

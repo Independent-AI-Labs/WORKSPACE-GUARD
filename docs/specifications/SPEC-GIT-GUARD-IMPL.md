@@ -13,16 +13,33 @@
 
 ```text
 WORKSPACE-GUARD/
-├── Cargo.toml               # unrelated guard/tool packages only
-├── git-guard/               # standalone privileged package; not a workspace member
-│   ├── Cargo.toml
-│   ├── Cargo.lock
-│   ├── build.rs
-│   ├── .cargo/config.toml   # trusted x86_64-unknown-linux-musl flags/source
-│   └── src/
-│       ├── main.rs
-│       └── linux_ffi.rs
-└── src/                     # shell/binary/SSH/YAML-editor package sources
+├── Cargo.toml               # workspace manifest: non-privileged tools only
+├── Cargo.lock
+├── build.rs                 # codegen for shell/binary/git-ssh config
+├── src/                     # non-privileged package: shell/binary/SSH/YAML-editor
+│   ├── shell_guard/         # main.rs (bin root), fd.rs, report.rs, tests.rs
+│   ├── binary_guard/        # main.rs (bin root), policy_types.rs, tests.rs
+│   ├── yaml_edit/           # main.rs (bin root), admin, comment, delete, diff,
+│   │                        #   emit, engine, install, ops, query, schema,
+│   │                        #   shape, splice, target, unset (+ tests)
+│   └── git_ssh.rs           # bin root: git SSH transport wrapper
+└── git-guard/               # standalone privileged package; not a workspace member
+    ├── Cargo.toml
+    ├── Cargo.lock
+    ├── dependency-closure.json
+    ├── build.rs
+    ├── .cargo/config.toml   # trusted x86_64-unknown-linux-musl flags/source
+    ├── src/
+    │   ├── main.rs
+    │   ├── linux_ffi.rs      # sole reviewed unsafe boundary (§8.3)
+    │   ├── args.rs  block.rs  sanitize.rs
+    │   ├── exec.rs  gitdir.rs  sealed_repo.rs  reconcile.rs
+    │   ├── remote.rs  fetch.rs  vendored.rs
+    │   ├── agent_identity.rs  ci_integrity.rs  ci_hook_identity.rs
+    │   ├── config_keys.rs  child.rs  log.rs  wsroot.rs
+    │   └── *_tests.rs        # unit tests colocated with their module
+    └── tests/
+        └── integration_test.rs
 ```
 
 The privileged Git guard is a standalone package with its own lockfile and no
@@ -30,7 +47,9 @@ path dependency on the broader repository package. This prevents dependencies
 needed by shell guard, binary guard, SSH, YAML editing, or their tests from
 entering Git guard resolution through workspace feature unification. Source files
 shared today are moved or minimally duplicated; no shared local crate is added to
-the privileged closure.
+the privileged closure. The non-privileged tools stay in the top-level package,
+each grouped under a directory named for its bin root so no module directory
+exceeds the structural limits in `config/file_length_limits.yaml`.
 
 ### 8.2 Dependencies
 
@@ -75,7 +94,7 @@ binding and installs; it does not execute dependency build code.
 
 ### 8.3 Unsafe Blocks
 
-Production code has one reviewed `src/linux_ffi.rs` boundary. Crate roots use
+Production code has one reviewed `git-guard/src/linux_ffi.rs` boundary. Crate roots use
 `#![deny(unsafe_code)]`; only that module receives the narrow lint allowance.
 The module contains exactly four direct libc operations:
 
@@ -342,9 +361,15 @@ privilege boundary failure, but its authority is bounded by the capability set.
 | `/usr/bin/git.original` | real git binary (relocated, 0700 root:root) |
 | `projects/WORKSPACE-GUARD/` | Rust source code repository |
 | `projects/WORKSPACE-GUARD/git-guard/src/main.rs` | Privileged multi-module Rust implementation |
+| `projects/WORKSPACE-GUARD/git-guard/src/linux_ffi.rs` | Sole reviewed unsafe boundary (see §8.3) |
 | `projects/WORKSPACE-GUARD/git-guard/Cargo.toml` | Isolated package manifest |
 | `projects/WORKSPACE-GUARD/git-guard/Cargo.lock` | Isolated locked dependencies |
 | `projects/WORKSPACE-GUARD/git-guard/dependency-closure.json` | Approved normal/build/proc-macro closures |
+| `projects/WORKSPACE-GUARD/src/` | Non-privileged package: shell, binary, SSH, YAML-editor |
+| `projects/WORKSPACE-GUARD/src/yaml_edit/main.rs` | `workspace-yaml-edit` bin root |
+| `projects/WORKSPACE-GUARD/src/shell_guard/main.rs` | `workspace-shell-guard` bin root |
+| `projects/WORKSPACE-GUARD/src/binary_guard/main.rs` | `workspace-binary-guard` bin root |
+| `projects/WORKSPACE-GUARD/src/git_ssh.rs` | `workspace-git-ssh` bin root |
 
 ---
 

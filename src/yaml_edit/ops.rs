@@ -1,16 +1,16 @@
-use crate::yaml_edit_install::install;
+use crate::install::install;
 use serde_yaml::Value;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use crate::yaml_edit_diff as diff;
-use crate::yaml_edit_engine as engine;
-use crate::yaml_edit_schema as schema;
-use crate::yaml_edit_shape as shape;
-use crate::yaml_edit_splice as splice;
-use crate::yaml_edit_target::{normalize_terminal, Target};
+use crate::diff;
+use crate::engine;
+use crate::schema;
+use crate::shape;
+use crate::splice;
+use crate::target::{normalize_terminal, Target};
 
 pub const LOG_FILE_NAME: &str = ".workspace-guard.log";
 const LOCK_PATH: &str = "/var/lib/workspace-guard/yaml-edit.lock";

@@ -1,5 +1,5 @@
-use crate::yaml_edit_engine::Access;
-use crate::yaml_edit_splice::{is_content, leading_spaces, parse_key_line};
+use crate::engine::Access;
+use crate::splice::{is_content, leading_spaces, parse_key_line};
 
 #[derive(Clone, Copy)]
 struct Region {
@@ -16,7 +16,7 @@ struct Located {
     dash: bool,
 }
 
-fn key_line(line: &str) -> Option<(crate::yaml_edit_splice::KeyLine, bool)> {
+fn key_line(line: &str) -> Option<(crate::splice::KeyLine, bool)> {
     if let Some(parsed) = parse_key_line(line) {
         return Some((parsed, false));
     }
@@ -176,8 +176,8 @@ pub fn splice_unset(original: &str, paths: &[Vec<Access>]) -> Result<String, Str
 #[cfg(test)]
 mod tests {
     use super::splice_unset;
-    use crate::yaml_edit_engine;
-    use crate::yaml_edit_target::normalize_terminal;
+    use crate::engine;
+    use crate::target::normalize_terminal;
     use serde_yaml::Value;
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
         let raw = "# header\nhooks:\n  - id: one # keep\n    safety: true\n    mandatory: true\n\n  - id: two\n    safety: false\n    mandatory: false\nother: 1\n\n";
         let doc: Value = serde_yaml::from_str(raw).expect("parse");
         let (expected, concrete) =
-            yaml_edit_engine::unset_fields(&doc, "hooks[].safety").expect("semantic unset");
+            engine::unset_fields(&doc, "hooks[].safety").expect("semantic unset");
         let out = normalize_terminal(&splice_unset(raw, &concrete).expect("splice"));
         assert!(out.contains("# header\n"));
         assert!(out.contains("  - id: one # keep\n"));
@@ -202,8 +202,7 @@ mod tests {
     fn dotted_map_splice_removes_only_the_field() {
         let raw = "outer:\n  remove: true\n  keep: 1\n";
         let doc: Value = serde_yaml::from_str(raw).expect("parse");
-        let (expected, concrete) =
-            yaml_edit_engine::unset_fields(&doc, "outer.remove").expect("unset");
+        let (expected, concrete) = engine::unset_fields(&doc, "outer.remove").expect("unset");
         let out = normalize_terminal(&splice_unset(raw, &concrete).expect("splice"));
         assert_eq!(out, "outer:\n  keep: 1\n");
         assert_eq!(

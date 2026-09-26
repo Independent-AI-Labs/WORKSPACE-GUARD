@@ -9,29 +9,16 @@ _REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
-resolve_podman() {
-    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
-        echo "/opt/workspace-ci/.boot-linux/bin/podman"
-        return 0
-    fi
-    if _podman_probe="$(command -v real-podman 2>&1)"; then
-        echo "real-podman"
-        return 0
-    fi
-    if _podman_probe="$(command -v podman 2>&1)"; then
-        echo "podman"
-        return 0
-    fi
-    echo "ERROR: podman not found" >&2
-    return 1
-}
+PODMAN="/opt/workspace-ci/.boot-linux/bin/podman"
+if [[ ! -x "$PODMAN" ]]; then
+    echo "ERROR: podman not found at $PODMAN" >&2
+    exit 1
+fi
 
 if [[ ! -d "$_PROJECTS_ROOT/WORKSPACE-CI" ]]; then
     echo "ERROR: WORKSPACE-CI not found at $_PROJECTS_ROOT/WORKSPACE-CI" >&2
     exit 1
 fi
-
-PODMAN="$(resolve_podman)"
 
 if ! "$PODMAN" image exists "$_IMAGE"; then
     echo "==> Test image $_IMAGE missing; building from Containerfile.test..."

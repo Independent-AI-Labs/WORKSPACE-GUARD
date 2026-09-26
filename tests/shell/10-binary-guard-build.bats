@@ -5,7 +5,7 @@
 # under an unknown name, and that the compile-time policy table has
 # entries matching res/binary-lock.yaml. These tests exercise the
 # build output, not the runtime guard logic (that is covered by
-# Rust unit tests in src/binary_guard_tests.rs).
+# Rust unit tests in src/binary_guard/tests.rs).
 
 load lib/harness
 bats_require_minimum_version 1.5.0
@@ -66,14 +66,14 @@ GUARD_BIN="$GUARD_ROOT/target/release/workspace-binary-guard"
     [ -f "$GUARD_ROOT/build.rs" ]
 }
 
-@test "guard-build: binary_policy_types.rs defines PolicyKind enum" {
-    local f="$GUARD_ROOT/src/binary_policy_types.rs"
+@test "guard-build: policy_types.rs defines PolicyKind enum" {
+    local f="$GUARD_ROOT/src/binary_guard/policy_types.rs"
     [ -f "$f" ]
     grep -q 'enum PolicyKind' "$f"
 }
 
-@test "guard-build: binary_policy_types.rs has find_policy function" {
-    local f="$GUARD_ROOT/src/binary_policy_types.rs"
+@test "guard-build: policy_types.rs has find_policy function" {
+    local f="$GUARD_ROOT/src/binary_guard/policy_types.rs"
     [ -f "$f" ]
     grep -q 'fn find_policy' "$f"
 }

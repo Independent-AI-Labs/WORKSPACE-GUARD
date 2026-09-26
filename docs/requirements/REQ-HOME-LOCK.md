@@ -221,7 +221,7 @@ binary lock this complements is in
   binary lock.
 
 - **REQ-HL-504**: Cross-config consistency tests in
-  `src/config_consistency_tests.rs` shall verify:
+  `git-guard/src/config_consistency_tests.rs` shall verify:
   - The `absolute_file_paths` block parses.
   - Every key is either absolute (`/...`) or `~`-prefixed.
   - Every mode is in the range `[0o400, 0o777]`.

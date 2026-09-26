@@ -8,22 +8,11 @@ _SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 _REPO_ROOT="$(cd "$_SCRIPT_DIR/.." && pwd)"
 _IMAGE="${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04}"
 
-resolve_podman() {
-    if [[ -x "/opt/workspace-ci/.boot-linux/bin/podman" ]]; then
-        echo "/opt/workspace-ci/.boot-linux/bin/podman"
-        return 0
-    fi
-    if command -v real-podman; then
-        echo "real-podman"
-        return 0
-    fi
-    if command -v podman; then
-        echo "podman"
-        return 0
-    fi
-    echo "ERROR: podman not found. Run: make init" >&2
-    return 1
-}
+PODMAN="/opt/workspace-ci/.boot-linux/bin/podman"
+if [[ ! -x "$PODMAN" ]]; then
+    echo "ERROR: podman not found at $PODMAN. Run: make init" >&2
+    exit 1
+fi
 
 _PROJECTS_ROOT="$(cd "$_REPO_ROOT/.." && pwd)"
 if [[ ! -d "$_PROJECTS_ROOT/WORKSPACE-CI" ]]; then
@@ -32,7 +21,6 @@ if [[ ! -d "$_PROJECTS_ROOT/WORKSPACE-CI" ]]; then
     exit 1
 fi
 
-PODMAN="$(resolve_podman)"
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc)}"
 if (( CARGO_BUILD_JOBS < 4 )); then CARGO_BUILD_JOBS=4; fi
 if (( CARGO_BUILD_JOBS > 8 )); then CARGO_BUILD_JOBS=8; fi

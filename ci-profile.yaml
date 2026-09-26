@@ -1,0 +1,21 @@
+version: 1
+project: workspace-guard
+tier: strict
+languages: [rust, shell]
+hooks:
+  pre-commit:
+    - check-unstaged
+    - block-sensitive-files
+    - gitleaks
+    - check-banned-words
+    - check-file-length
+    - check-markdown-docs
+  commit-msg:
+    - check-commit-message
+    - block-coauthored
+  pre-push:
+    - ci-check-push
+    - block-coauthored-history
+overrides:
+  ci-check-push:
+    entry: "bash -c 'if [ \"$(uname -s)\" = Darwin ]; then make test-podman; else make check-push; fi'"

@@ -8,17 +8,18 @@
 //! names, sandbox profile names resolve to real profile files, the
 //! CVE catalog has unique ids in a sane CVSS range, etc.
 //!
-//! Tests read files relative to CARGO_MANIFEST_DIR (the repo root) so
+//! Tests read files relative to CARGO_MANIFEST_DIR/.. (the repo root) so
 //! they are stable regardless of the cargo invocation cwd.
 
 use serde_yaml::Value;
 use std::collections::HashSet;
 use std::fs;
 
-/// Resolve a repo-relative path under the crate manifest dir.
+/// Resolve a repo-relative path from the crate manifest dir (git-guard/) to
+/// the repository root, where config/ and res/ live.
 fn repo_path(rel: &str) -> String {
     let manifest = env!("CARGO_MANIFEST_DIR");
-    format!("{manifest}/{rel}")
+    format!("{manifest}/../{rel}")
 }
 
 fn load_yaml(rel: &str) -> Value {

@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 fn repo_path(rel: &str) -> String {
-    format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel)
+    format!("{}/../{}", env!("CARGO_MANIFEST_DIR"), rel)
 }
 
 fn load_yaml(rel: &str) -> Value {
