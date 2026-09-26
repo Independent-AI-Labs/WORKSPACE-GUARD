@@ -175,6 +175,19 @@ fn collect_sudo_gated_env_warnings(sudo: bool) -> Vec<String> {
     warnings
 }
 
+/// True when a caller-provided environment variable must not reach real Git.
+/// Hook-bypass names are always dropped. For non-root callers the cataloged
+/// identity and editor names are dropped too: the "IGNORING" warning in
+/// `collect_sudo_gated_env_warnings` is only truthful if this filter actually
+/// removes the variable, otherwise `GIT_AUTHOR_*`/`GIT_COMMITTER_*` override
+/// the guard-injected identity and forge commit authorship.
+fn should_drop_child_env(key: &str, sudo: bool) -> bool {
+    crate::BLOCKED_BYPASS_VARS.contains(&key)
+        || (!sudo
+            && (crate::SUDO_GATED_IDENTITY_ENV_VARS.contains(&key)
+                || crate::SUDO_GATED_EDITOR_ENV_VARS.contains(&key)))
+}
+
 pub fn execve_real_git(
     argv_os: &[OsString],
     state: Option<&ArgState>,
@@ -211,10 +224,7 @@ pub fn execve_real_git(
     }
 
     let mut env_map: HashMap<OsString, OsString> = std::env::vars_os()
-        .filter(|(key, _)| {
-            let key = key.to_string_lossy();
-            !crate::BLOCKED_BYPASS_VARS.contains(&key.as_ref())
-        })
+        .filter(|(key, _)| !should_drop_child_env(&key.to_string_lossy(), sudo))
         .collect();
 
     let hardened = crate::agent_identity::hardened_git_env_pairs(crate::is_config_privileged());

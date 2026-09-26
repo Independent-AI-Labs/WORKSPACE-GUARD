@@ -186,7 +186,12 @@ GIT_SSH=/usr/lib/workspace-guard/git-ssh-wrapper
 
 - `git config user.email` / `user.name` (sudo-gated keys)
 - `git config core.sshCommand` (dangerous key)
-- Set `GIT_SSH` / `GIT_SSH_COMMAND` / `GIT_AUTHOR_*` (stripped or sudo-gated)
+- Override or reuse commit authorship: `commit --author`, `--reset-author`,
+  `-C`/`--reuse-message`, `-c`/`--reedit-message`, and `--date` (sudo-gated,
+  REQ-GGUARD-056)
+- Set `GIT_SSH` / `GIT_SSH_COMMAND` / `GIT_AUTHOR_*` / `GIT_COMMITTER_*` /
+  `GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE` (removed before real Git, not merely
+  warned about, REQ-GGUARD-070)
 - Run `ssh-keygen` (binary lock `deny-non-root`)
 - Create `~/.ssh/id_*` (`.ssh` directory root-owned `0755`, not user-writable)
 

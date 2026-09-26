@@ -178,11 +178,8 @@ pub fn check_subcommand_rules(
         }
     }
 
-    if subcommand == "commit" && state.has_amend && !operator_root {
-        return Err(GuardError::Blocked {
-            reason: "git commit --amend".into(),
-            hint: "Amends rewrite history: agent commits are forward-only. Operators may amend via sudo.".into(),
-        });
+    if subcommand == "commit" {
+        crate::commit::check_commit_attribution(state, operator_root)?;
     }
 
     if subcommand == "fetch" {

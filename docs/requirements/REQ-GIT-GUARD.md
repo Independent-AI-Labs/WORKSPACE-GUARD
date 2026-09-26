@@ -361,6 +361,21 @@ This document specifies the requirements for the Rust binary. The installation/d
   revert targets or spawn branch, verification, or ancestry subprocesses for
   this decision. Normal hook enforcement, environment sanitization, capability
   policy, and post-operation ownership reconciliation remain mandatory.
+- **REQ-GGUARD-056**: `commit` author/attribution overrides shall be sudo-gated
+  without inspecting repository state: every actual override option accepted by
+  the pinned commit parser shall exit 1 for non-root users, while the verified
+  root operator path may proceed through the normal commit contract checks. The
+  option set shall cover explicit author and reset (`--author[=]`,
+  `--reset-author`), author date (`--date[=]`), and the authorship-reusing forms
+  `-C <commit>`/`--reuse-message[=]` and `-c <commit>`/`--reedit-message[=]`,
+  distinguished byte-exactly from the global `-c`/`-C` options that precede the
+  subcommand. Prefixes or operands that are not these options shall not block.
+  The guard-injected per-UID identity remains the only authorship a non-root
+  commit may carry; cataloged identity and editor environment names that could
+  override it shall be removed before real Git, per REQ-GGUARD-070, not merely
+  reported. The decision shall not depend on
+  branch state, upstream naming, remote-tracking freshness, detached-HEAD
+  state, a subprocess, or network access.
 
 ### 7. Protected Branch Rules
 

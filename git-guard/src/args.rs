@@ -10,6 +10,12 @@ pub struct ArgState {
     /// sanitization matches this byte-exactly (REQ-GGUARD-043).
     pub subcommand_raw: Option<String>,
     pub has_amend: bool,
+    /// Commit authorship is overridden or reused (`--author`,
+    /// `--reset-author`, `-C`/`--reuse-message`, `-c`/`--reedit-message`).
+    pub has_author_override: bool,
+    /// Commit author date is overridden (`--date`). Enum-free: `--date`
+    /// is not `--amend`, but it is still caller-supplied attribution.
+    pub has_author_date_override: bool,
     pub has_force_flag: bool,
     pub has_force_with_lease_flag: bool,
     pub has_branch_d: bool,
@@ -108,6 +114,8 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         subcommand: None,
         subcommand_raw: None,
         has_amend: false,
+        has_author_override: false,
+        has_author_date_override: false,
         has_force_flag: false,
         has_force_with_lease_flag: false,
         has_branch_d: false,
@@ -367,20 +375,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 }
             }
             if resolved == "commit" {
-                let mut past_dash = false;
-                for &sarg in &argv[i + 1..] {
-                    let s = std::str::from_utf8(sarg).unwrap_or("");
-                    if s == "--" {
-                        past_dash = true;
-                        continue;
-                    }
-                    if past_dash {
-                        continue;
-                    }
-                    if s.starts_with("--amend") {
-                        state.has_amend = true;
-                    }
-                }
+                crate::commit::scan_commit_args(&argv[i + 1..], &mut state);
             }
             if resolved == "merge" {
                 let mut past_dash = false;

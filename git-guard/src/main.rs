@@ -11,6 +11,7 @@ mod args;
 mod block;
 mod child;
 mod ci_integrity;
+mod commit;
 mod config_keys;
 mod exec;
 mod fetch;

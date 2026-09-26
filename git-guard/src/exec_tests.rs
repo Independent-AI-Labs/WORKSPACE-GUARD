@@ -239,6 +239,26 @@ fn sudo_gated_env_warnings_non_sudo_drops_with_message() {
     assert!(msgs_sudo.is_empty());
 }
 
+#[test]
+fn child_env_filter_drops_gated_vars_for_non_root_only() {
+    for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS
+        .iter()
+        .chain(crate::SUDO_GATED_EDITOR_ENV_VARS.iter())
+    {
+        assert!(
+            should_drop_child_env(var, false),
+            "non-root must drop {var} before exec"
+        );
+        assert!(!should_drop_child_env(var, true), "root keeps {var}");
+    }
+    // Hook-bypass vars are dropped for every caller.
+    assert!(should_drop_child_env("SKIP", false));
+    assert!(should_drop_child_env("SKIP", true));
+    // Ordinary variables pass through untouched.
+    assert!(!should_drop_child_env("PATH", false));
+    assert!(!should_drop_child_env("HOME", false));
+}
+
 fn make_workspace_markers(dir: &std::path::Path, markers: &[&str]) {
     for m in markers {
         let p = dir.join(m);

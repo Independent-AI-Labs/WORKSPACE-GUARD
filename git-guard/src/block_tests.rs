@@ -6,6 +6,8 @@ fn empty_state(subcommand: &str) -> ArgState {
         subcommand: Some(subcommand.to_string()),
         subcommand_raw: Some(subcommand.to_string()),
         has_amend: false,
+        has_author_override: false,
+        has_author_date_override: false,
         has_force_flag: false,
         has_force_with_lease_flag: false,
         has_branch_d: false,
