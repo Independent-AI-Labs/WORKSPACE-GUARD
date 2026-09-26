@@ -8,7 +8,7 @@ rm -rf /tmp/WORKSPACE-CI
 mkdir -p /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
 tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .
 tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD
-tar --exclude=.git --exclude=.venv --exclude=node_modules -cf /tmp/workspace-ci.tar -C /projects/WORKSPACE-CI .
+tar --exclude=.git --exclude=.venv --exclude=node_modules --exclude=target -cf /tmp/workspace-ci.tar -C /projects/WORKSPACE-CI .
 tar --no-same-owner -xf /tmp/workspace-ci.tar -C /tmp/WORKSPACE-CI
 # The sealed artifact is not mounted into the container; the extracted
 # source checkout is the CI root for all in-container make targets.
