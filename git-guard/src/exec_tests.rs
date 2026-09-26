@@ -251,6 +251,16 @@ fn child_env_filter_drops_gated_vars_for_non_root_only() {
         );
         assert!(!should_drop_child_env(var, true), "root keeps {var}");
     }
+    // The loop only covers names the catalog currently holds, so it cannot
+    // catch a removal from git_guard_environment.yaml. Pin the date names:
+    // without them a non-root caller can backdate a commit even though
+    // GIT_AUTHOR_NAME/EMAIL are dropped.
+    for var in ["GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"] {
+        assert!(
+            crate::SUDO_GATED_IDENTITY_ENV_VARS.contains(&var),
+            "{var} must stay cataloged in git_guard_environment.yaml"
+        );
+    }
     // Hook-bypass vars are dropped for every caller.
     assert!(should_drop_child_env("SKIP", false));
     assert!(should_drop_child_env("SKIP", true));

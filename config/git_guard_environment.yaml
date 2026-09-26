@@ -39,6 +39,8 @@ sudo_gated_identity:
   - GIT_COMMITTER_NAME
   - GIT_COMMITTER_EMAIL
   - EMAIL
+  - GIT_AUTHOR_DATE
+  - GIT_COMMITTER_DATE
 
 sudo_gated_editor:
   - EDITOR
