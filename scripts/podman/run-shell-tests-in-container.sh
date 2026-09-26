@@ -11,7 +11,7 @@ cp /bin/bash /bin/bash.real
 chmod 700 /bin/bash.real
 tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .
 tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD
-tar --exclude=.git --exclude=.venv --exclude=node_modules --exclude=.boot-linux -cf /tmp/ci.tar -C /projects/WORKSPACE-CI .
+tar --exclude=.git --exclude=.venv --exclude=node_modules --exclude=.boot-linux --exclude=target -cf /tmp/ci.tar -C /projects/WORKSPACE-CI .
 tar --no-same-owner -xf /tmp/ci.tar -C /tmp/WORKSPACE-CI
 cd /tmp/WORKSPACE-GUARD
 export CI_ROOT=/tmp/WORKSPACE-CI
