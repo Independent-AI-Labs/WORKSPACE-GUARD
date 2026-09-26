@@ -147,9 +147,9 @@ fn is_guard_binary(path: &Path) -> bool {
     target.st_dev() == self_meta.st_dev() && target.st_ino() == self_meta.st_ino()
 }
 
-fn collect_sudo_gated_env_warnings(sudo: bool) -> Vec<String> {
+fn collect_sudo_gated_env_warnings(privileged: bool) -> Vec<String> {
     let mut warnings = Vec::new();
-    if sudo {
+    if privileged {
         return warnings;
     }
     for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS {
@@ -181,9 +181,9 @@ fn collect_sudo_gated_env_warnings(sudo: bool) -> Vec<String> {
 /// `collect_sudo_gated_env_warnings` is only truthful if this filter actually
 /// removes the variable, otherwise `GIT_AUTHOR_*`/`GIT_COMMITTER_*` override
 /// the guard-injected identity and forge commit authorship.
-fn should_drop_child_env(key: &str, sudo: bool) -> bool {
+fn should_drop_child_env(key: &str, privileged: bool) -> bool {
     crate::BLOCKED_BYPASS_VARS.contains(&key)
-        || (!sudo
+        || (!privileged
             && (crate::SUDO_GATED_IDENTITY_ENV_VARS.contains(&key)
                 || crate::SUDO_GATED_EDITOR_ENV_VARS.contains(&key)))
 }
@@ -200,11 +200,15 @@ pub fn execve_real_git(
     // Dangerous `-c` config decisions happen in the engine (step 3,
     // sanitize::decide) before this point; argv arriving here is either
     // clean or the invocation was blocked (SPEC-GIT-GUARD section 4).
-    let sudo = crate::is_sudo();
+    // euid==0, not AT_SECURE: the kernel also sets AT_SECURE for
+    // file-capability binaries run by non-root, so is_sudo() is true for
+    // every agent git invocation. Gating the drop on AT_SECURE would keep
+    // GIT_AUTHOR_*/GIT_COMMITTER_* and forge authorship (TODO.md:613).
+    let privileged = crate::is_config_privileged();
 
     verify_git_original()?;
 
-    for msg in collect_sudo_gated_env_warnings(sudo) {
+    for msg in collect_sudo_gated_env_warnings(privileged) {
         crate::log::warn(&msg);
     }
 
@@ -224,15 +228,15 @@ pub fn execve_real_git(
     }
 
     let mut env_map: HashMap<OsString, OsString> = std::env::vars_os()
-        .filter(|(key, _)| !should_drop_child_env(&key.to_string_lossy(), sudo))
+        .filter(|(key, _)| !should_drop_child_env(&key.to_string_lossy(), privileged))
         .collect();
 
-    let hardened = crate::agent_identity::hardened_git_env_pairs(crate::is_config_privileged());
+    let hardened = crate::agent_identity::hardened_git_env_pairs(privileged);
     for (key, value) in hardened {
         env_map.insert(OsString::from(key), OsString::from(value));
     }
 
-    if sudo {
+    if privileged {
         for &var in crate::SUDO_GATED_IDENTITY_ENV_VARS
             .iter()
             .chain(crate::SUDO_GATED_EDITOR_ENV_VARS.iter())
