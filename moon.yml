@@ -39,6 +39,11 @@ tasks:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
+      - 'git-guard/src/**/*.rs'
+      - 'git-guard/tests/**/*.rs'
+      - 'git-guard/build.rs'
+      - 'git-guard/Cargo.toml'
+      - 'git-guard/Cargo.lock'
   type-check:
     # Rust has no separate type-check; cargo check IS the type-check.
     command: 'make type-check'
@@ -48,6 +53,11 @@ tasks:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
+      - 'git-guard/src/**/*.rs'
+      - 'git-guard/tests/**/*.rs'
+      - 'git-guard/build.rs'
+      - 'git-guard/Cargo.toml'
+      - 'git-guard/Cargo.lock'
   test:
     command: 'make test'
     inputs:
@@ -56,6 +66,11 @@ tasks:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
+      - 'git-guard/src/**/*.rs'
+      - 'git-guard/tests/**/*.rs'
+      - 'git-guard/build.rs'
+      - 'git-guard/Cargo.toml'
+      - 'git-guard/Cargo.lock'
   check:
     # Aggregator: deps run lint+type-check+test through moon's task DAG;
     # the command itself is a no-op so we don't re-invoke `make check`
@@ -76,6 +91,11 @@ tasks:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
+      - 'git-guard/src/**/*.rs'
+      - 'git-guard/tests/**/*.rs'
+      - 'git-guard/build.rs'
+      - 'git-guard/Cargo.toml'
+      - 'git-guard/Cargo.lock'
     options:
       cache: false
   # Workspace-wide update walk. `^update` runs the same task in every
