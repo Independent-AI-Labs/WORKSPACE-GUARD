@@ -783,8 +783,10 @@ requirement decisions.
 - [ ] Add registry attack tests for symlink registry paths, inode replacement,
   ownership/mode/immutable drift, truncation, duplicates, invalid bytes, relative
   paths, and TOCTOU between verification and read.
-- [ ] Remove `workspace_markers` from `config/shared_paths.yaml` and its schema
+- [x] Remove `workspace_markers` from `config/shared_paths.yaml` and its schema
   through the sudo-gated YAML editor after all authority consumers are removed.
+  DONE 2026-09-27: field and schema entry removed; guard identity now reads the
+  root-owned record `/usr/lib/workspace-guard/workspace-root`.
 
 ## REQ-GGUARD-082: Outside-Workspace Contract Scope
 
