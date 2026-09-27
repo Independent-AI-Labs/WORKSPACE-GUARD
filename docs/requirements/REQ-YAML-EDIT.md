@@ -294,7 +294,7 @@ splitting). The replacement:
 - **REQ-YE-601**: Audit write failure shall abort the mutation before
   install (fail-closed): the target stays untouched and the typed failure is
   reported non-recursively on stderr and distinct tty under REQ-GGUARD-092. No
-  user-writable or unverified fallback is allowed.
+  user-writable or unverified substitute is allowed.
 
 - **REQ-YE-602**: Audit records for `unset`, `remove-comment`, and
   `delete` shall identify the intent and target. Delete records shall

@@ -122,7 +122,6 @@ struct PathsConfig {
     child_path: String,
     contract_script: String,
     enforcement_config: String,
-    workspace_markers: Vec<String>,
 }
 
 fn read_yaml<T: DeserializeOwned>(config_dir: &Path, name: &str) -> T {
@@ -446,7 +445,6 @@ fn main() {
     emit_str(&mut code, "CHILD_PATH", &paths.child_path);
     emit_str(&mut code, "CONTRACT_SCRIPT", &paths.contract_script);
     emit_str(&mut code, "ENFORCEMENT_CONFIG", &paths.enforcement_config);
-    emit_str_list(&mut code, "WORKSPACE_MARKERS", &paths.workspace_markers);
 
     code.push_str("// --- git_ssh_allowlist.yaml ---\n");
     emit_str_list(&mut code, "GIT_SSH_ALLOWED_HOSTS", &ssh_allowlist.hosts);

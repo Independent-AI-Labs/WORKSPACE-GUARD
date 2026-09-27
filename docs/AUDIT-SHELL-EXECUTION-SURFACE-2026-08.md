@@ -17,7 +17,7 @@ The most important contradiction is that the repository explicitly permits
 the sanctioned Python launcher. `uv` is a launcher, not a justification for
 inline Python. The command remains an inline, unscanned interpreter channel.
 
-The second critical issue is the production fallback in
+The second critical issue is the production substitute in
 `scripts/lib/host-provision-admin.sh`: it invokes Perl both with `-e` and with
 a heredoc. Those paths are not `uv`-managed and are not blocked when the
 script is scanned as a script body because `alt-interp` is command-scoped.
@@ -107,7 +107,7 @@ execution there except for explicit extension-qualified script files that are
 validated as isolated artifacts. Trusted status must not silently authorize
 inline code if the repository contract is “no inline code”.
 
-### SHG-003 Critical: Production Perl fallback violates the UV-only contract
+### SHG-003 Critical: Production Perl substitute violates the UV-only contract
 
 Evidence:
 
@@ -120,7 +120,7 @@ interpreter code on the host. The heredoc is precisely an inline payload.
 
 Required direction: replace both with a checked-in, extension-qualified,
 reviewed implementation executed through the sanctioned launcher, or use a
-compiled implementation. No bare Perl fallback should remain.
+compiled implementation. No bare Perl substitute should remain.
 
 ### SHG-004 High: Heredoc payloads are not modeled as a policy class
 
@@ -331,7 +331,7 @@ The shell guard should remain one defense, not the universal execution policy.
 | `bash -c` | Raw regex command scan | Grammar and inline payload gaps | Critical |
 | Bash script body | Raw regex script scan | `alt-interp` excluded by scope | Critical |
 | `uv run python -c` | Explicitly allowed | Inline interpreter channel | Critical |
-| Perl fallback | Bare Perl and heredoc | Not UV-managed or isolated | Critical |
+| Perl substitute | Bare Perl and heredoc | Not UV-managed or isolated | Critical |
 | Heredoc stdin | No general rule | Code channel not modeled | High |
 | Nested shell | Expected re-entry | Copies/containers can escape | High |
 | Rust `Command` | Per-call controls | No central allowlist | High |

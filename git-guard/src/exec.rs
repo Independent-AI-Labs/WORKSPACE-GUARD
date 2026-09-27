@@ -15,7 +15,7 @@ use crate::{
     remote::repo_targets_provisioned_host,
     wsroot::{classify_workspace_root, WorkspaceRoot},
     GuardError, CONTRACT_POLL_MS, CONTRACT_SCRIPT, CONTRACT_TIMEOUT_MS, CORE_LIMIT, GIT_ORIGINAL,
-    NOFILE_LIMIT, WORKSPACE_MARKERS,
+    NOFILE_LIMIT,
 };
 
 #[cfg(test)]
@@ -387,13 +387,6 @@ pub fn check_workspace_ci_contract(
 
     let wsroot = match classify_workspace_root(&toplevel) {
         WorkspaceRoot::Full(w) => w,
-        WorkspaceRoot::Partial(partial) => {
-            return Err(GuardError::ContractFailed(format!(
-                "workspace markers incomplete at {}: expected all of {:?}; \
-                 failing closed (possible marker tampering)",
-                partial, WORKSPACE_MARKERS
-            )));
-        }
         WorkspaceRoot::None => {
             if repo_targets_provisioned_host(&toplevel) {
                 return Err(GuardError::ContractFailed(format!(

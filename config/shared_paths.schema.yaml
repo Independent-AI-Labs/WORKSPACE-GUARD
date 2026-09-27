@@ -28,10 +28,6 @@ fields:
     default: workspace/config/project_enforcement.yaml
     description: "Project enforcement YAML path, relative to the workspace root. Used for vendored-tier bypass detection."
 
-  - path: workspace_markers
-    type: list<string>
-    required: true
-    description: "Paths checked to identify the workspace root. All must exist for a directory to be recognized as the workspace root."
   - path: contract_script
     type: string
     required: true

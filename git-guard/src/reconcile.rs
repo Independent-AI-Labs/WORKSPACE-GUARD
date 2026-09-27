@@ -108,13 +108,11 @@ pub fn run(git_dir: &Path) -> Vec<String> {
     drift
 }
 
-/// Same scope rule as gitdir::lock: workspace repos (full or partial
-/// marker match) and clones of provisioned remotes. Anything else is
-/// left alone.
+/// Same scope rule as gitdir::lock: repos inside the recorded workspace
+/// root and clones of provisioned remotes. Anything else is left alone.
 fn in_scope(toplevel: &Path) -> bool {
     let s = toplevel.to_string_lossy().to_string();
-    crate::wsroot::find_partial_workspace_root(&s).is_some()
-        || crate::remote::repo_targets_provisioned_host(&s)
+    crate::wsroot::is_workspace_path(&s) || crate::remote::repo_targets_provisioned_host(&s)
 }
 
 /// `<repo>/config/` and its direct `*.yaml` children (non-recursive;
@@ -276,9 +274,10 @@ fn warn_hooks_drift(git_dir: &Path) {
 /// lacks the immutable flag (REQ-GGUARD-178). Absent registries are
 /// skipped: not every checkout carries both trees.
 fn warn_registry_drift(toplevel: &Path) {
-    let ws = match crate::wsroot::find_partial_workspace_root(&toplevel.to_string_lossy()) {
-        Some(w) => w,
-        None => return,
+    let s = toplevel.to_string_lossy();
+    let ws = match crate::wsroot::classify_workspace_root(&s) {
+        crate::wsroot::WorkspaceRoot::Full(w) => w,
+        crate::wsroot::WorkspaceRoot::None => return,
     };
     for rel in TIER_REGISTRIES {
         let path = PathBuf::from(&ws).join(rel);

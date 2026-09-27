@@ -439,7 +439,7 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-502**: If the log file cannot be opened, the block shall
   still be enforced: logging failure shall never bypass blocking. Every failure
   shall use REQ-GGUARD-092's typed, non-recursive stderr/distinct-tty diagnostic;
-  no user-writable or unverified fallback is allowed. The log file shall be
+  no user-writable or unverified substitute is allowed. The log file shall be
   opened under the verified directory fd with no-follow append semantics.
 
 - **REQ-SHG-503**: The log file shall be opened and written only

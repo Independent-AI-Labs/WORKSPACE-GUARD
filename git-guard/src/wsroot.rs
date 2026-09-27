@@ -1,63 +1,55 @@
-use crate::WORKSPACE_MARKERS;
+//! Workspace-root detection.
+//!
+//! Identity comes from a root-owned record written at install time under
+//! `/usr/lib/workspace-guard`. The guard does not infer the workspace root
+//! from markers in the agent-writable tree: a marker can be forged or
+//! deleted by the agent, and requiring one made the guard's own identity
+//! test depend on a file that exists only to be bypassed. The record
+//! cannot be forged or removed by the agent, and an absent or empty
+//! record means "not a workspace".
 
-/// Single ancestor walk that classifies `toplevel` in ONE pass.
-/// Previously callers ran find_workspace_root (up to N levels x 3
-/// marker stats) and, on failure, find_partial_workspace_root (the
-/// same walk again). Both results come out of one traversal here.
+use std::path::Path;
+
+const WORKSPACE_ROOT_RECORD: &str = "/usr/lib/workspace-guard/workspace-root";
+
 pub enum WorkspaceRoot {
-    /// All markers present at this level.
+    /// The recorded root, which contains the queried path.
     Full(String),
-    /// Some but not all markers present (possible marker tampering).
-    Partial(String),
+    /// No record, or the queried path is outside the recorded root.
     None,
 }
 
-pub fn classify_workspace_root(toplevel: &str) -> WorkspaceRoot {
-    let mut cur = std::path::PathBuf::from(toplevel);
-    let mut first_partial: Option<String> = None;
-    loop {
-        let mut hits = 0usize;
-        for m in WORKSPACE_MARKERS {
-            if cur.join(m).exists() {
-                hits += 1;
-            }
-        }
-        if hits == WORKSPACE_MARKERS.len() {
-            // A full match anywhere up the tree takes precedence over a
-            // partial seen at a lower level (matches the original
-            // find-then-find-partial call order in exec.rs).
-            return WorkspaceRoot::Full(cur.to_string_lossy().to_string());
-        }
-        if hits > 0 && first_partial.is_none() {
-            first_partial = Some(cur.to_string_lossy().to_string());
-        }
-        if !cur.pop() {
-            return match first_partial {
-                Some(p) => WorkspaceRoot::Partial(p),
-                None => WorkspaceRoot::None,
-            };
-        }
+pub fn classify_workspace_root(candidate: &str) -> WorkspaceRoot {
+    classify_against(recorded_workspace_root().as_deref(), candidate)
+}
+
+/// Pure classifier against an explicit root, so tests need no filesystem
+/// and no real installation.
+pub fn classify_against(root: Option<&str>, candidate: &str) -> WorkspaceRoot {
+    match root {
+        Some(root) if is_within(root, candidate) => WorkspaceRoot::Full(root.to_string()),
+        _ => WorkspaceRoot::None,
     }
 }
 
-/// Thin wrapper kept for callers that only want the full-marker case.
-/// Currently used only by tests; exec.rs uses classify_workspace_root.
-#[allow(dead_code)]
-pub fn find_workspace_root(toplevel: &str) -> Option<String> {
-    match classify_workspace_root(toplevel) {
-        WorkspaceRoot::Full(p) => Some(p),
-        _ => None,
+/// True when `candidate` sits at or under the recorded workspace root.
+#[cfg(feature = "capability-mode")]
+pub fn is_workspace_path(candidate: &str) -> bool {
+    matches!(classify_workspace_root(candidate), WorkspaceRoot::Full(_))
+}
+
+fn recorded_workspace_root() -> Option<String> {
+    let raw = std::fs::read_to_string(WORKSPACE_ROOT_RECORD).ok()?;
+    let root = raw.trim();
+    if root.is_empty() {
+        None
+    } else {
+        Some(root.to_string())
     }
 }
 
-// Audit C6: a directory matching SOME but not all markers is a workspace
-// root with missing pieces (e.g. an agent-deletable marker removed to
-// stop the contract checks). Callers must fail closed on partials.
-// Used by gitdir.rs (capability-mode only) and by tests.
-#[cfg(any(test, feature = "capability-mode"))]
-pub fn find_partial_workspace_root(toplevel: &str) -> Option<String> {
-    match classify_workspace_root(toplevel) {
-        WorkspaceRoot::Partial(p) | WorkspaceRoot::Full(p) => Some(p),
-        WorkspaceRoot::None => None,
-    }
+fn is_within(root: &str, candidate: &str) -> bool {
+    let root = Path::new(root);
+    let candidate = Path::new(candidate);
+    candidate == root || candidate.starts_with(root)
 }

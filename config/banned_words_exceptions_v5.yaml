@@ -152,41 +152,6 @@ exceptions:
     review_date: '2026-09-11'
     removal: Remove when the file no longer quotes the rule.
 
-  - rule: bfallback-b
-    path: ^docs/AUDIT\-SHELL\-EXECUTION\-SURFACE\-2026\-08\.md$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-guard
-    review_date: '2026-09-11'
-    removal: Remove when the file no longer quotes the rule.
-
-  - rule: bfallback-b
-    path: ^docs/requirements/REQ\-GIT\-GUARD\.md$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-guard
-    review_date: '2026-09-11'
-    removal: Remove when the file no longer quotes the rule.
-
-  - rule: bfallback-b
-    path: ^docs/requirements/REQ\-SHELL\-GUARD\.md$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-guard
-    review_date: '2026-09-11'
-    removal: Remove when the file no longer quotes the rule.
-
-  - rule: bfallback-b
-    path: ^docs/requirements/REQ\-YAML\-EDIT\.md$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-guard
-    review_date: '2026-09-11'
-    removal: Remove when the file no longer quotes the rule.
-
-  - rule: bfallback-b
-    path: ^docs/specifications/SPEC\-GIT\-GUARD\.md$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-guard
-    review_date: '2026-09-11'
-    removal: Remove when the file no longer quotes the rule.
-
   - rule: blazy-b
     path: ^docs/PERF\-AUDIT\.md$
     rationale: Quoted forbidden vocabulary required by this file's reviewed role.

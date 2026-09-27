@@ -494,7 +494,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   on stderr, the variable is not forwarded to children, and tracing shall report
   its configured phase evidence. Every policy helper's stderr and failure status
   shall be surfaced with reversible byte escaping rather than discarded,
-  modified, or collapsed into an unreported fallback.
+  modified, or collapsed into an unreported substitute.
 
 ### 9. WORKSPACE-CI Contract Enforcement
 
@@ -842,7 +842,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   `GNU_STACK`, use stack protection, and contain no ELF interpreter or dynamic
   dependencies. Full-RELRO linker semantics shall include immediate binding when
   a dynamic target is explicitly specified by a future requirement; no dynamic
-  fallback is currently permitted. The build shall use committed trusted target/
+  substitute is currently permitted. The build shall use committed trusted target/
   linker flags and a pinned toolchain, reject inherited compiler/linker overrides,
   and fail closed if the toolchain cannot produce or the verifier cannot prove
   every required property. Verification shall inspect the built artifact, record
@@ -1096,10 +1096,10 @@ guard, not in operator discipline.
   `nix`, and mode-optional `caps` only. Build dependencies and their complete
   transitive/proc-macro closure are separately allow-listed under REQ-GGUARD-122.
   No `clap` or argument parsing framework is permitted.
-- **Static linking required**: no dynamic fallback or final dynamic dependency.
+- **Static linking required**: no dynamic substitute or final dynamic dependency.
 - **Target**: pinned `x86_64-unknown-linux-musl` static PIE only. Missing target,
   linker, stack-protection support, or verifier is a hard provisioning failure;
-  there is no GNU or architecture fallback.
+  there is no GNU or architecture substitute.
 - **No shell, no Python, no interpreter**: the binary is fully self-contained.
 - **Binary size target**: under 500KB stripped.
 - **Deployment is via `make build-guard` + `make install-guard-host-exec`**: the `make install` flow shall NOT handle git or the git guard.

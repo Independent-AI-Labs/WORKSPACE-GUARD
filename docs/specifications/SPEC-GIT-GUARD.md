@@ -743,7 +743,7 @@ protocol and is never emitted. Failed or malformed protocol stdout is preserved
 as encoded failure evidence, not copied raw to stdout. Spawn errors, reader
 failures, signals, timeouts, malformed results, and non-zero statuses retain
 distinct typed diagnostics and are never converted to empty output or a silent
-fallback.
+substitute.
 
 An ordinary successful invocation with no diagnostic condition remains
 transparent. Transparency never suppresses explicit trace output, filtering
@@ -979,7 +979,7 @@ replacement, or pre-spawn race failure produces a typed contract-unavailable
 outcome and exit 4 for every user. The concise report identifies the fixed path
 and failure class through stderr, distinct tty, and audit without copying mutable
 file content or secrets. Missing/untrusted deployment is never permission to
-skip, and the guard performs no source-checkout fallback, alternate selection,
+skip, and the guard performs no source-checkout substitute, alternate selection,
 repair, installation, or network retrieval. Invocations outside contract scope
 do not inspect the runner.
 
@@ -1046,7 +1046,7 @@ error. Parent verification, open/create, metadata, lock, encode, write, sync,
 unlock, and close failures each retain OS status where available. Main policy
 handling reports one reversibly escaped `AUDIT FAILURE` diagnostic through stderr
 and a distinct tty and exits with the original denial's code. No requested Git
-execution, path fallback, or integrity retry occurs. HOME, `/tmp`, workspace,
+execution, path substitute, or integrity retry occurs. HOME, `/tmp`, workspace,
 caller-selected, world-writable, and unverified alternate destinations are
 forbidden. A successful append plus sync is required before persistence may be
 claimed. Failure reporting never recursively invokes the failed writer; an

@@ -269,56 +269,43 @@ fn child_env_filter_drops_gated_vars_for_non_root_only() {
     assert!(!should_drop_child_env("HOME", false));
 }
 
-fn make_workspace_markers(dir: &std::path::Path, markers: &[&str]) {
-    for m in markers {
-        let p = dir.join(m);
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::create_dir_all(&p).unwrap();
-    }
+#[test]
+fn recorded_root_matches_descendants() {
+    use crate::wsroot::{classify_against, WorkspaceRoot};
+    let root = "/srv/wsroot";
+    assert!(matches!(
+        classify_against(Some(root), "/srv/wsroot/projects/repo"),
+        WorkspaceRoot::Full(r) if r == root
+    ));
+    assert!(matches!(
+        classify_against(Some(root), root),
+        WorkspaceRoot::Full(r) if r == root
+    ));
 }
 
 #[test]
-fn full_markers_find_workspace_root() {
-    use crate::wsroot::find_workspace_root;
-    let dir = tempfile::tempdir().unwrap();
-    make_workspace_markers(dir.path(), WORKSPACE_MARKERS);
-    let top = format!("{}/projects/repo", dir.path().to_string_lossy());
-    assert_eq!(
-        find_workspace_root(&top),
-        Some(dir.path().to_string_lossy().to_string())
-    );
+fn path_outside_recorded_root_is_not_workspace() {
+    use crate::wsroot::{classify_against, WorkspaceRoot};
+    assert!(matches!(
+        classify_against(Some("/srv/wsroot"), "/tmp/repo"),
+        WorkspaceRoot::None
+    ));
+    assert!(matches!(
+        classify_against(Some("/srv/wsroot"), "/srv/wsroot2/repo"),
+        WorkspaceRoot::None
+    ));
 }
 
 #[test]
-fn partial_markers_miss_full_but_hit_partial() {
-    use crate::wsroot::{find_partial_workspace_root, find_workspace_root};
-    let dir = tempfile::tempdir().unwrap();
-    let some: Vec<&str> = WORKSPACE_MARKERS.iter().take(1).cloned().collect();
-    make_workspace_markers(dir.path(), &some);
-    let top = format!("{}/projects/repo", dir.path().to_string_lossy());
-    assert_eq!(find_workspace_root(&top), None);
-    assert_eq!(
-        find_partial_workspace_root(&top),
-        Some(dir.path().to_string_lossy().to_string())
-    );
-}
-
-#[test]
-fn no_markers_hit_neither() {
-    use crate::wsroot::{find_partial_workspace_root, find_workspace_root};
-    let dir = tempfile::tempdir().unwrap();
-    let top = dir.path().to_string_lossy().to_string();
-    assert_eq!(find_workspace_root(&top), None);
-    assert_eq!(find_partial_workspace_root(&top), None);
+fn absent_record_is_not_workspace() {
+    use crate::wsroot::{classify_against, WorkspaceRoot};
+    assert!(matches!(
+        classify_against(None, "/srv/wsroot/projects/repo"),
+        WorkspaceRoot::None
+    ));
 }
 
 #[test]
 fn workspace_contract_uses_only_live_paths() {
-    assert_eq!(
-        WORKSPACE_MARKERS,
-        &[".boot-linux", "workspace/scripts/utils/git-guard"]
-    );
     assert_eq!(CONTRACT_SCRIPT, "/opt/workspace-ci/lib/checks_quality.sh");
 }

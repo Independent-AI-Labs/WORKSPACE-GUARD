@@ -152,17 +152,14 @@ pub fn lock(git_dir: &Path) {
 }
 
 /// True when the ownership lock applies to the repo at `toplevel`: repos
-/// inside the workspace (full or partial marker match; a partial match is
-/// a workspace with missing pieces and must stay locked, matching the
-/// fail-closed contract in exec.rs) and clones of provisioned remotes
+/// inside the recorded workspace root, and clones of provisioned remotes
 /// outside the workspace (H4). Any other repo (scratch clones, test
 /// sandboxes under /tmp, upstream checkouts) is out of scope: locking it
 /// would break ordinary agent workflows without protecting anything the
 /// guard enforces on.
 fn lock_in_scope(toplevel: &Path) -> bool {
     let s = toplevel.to_string_lossy().to_string();
-    crate::wsroot::find_partial_workspace_root(&s).is_some()
-        || crate::remote::repo_targets_provisioned_host(&s)
+    crate::wsroot::is_workspace_path(&s) || crate::remote::repo_targets_provisioned_host(&s)
 }
 
 /// Directory names the unified worktree glob walk never descends into.
