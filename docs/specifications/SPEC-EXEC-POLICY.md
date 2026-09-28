@@ -121,11 +121,21 @@ they are denied by default (`REQ-EXEC-104`).
 
 A kernel program cannot be relied on when it is absent. Therefore:
 
-1. The loader writes a readiness token only after `BPF_LINK_CREATE` succeeds.
-2. The agent session unit `ExecCondition` requires the token and the pinned
-   program link; absent either, the session does not start.
+1. The loader writes a readiness token (`/run/workspace-exec-policy/ready`)
+   only after `BPF_LINK_CREATE` succeeds.
+2. The agent session unit gets an `ExecCondition`
+   (`workspace-exec-policy-session-gate`, installed as a drop-in) that
+   requires the readiness token **only while the posture is enforcing**. The
+   gate reads `/etc/workspace-guard/exec-policy-mode`: in `audit` it always
+   allows the session to start, so a staged-but-not-enabled host is
+   unaffected; in `enforce` it fails closed when the token is absent.
 3. Layer B (AppArmor) and layer C (Landlock) are applied by the same session
    wrapper, so a loader failure denies, never allows.
+
+Enforcement is never implicit. `install-exec-policy` stages every layer in
+`audit` mode; only `enable-exec-policy` writes `mode=enforce`, and only after
+the LSM `bpf` hook is confirmed active and the readiness token exists
+(`REQ-EXEC-172`).
 
 ---
 
@@ -166,8 +176,11 @@ denying policy class. Denial delivery failure never downgrades a denial.
 
 ## 5. Policy Schema (`config/exec_allowlist.yaml`)
 
-Root-owned, `chattr +i`, edited only through the sudo-gated secure YAML editor
-(SPEC-YAML-EDIT). Sketch:
+The reviewed source of truth is `config/exec_allowlist.yaml`: root-owned,
+`chattr +i`, edited only through the sudo-gated secure YAML editor
+(SPEC-YAML-EDIT). `make install-exec-policy` installs it to
+`/etc/workspace-guard/exec_allowlist.yaml`, which is the path the loader reads;
+the two are byte-identical after staging. Sketch:
 
 ```yaml
 version: 1
@@ -268,13 +281,37 @@ enforces the effect classes previously approximated by text: signals
 
 ## 9. Install, Reconcile, Recovery
 
-- `make build-exec-policy` builds the loader and BPF object.
-- `make install-exec-policy` (root): install root-owned loader + BPF object,
-  install the pinned map seed from `config/exec_allowlist.yaml`, install the
-  AppArmor profile, install the session wrapper, and enable the boot-time
-  service. Idempotent and reconciling.
-- `make check-exec-policy`: verify program attached, map pinned, profile
-  enforced, session wrapper wired, hashes current. Exit non-zero on drift.
+The lifecycle is a state machine in `scripts/exec-policy`, exposed as Make
+targets. It separates **staging** (safe, idempotent) from **enabling** (an
+explicit operator decision), so a host can carry the layers without any
+behavior change.
+
+- `make build-exec-policy`: build the loader and BPF object (kernel phase).
+- `make install-exec-policy` (root; `stage`): install the loader, BPF object,
+  AppArmor profile, session gate, unit, and drop-in; install the pinned map
+  seed from `config/exec_allowlist.yaml` to
+  `/etc/workspace-guard/exec_allowlist.yaml`; create `exec-policy-mode` as
+  `audit`; enable the boot-time service. Idempotent and reconciling. If the
+  authority artifacts are not built or the allowlist is unseeded, stage warns
+  and installs the interim layers only; it never enables enforcement.
+- `make enable-exec-policy CONFIRM=1` (root; `enable`): refuse without
+  `CONFIRM=1`; require the staged layers, the policy, an active LSM `bpf`
+  hook, and the loader readiness token; run the denial canary (`WEP_CANARY`)
+  and revert to `audit` if it fails; write `mode=enforce`; return the
+  AppArmor layer to complain.
+- `make disable-exec-policy` (root): write `mode=audit` and return AppArmor
+  to complain; the layers stay staged.
+- `make check-exec-policy` (any): read-only report; exit 2 `NOT INSTALLED`,
+  exit 0 with a warning for `AUDIT` / `NOT ACTIVE` / interim, exit 0 `OK`,
+  exit 1 `DRIFTED` (mode and attached authority disagree).
+- `make uninstall-exec-policy` (root): remove the staged layers; the policy
+  and mode file are preserved.
+
+`scripts/guard-operator.sh` integrates the posture: `guard-up` and
+`guard-refresh` stage it (warn-only, so a host without the policy still comes
+up green); `guard-check` reports it; `guard-down` unstages it. None of these
+enable enforcement - that is `enable-exec-policy` alone.
+
 - **Break-glass**: root remains unconfined (selected answer). Recovery uses
   `/bin/bash.real` and `aa-complain`/loader stop from an unconfined root shell.
   The agent has no path to modify policy or stop the loader (`CAP_BPF` absent).
@@ -298,8 +335,12 @@ destination and mode follow [SPEC-AUDIT](SPEC-AUDIT.md).
   interpreter denied; `memfd`/`execveat(AT_EMPTY_PATH)` denied; `task_kill`
   outside tree denied; device write denied; module load denied; `AF_ALG`
   denied; loader-absent session refuses to start.
-- **Shell suite**: `tests/shell/` covers install/reconcile/check and the
-  AppArmor/Landlock secondary layers.
+- **Shell suite**: `tests/shell/26-exec-policy-provisioning.bats` covers the
+  staging state machine against a `WEP_ROOT` fixture (no root, no kernel):
+  `NOT INSTALLED` / `NOT ACTIVE` / interim / `AUDIT` / `OK` / `DRIFTED`, the
+  session gate in each mode, and the unseeded-policy warning. The
+  AppArmor/Landlock secondary layers are covered by the same suite's
+  fixtures and by the kernel matrix.
 - **MATRIX-DISPOSITION gate**: `scripts/check-exec-dispositions.sh` fails when
   any rule id in `config/shell_guard_policy.yaml` is absent from the section 6
   matrix, so a new rule cannot be added without a disposition. Run from

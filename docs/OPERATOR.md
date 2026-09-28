@@ -6,7 +6,7 @@ Run from the repository or workspace root:
 sudo make guard-up       # idempotent bring-up (provision + guard install as needed)
 sudo make guard-refresh  # after pulling guard code (alias: refresh-guard)
 make guard-check         # read-only health
-sudo make guard-down     # remove shell guard first, then git guard (provision state preserved)
+sudo make guard-down     # unstage exec policy, then remove shell guard, then git guard
 ```
 
 `guard-check`, `check-guard-host-exec`, and `shell-guard-check` are read-only
@@ -116,12 +116,29 @@ The host is moving to a deny-by-default, kernel-enforced execution posture
 
 - Add `bpf` to the kernel LSM list and reboot once:
   `lsm=landlock,lockdown,yama,integrity,apparmor,bpf`.
-- `sudo make install-exec-policy` installs the loader, program, pinned map
-  seed, AppArmor profile, and session wrapper; `make check-exec-policy`
-  verifies them.
+- Seed the reviewed allowlist once through the secure editor into
+  `config/exec_allowlist.yaml` (`yaml-bootstrap` for `version` and `deny`,
+  then `yaml-add` per allowlisted binary; `install-exec-policy` prints the
+  exact commands and the reviewed seed set).
+- `sudo make install-exec-policy` **stages** the loader, program, pinned map
+  seed, AppArmor profile, session gate, unit, and drop-in. It never enables
+  enforcement: the mode file is written as `audit`, and if the loader/BPF
+  object or the policy is absent it warns and stages the interim layers only.
+- `make check-exec-policy` is read-only: `NOT INSTALLED` (exit 2),
+  `NOT ACTIVE`/`AUDIT`/interim (exit 0 with a warning), `OK` (exit 0), or
+  `DRIFTED` (exit 1).
+- `sudo make enable-exec-policy CONFIRM=1` is the **only** enforcement flip.
+  It refuses without `CONFIRM=1`, requires the staged layers, the seeded
+  policy, an active LSM `bpf` hook, and the loader readiness token, runs a
+  denial canary, and reverts to `audit` on canary failure. It moves the
+  AppArmor layer to `complain`; `sudo make disable-exec-policy` returns to
+  `audit`.
+- `guard-up`/`guard-refresh` stage the posture (warn-only, never enable);
+  `guard-check` reports it; `guard-down` unstages it.
 - Root remains break-glass and unconfined. If an over-restrictive policy
-  wedges a session, recover from an unconfined root shell: stop the loader and
-  set the AppArmor profile to complain mode.
+  wedges a session, recover from an unconfined root shell: `sudo make
+  disable-exec-policy`, stop the loader, and set the AppArmor profile to
+  complain mode.
 
 Use `yaml-bootstrap` once to create a missing top-level scalar key; it
 rejects keys that already exist. Use `yaml-set` for subsequent updates.

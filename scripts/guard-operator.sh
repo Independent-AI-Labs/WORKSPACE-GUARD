@@ -15,10 +15,10 @@ REPO_CFG="$REPO_ROOT/config/host-provision.yaml"
 
 usage() {
     printf 'Usage: %s <up|refresh|check|down>\n' "$0"
-    printf '  up      Idempotent bring-up (provision + git guard + shell guard as needed)\n'
-    printf '  refresh Rebuild and force reinstall git guard + shell guard after code changes\n'
-    printf '  check   Read-only health check (git guard + shell guard)\n'
-    printf '  down    Remove shell guard + git guard; preserve provision state\n'
+    printf '  up      Idempotent bring-up (provision + git/shell guards + stage exec policy)\n'
+    printf '  refresh Rebuild and force reinstall git/shell guards + stage exec policy\n'
+    printf '  check   Read-only health check (git/shell guards + exec policy)\n'
+    printf '  down    Unstage exec policy, then remove shell + git guards; keep provision state\n'
 }
 
 require_root() {
@@ -104,6 +104,25 @@ _shell_guard_up() {
     echo "==> guard-up: shell guard already healthy"
 }
 
+_exec_policy_available() {
+    [[ -x "$REPO_ROOT/scripts/exec-policy" ]]
+}
+
+_exec_policy_stage() {
+    _exec_policy_available || return 0
+    echo "==> guard-up: staging exec policy (audit mode; enforcement stays manual)"
+    local stage_status=0
+    bash "$REPO_ROOT/scripts/exec-policy" stage || stage_status=$?
+    if [[ "$stage_status" -ne 0 ]]; then
+        echo "WARN: exec-policy stage reported a problem (see above)" >&2
+    fi
+    return 0
+}
+
+_exec_policy_check_status() {
+    bash "$REPO_ROOT/scripts/exec-policy" check 2>&1
+}
+
 guard_up() {
     require_root
     if _user_mgmt_enabled && [[ ! -f "$MARKER" ]]; then
@@ -122,6 +141,7 @@ guard_up() {
         echo "==> guard-up: git guard already healthy"
     fi
     _shell_guard_up
+    _exec_policy_stage
 }
 
 guard_refresh() {
@@ -132,6 +152,7 @@ guard_refresh() {
         echo "==> guard-refresh: reconcile shell guard"
         make -C "$REPO_ROOT" install-shell-guard
     fi
+    _exec_policy_stage
 }
 
 guard_check() {
@@ -140,11 +161,18 @@ guard_check() {
     if _shell_guard_available; then
         _shell_guard_check_status || status=$?
     fi
+    if _exec_policy_available; then
+        _exec_policy_check_status || status=$?
+    fi
     return "$status"
 }
 
 guard_down() {
     require_root
+    if _exec_policy_available; then
+        echo "==> guard-down: unstaging exec policy"
+        bash "$REPO_ROOT/scripts/exec-policy" unstage
+    fi
     if [[ -x "$REPO_ROOT/scripts/uninstall-shell-guard" ]]; then
         echo "==> guard-down: removing shell guard"
         make -C "$REPO_ROOT" uninstall-shell-guard

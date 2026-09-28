@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# exec-policy: exclusive-execution-posture lifecycle.
+#
+# Implements docs/specifications/SPEC-EXEC-POLICY.md section 9:
+#   stage    (root) install/reconcile loader, object, policy, AppArmor
+#            profile, session gate, and unit; default mode is audit.
+#   enable   (root) flip the pinned map to enforce, after the kernel
+#            authority is attached and the readiness token exists.
+#   disable  (root) flip back to audit (interim layers stay staged).
+#   check    (any) read-only state report; OK / AUDIT / NOT ACTIVE /
+#            NOT INSTALLED / DRIFTED.
+#   unstage  (root) remove the staged layers; policy and mode are kept.
+#
+# Test hooks: WEP_ROOT prefixes absolute paths, WEP_ALLOW_NONROOT skips the
+# euid gate, WEP_SYSTEMCTL / WEP_APPARMOR_PARSER / WEP_AA_COMPLAIN override
+# tool paths, WEP_CANARY runs a denial probe on enable,
+# WEP_LOADER_SRC / WEP_BPF_OBJ_SRC override built artifacts.
+
+set -uo pipefail
+
+DEVNULL=/dev/null
+WEP_ROOT="${WEP_ROOT:-}"
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in
+    /proc/self/fd/*) SELF="${SHG_SCRIPT_PATH:-$SELF}" ;;
+esac
+SELF_DIR="$(cd "$(dirname "$SELF")" 2>"$DEVNULL" && pwd)"
+REPO_ROOT="${WEP_REPO_ROOT:-$(cd "$SELF_DIR/.." 2>"$DEVNULL" && pwd)}"
+
+ETC="$WEP_ROOT/etc/workspace-guard"
+POLICY="$ETC/exec_allowlist.yaml"
+MODE_FILE="$ETC/exec-policy-mode"
+READY="$WEP_ROOT/run/workspace-exec-policy/ready"
+LOADER="$WEP_ROOT/usr/local/bin/workspace-exec-policyd"
+BPF_OBJ="$WEP_ROOT/usr/local/lib/workspace-guard/exec_policy.bpf.o"
+GATE="$WEP_ROOT/usr/local/bin/workspace-exec-policy-session-gate"
+APPARMOR="$WEP_ROOT/etc/apparmor.d/workspace-exec-policy"
+UNIT="$WEP_ROOT/etc/systemd/system/workspace-exec-policyd.service"
+DROPIN_DIR="$WEP_ROOT/etc/systemd/system/workspace-agent@.service.d"
+DROPIN="$DROPIN_DIR/10-exec-policy.conf"
+LSM_FILE="$WEP_ROOT/sys/kernel/security/lsm"
+
+LOADER_SRC="${WEP_LOADER_SRC:-$REPO_ROOT/target/release/workspace-exec-policyd}"
+BPF_OBJ_SRC="${WEP_BPF_OBJ_SRC:-$REPO_ROOT/target/release/exec_policy.bpf.o}"
+PROFILE_SRC="$REPO_ROOT/config/systemd/workspace-exec-policy.apparmor"
+POLICY_SRC="$REPO_ROOT/config/exec_allowlist.yaml"
+SYSTEMCTL="${WEP_SYSTEMCTL:-systemctl}"
+APPARMOR_PARSER="${WEP_APPARMOR_PARSER:-apparmor_parser}"
+AA_COMPLAIN="${WEP_AA_COMPLAIN:-aa-complain}"
+
+have() { command -v "$1" >"$DEVNULL" 2>&1; }
+
+note() { echo "exec-policy: $*"; }
+warn() { echo "WARN: $*" >&2; }
+
+require_root() {
+    if [ "$(id -u)" -ne 0 ] && [ -z "${WEP_ALLOW_NONROOT:-}" ]; then
+        echo "ERROR: this target needs root: sudo make $1" >&2
+        exit 1
+    fi
+}
+
+mode() {
+    if [ -f "$MODE_FILE" ]; then
+        tr -d '[:space:]' < "$MODE_FILE"
+    else
+        echo audit
+    fi
+}
+
+bpf_active() {
+    [ -r "$LSM_FILE" ] || return 1
+    grep -qw bpf "$LSM_FILE"
+}
+
+installed() {
+    [ -f "$LOADER" ] || return 1
+    [ -f "$BPF_OBJ" ] || return 1
+    [ -f "$GATE" ] || return 1
+    [ -f "$APPARMOR" ] || return 1
+    [ -f "$UNIT" ] || return 1
+    return 0
+}
+
+apparmor_enforcing() {
+    [ -f "$APPARMOR" ] || return 1
+    ! grep -q 'flags=(complain)' "$APPARMOR"
+}
+
+missing_authority_artifacts() {
+    [ -f "$LOADER_SRC" ] || return 0
+    [ -f "$BPF_OBJ_SRC" ] || return 0
+    return 1
+}
+
+seed_help() {
+    warn "allowlist policy missing: $POLICY_SRC"
+    warn "seed it once through the secure editor (root), then re-run stage:"
+    warn "  sudo make yaml-bootstrap FILE=config/exec_allowlist.yaml KEY=version VALUE=1"
+    warn "  sudo make yaml-bootstrap FILE=config/exec_allowlist.yaml KEY=deny VALUE='{default: true}'"
+    warn "  sudo make yaml-add FILE=config/exec_allowlist.yaml KEY=allow \\"
+    warn "       FIELDS='path=/bin/bash;sha256=<hex>;allow_uid=1000;note=guarded shell'"
+    warn "See docs/OPERATOR.md 'Exclusive execution posture' for the reviewed seed set."
+}
+
+install_one() {
+    local src="$1" dst="$2" perm="$3"
+    mkdir -p "$(dirname "$dst")"
+    install -Dm "$perm" "$src" "$dst"
+}
+
+systemctl_do() {
+    have "$SYSTEMCTL" || return 0
+    "$SYSTEMCTL" "$@" >"$DEVNULL" 2>&1
+}
+
+stage() {
+    require_root install-exec-policy
+
+    install_one "$REPO_ROOT/scripts/exec-policy-session-gate" "$GATE" 0755
+    install_one "$PROFILE_SRC" "$APPARMOR" 0644
+    install_one "$REPO_ROOT/config/systemd/workspace-exec-policyd.service" "$UNIT" 0644
+    install_one "$REPO_ROOT/config/systemd/workspace-exec-policy.conf" "$DROPIN" 0644
+    mkdir -p "$ETC"
+    if [ ! -f "$MODE_FILE" ]; then
+        printf 'audit\n' > "$MODE_FILE"
+        chmod 0644 "$MODE_FILE"
+    fi
+
+    if [ -f "$POLICY_SRC" ]; then
+        install_one "$POLICY_SRC" "$POLICY" 0644
+        note "allowlist policy installed ($POLICY)"
+    else
+        seed_help
+    fi
+
+    if missing_authority_artifacts; then
+        warn "authority artifacts not built (run: make build-exec-policy); interim layers staged only"
+    else
+        install_one "$LOADER_SRC" "$LOADER" 0755
+        install_one "$BPF_OBJ_SRC" "$BPF_OBJ" 0644
+        systemctl_do enable workspace-exec-policyd.service
+    fi
+
+    if have "$APPARMOR_PARSER" && [ -f "$APPARMOR" ]; then
+        "$APPARMOR_PARSER" -r "$APPARMOR" >"$DEVNULL" 2>&1 \
+            || warn "AppArmor profile reload failed (profile staged in complain)"
+    fi
+    systemctl_do daemon-reload
+    note "staged (mode=$(mode)); enable with: sudo make enable-exec-policy CONFIRM=1"
+}
+
+enable() {
+    require_root enable-exec-policy
+    if [ "${CONFIRM:-}" != "1" ]; then
+        echo "ERROR: refusing to enforce without CONFIRM=1" >&2
+        echo "  review the policy, then: sudo make enable-exec-policy CONFIRM=1" >&2
+        exit 2
+    fi
+    if ! installed || [ ! -f "$POLICY" ]; then
+        echo "ERROR: not staged (run: sudo make install-exec-policy)" >&2
+        exit 1
+    fi
+    if ! bpf_active; then
+        echo "ERROR: bpf LSM not active; add bpf to the kernel lsm= list and restart the host once:" >&2
+        echo "  lsm=landlock,lockdown,yama,integrity,apparmor,bpf" >&2
+        exit 1
+    fi
+    if [ ! -f "$READY" ]; then
+        echo "ERROR: loader readiness token missing ($READY); authority is not attached" >&2
+        echo "  start workspace-exec-policyd and re-run" >&2
+        exit 1
+    fi
+
+    if [ -n "${WEP_CANARY:-}" ]; then
+        if ! "$WEP_CANARY" >"$DEVNULL" 2>&1; then
+            echo "ERROR: denial canary failed; keeping mode=audit" >&2
+            printf 'audit\n' > "$MODE_FILE"
+            exit 1
+        fi
+        note "denial canary passed"
+    else
+        warn "WEP_CANARY unset: skipping the denial canary (kernel phase only)"
+    fi
+
+    printf 'enforce\n' > "$MODE_FILE"
+    if have "$AA_COMPLAIN" && [ -f "$APPARMOR" ]; then
+        "$AA_COMPLAIN" "$APPARMOR" >"$DEVNULL" 2>&1 \
+            || warn "could not set AppArmor to complain mode"
+    fi
+    systemctl_do restart workspace-exec-policyd.service
+    note "enforcing (eBPF authority + Landlock; AppArmor complain)"
+}
+
+disable() {
+    require_root disable-exec-policy
+    printf 'audit\n' > "$MODE_FILE"
+    if have "$AA_COMPLAIN" && [ -f "$APPARMOR" ]; then
+        "$AA_COMPLAIN" "$APPARMOR" >"$DEVNULL" 2>&1 \
+            || warn "could not set AppArmor to complain mode"
+    fi
+    note "mode=audit (interim layers remain staged)"
+}
+
+unstage() {
+    require_root uninstall-exec-policy
+    systemctl_do stop workspace-exec-policyd.service
+    systemctl_do disable workspace-exec-policyd.service
+    rm -f "$LOADER" "$BPF_OBJ" "$GATE" "$APPARMOR" "$UNIT" "$DROPIN"
+    rmdir "$DROPIN_DIR" >"$DEVNULL" 2>&1
+    systemctl_do daemon-reload
+    note "unstaged (policy and mode preserved)"
+}
+
+check() {
+    if ! installed; then
+        note "NOT INSTALLED"
+        return 2
+    fi
+    if [ ! -f "$POLICY" ]; then
+        warn "allowlist policy missing ($POLICY); posture cannot be enabled"
+    fi
+    local m
+    m="$(mode)"
+    if bpf_active; then
+        if [ "$m" = enforce ]; then
+            if apparmor_enforcing; then
+                note "DRIFTED (bpf active, mode=enforce, AppArmor still enforcing)"
+                return 1
+            fi
+            note "OK (enforcing)"
+            return 0
+        fi
+        note "AUDIT (bpf active, authority attached, not enforcing)"
+        return 0
+    fi
+    if [ "$m" = enforce ]; then
+        note "DRIFTED (mode=enforce but bpf LSM inactive)"
+        return 1
+    fi
+    if apparmor_enforcing; then
+        warn "bpf LSM inactive; interim AppArmor authority is enforcing"
+        note "OK (interim)"
+        return 0
+    fi
+    note "NOT ACTIVE (bpf LSM off; layers staged in complain)"
+    return 0
+}
+
+ACTION="${1:-}"
+case "$ACTION" in
+    stage)    stage ;;
+    enable)   enable ;;
+    disable)  disable ;;
+    check)    check ;;
+    unstage)  unstage ;;
+    -h|--help|"")
+        printf 'Usage: %s <stage|enable|disable|check|unstage>\n' "$0"
+        [ -n "$ACTION" ] || exit 2
+        ;;
+    *)
+        echo "ERROR: unknown action: $ACTION" >&2
+        printf 'Usage: %s <stage|enable|disable|check|unstage>\n' "$0" >&2
+        exit 2
+        ;;
+esac

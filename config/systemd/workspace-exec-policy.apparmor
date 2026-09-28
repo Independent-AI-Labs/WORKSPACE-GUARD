@@ -1,0 +1,53 @@
+# config/systemd/workspace-exec-policy.apparmor
+#
+# Interim enforce-mode authority for the exclusive execution posture
+# (REQ-EXEC-120, layer B). Source for the installed profile at
+# /etc/apparmor.d/workspace-exec-policy.
+#
+# Installed by `make install-exec-policy` in complain mode;
+# `make enable-exec-policy` calls aa-enforce only after the eBPF
+# authority (layer A) is proven, at which point this profile is returned
+# to complain as a non-weakening backstop.
+#
+# This is a reviewed scaffold: the read rules below keep a confined
+# process functional, and the explicit ix rules are the execution
+# allowlist. Absence of an ix rule for a path denies execution of it.
+# The operator must validate it against the deployed allowlist before
+# enforcing; the enable canary is the second check.
+#
+# The installed file is detected as enforcing when it no longer contains
+# flags=(complain); scripts/exec-policy toggles that line with
+# aa-complain and aa-enforce.
+
+#include <tunables/global>
+
+profile workspace-exec-policy flags=(complain) {
+  # Read/execute access needed by confined processes.
+  /usr/bin/** mr,
+  /usr/local/bin/** mr,
+  /usr/lib/** mr,
+  /usr/lib64/** mr,
+  /lib/** mr,
+  /lib64/** mr,
+  /opt/workspace-ci/** mr,
+  /etc/** r,
+  /proc/** r,
+  /sys/** r,
+  /dev/** r,
+  /run/** r,
+
+  # Execution allowlist (inherit the profile on exec).
+  /bin/bash ix,
+  /bin/bash.real ix,
+  /usr/bin/workspace-shell-guard ix,
+  /usr/bin/git ix,
+  /usr/bin/git.original ix,
+  /usr/local/bin/cargo ix,
+  /usr/local/bin/rustc ix,
+  /usr/local/bin/opencode ix,
+  /opt/workspace-ci/** ix,
+
+  # The ix rules above are the exhaustive execution allowlist: a path
+  # with no matching ix rule is denied execute (and a path that matches
+  # an mr rule but no ix rule cannot be run).
+}

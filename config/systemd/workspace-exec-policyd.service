@@ -1,0 +1,46 @@
+# config/systemd/workspace-exec-policyd.service
+#
+# Boot-time loader for the exclusive execution policy (REQ-EXEC-113,
+# REQ-EXEC-116). Attaches the BPF LSM program to bprm_check_security and
+# the non-exec effect hooks, seeds the pinned allowlist map from
+# /etc/workspace-guard/exec_allowlist.yaml, and writes the readiness
+# token only after BPF_LINK_CREATE succeeds.
+#
+# The default mode is "audit": the program observes and logs but allows,
+# until `make enable-exec-policy CONFIRM=1` writes mode=enforce. The
+# agent session unit's ExecCondition gate then requires the readiness
+# token (fail closed).
+#
+# Installed by: sudo make install-exec-policy
+# See docs/specifications/SPEC-EXEC-POLICY.md section 9.
+
+[Unit]
+Description=WORKSPACE-GUARD exclusive execution policy loader
+After=local-fs.target
+Before=workspace-agent@.service multi-user.target
+ConditionPathExists=/usr/local/bin/workspace-exec-policyd
+ConditionPathExists=/usr/local/lib/workspace-guard/exec_policy.bpf.o
+ConditionPathExists=/etc/workspace-guard/exec_allowlist.yaml
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/workspace-exec-policyd \
+    --object /usr/local/lib/workspace-guard/exec_policy.bpf.o \
+    --policy /etc/workspace-guard/exec_allowlist.yaml \
+    --mode-file /etc/workspace-guard/exec-policy-mode \
+    --ready /run/workspace-exec-policy/ready
+Restart=on-failure
+RestartSec=2s
+CapabilityBoundingSet=CAP_BPF CAP_SYS_ADMIN CAP_PERFMON CAP_NET_ADMIN
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+LockPersonality=yes
+NoNewPrivileges=no
+RuntimeDirectory=workspace-exec-policy
+RuntimeDirectoryMode=0755
+ReadWritePaths=/run/workspace-exec-policy
+
+[Install]
+WantedBy=multi-user.target

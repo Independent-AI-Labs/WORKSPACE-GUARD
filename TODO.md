@@ -1692,6 +1692,27 @@ secure editor).
   `scripts/check-exec-dispositions.sh`, wired into `make check` and covered by
   `tests/shell/25-exec-dispositions.bats`.
 
+### Provisioning (staged, no reboot)
+
+- [x] Lifecycle state machine `scripts/exec-policy`
+  (`stage|enable|disable|check|unstage`): stage installs every layer in
+  `audit` mode and never enables; `enable` requires `CONFIRM=1`, the seeded
+  policy, an active LSM `bpf` hook, the readiness token, and a passing canary
+  (REQ-EXEC-170-172, REQ-EXEC-175).
+- [x] Make targets `build`/`install`/`enable`/`disable`/`check`/`uninstall
+  -exec-policy`; `build-exec-policy` is a clear stub until the crate lands
+  (REQ-EXEC-170).
+- [x] Scaffolding sources: AppArmor profile
+  `config/systemd/workspace-exec-policy.apparmor`, session gate
+  `scripts/exec-policy-session-gate`, unit
+  `config/systemd/workspace-exec-policyd.service`, drop-in
+  `config/systemd/workspace-exec-policy.conf` (REQ-EXEC-120, REQ-EXEC-177).
+- [x] `scripts/guard-operator.sh` stages on up/refresh (warn-only), reports on
+  check, unstages on down; enforcement stays the explicit target
+  (REQ-EXEC-176).
+- [x] `tests/shell/26-exec-policy-provisioning.bats`: state machine + session
+  gate against a `WEP_ROOT` fixture (REQ-EXEC-183).
+
 ### Kernel authority (eBPF LSM)
 
 - [ ] Add the `exec-policy` Rust crate: loader and BPF object (aya/libbpf) for
@@ -1707,7 +1728,8 @@ secure editor).
 
 ### Fallback layers
 
-- [ ] AppArmor enforce profile bound to the agent session (REQ-EXEC-120).
+- [ ] AppArmor enforce profile bound to the agent session (REQ-EXEC-120):
+  scaffold staged in complain; needs operator review before enforce.
 - [ ] Session wrapper applying Landlock `EXECUTE` deny + `no_new_privs`
   (REQ-EXEC-121).
 - [ ] Install/reconcile wires all three layers; drift check covers them
@@ -1715,8 +1737,8 @@ secure editor).
 
 ### Deployment and recovery
 
-- [ ] `make build-exec-policy`, `make install-exec-policy`,
-  `make check-exec-policy` (REQ-EXEC-170-172).
+- [ ] `make build-exec-policy` (stub until the crate lands);
+  `install-exec-policy` / `check-exec-policy` staged (REQ-EXEC-170-172).
 - [ ] Document the operator boot-param change
   `lsm=landlock,lockdown,yama,integrity,apparmor,bpf` and reboot
   (REQ-EXEC-115, REQ-EXEC-174).

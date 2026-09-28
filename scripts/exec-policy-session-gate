@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# exec-policy-session-gate: conditional fail-closed gate for the confined
+# agent session (REQ-EXEC-103, REQ-EXEC-116).
+#
+# Attached as an ExecCondition= drop-in on the agent session unit. It must
+# not block ordinary sessions while the posture is staged but not enforcing:
+#   mode != enforce        -> exit 0 (session may start)
+#   mode == enforce, ready -> exit 0 (authority attached, session may start)
+#   mode == enforce, no readiness token -> exit 1 (session refuses to start)
+#
+# Test hook: WEP_ROOT prefixes absolute paths.
+
+set -u
+
+WEP_ROOT="${WEP_ROOT:-}"
+MODE_FILE="$WEP_ROOT/etc/workspace-guard/exec-policy-mode"
+READY="$WEP_ROOT/run/workspace-exec-policy/ready"
+
+[ -f "$MODE_FILE" ] || exit 0
+mode="$(tr -d '[:space:]' < "$MODE_FILE")"
+[ "$mode" = "enforce" ] || exit 0
+[ -f "$READY" ] || exit 1
+exit 0

@@ -75,9 +75,11 @@ policy is normative in
 
 ## 3. Secondary Layers (REQ-EXEC-120 series)
 
-- **REQ-EXEC-120**: An AppArmor enforce-mode profile bound to the agent session
-  shall allow execution only of the allowlisted paths and deny all other
-  execution, as the interim authority and the fail-closed backstop.
+- **REQ-EXEC-120**: An AppArmor profile bound to the agent session shall allow
+  execution only of the allowlisted paths and deny all other execution. It
+  shall be installed in complain mode and moved to enforce only while the eBPF
+  authority is not active; once enforcement is enabled it shall return to
+  complain as the fail-closed, non-weakening backstop.
 - **REQ-EXEC-121**: A session wrapper shall apply Landlock rules denying
   `LANDLOCK_ACCESS_FS_EXECUTE` outside the allowlist in addition to
   `PR_SET_NO_NEW_PRIVS`, before the agent process runs.
@@ -152,13 +154,29 @@ policy is normative in
   verify the loader, program, map seed, AppArmor profile, and session wrapper.
 - **REQ-EXEC-171**: Install shall be idempotent and reconciling, matching the
   guard install precedent.
-- **REQ-EXEC-172**: `check-exec-policy` shall exit non-zero on any drift and on
-  any missing secondary layer.
+- **REQ-EXEC-172**: `check-exec-policy` shall be read-only and shall report
+  `NOT INSTALLED` (exit 2), `NOT ACTIVE` / `AUDIT` / interim authority (exit 0
+  with a warning), `OK` (exit 0), and `DRIFTED` (exit 1) when the mode file and
+  the attached authority disagree.
 - **REQ-EXEC-173**: A documented recovery procedure shall exist for an
   over-restrictive policy: unconfined root may stop the loader and load the
   profile in complain mode; the agent cannot invoke this path.
 - **REQ-EXEC-174**: The boot-param change and reboot shall be recorded as an
   operator step in the deployment documentation.
+- **REQ-EXEC-175**: `install-exec-policy` shall stage every layer without
+  enabling enforcement (mode `audit`). `enable-exec-policy` shall require
+  `CONFIRM=1`, the staged layers, the seeded policy, an active LSM `bpf` hook,
+  and the readiness token; it shall run a denial canary and revert to `audit`
+  on canary failure.
+- **REQ-EXEC-176**: `scripts/guard-operator.sh` shall stage the posture on
+  `up`/`refresh` (warn-only; never enable), report it on `check`, and unstage
+  it on `down`. Enabling enforcement shall remain the explicit
+  `enable-exec-policy` target alone.
+- **REQ-EXEC-177**: The posture shall use the state files
+  `/etc/workspace-guard/exec-policy-mode` (`audit|enforce`),
+  `/etc/workspace-guard/exec_allowlist.yaml` (installed from the reviewed
+  source), and `/run/workspace-exec-policy/ready`. A session-gate drop-in on
+  the agent unit shall fail closed only in `enforce` mode.
 
 ## 9. Testing (REQ-EXEC-180 series)
 
@@ -170,8 +188,9 @@ policy is normative in
   when the loader/program is absent (fail-closed).
 - **REQ-EXEC-182**: A test shall prove no agent-writable file changes the allow
   decision.
-- **REQ-EXEC-183**: The shell suite shall cover install/reconcile/check and the
-  secondary layers; the Rust suite shall cover policy parse, hash mismatch, and
+- **REQ-EXEC-183**: The shell suite shall cover the staging state machine
+  (`tests/shell/26-exec-policy-provisioning.bats`), install/reconcile/check, and
+  the session gate; the Rust suite shall cover policy parse, hash mismatch, and
   the readiness gate.
 - **REQ-EXEC-184**: The disposition gate of REQ-EXEC-151 shall be exercised by
   a negative test.
@@ -199,5 +218,5 @@ policy is normative in
 | REQ-EXEC-140-144 | SPEC-EXEC-POLICY §5 |
 | REQ-EXEC-150-153 | SPEC-EXEC-POLICY §6 |
 | REQ-EXEC-160-162 | SPEC-EXEC-POLICY §10 |
-| REQ-EXEC-170-174 | SPEC-EXEC-POLICY §9 |
+| REQ-EXEC-170-177 | SPEC-EXEC-POLICY §9, §3 |
 | REQ-EXEC-180-184 | SPEC-EXEC-POLICY §11 |

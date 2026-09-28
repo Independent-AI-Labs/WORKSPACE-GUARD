@@ -184,6 +184,30 @@ check-unsafe-boundary: ## Gate: production unsafe Rust confined to the reviewed 
 check-exec-dispositions: ## Gate: every shell-guard rule has a disposition row (REQ-EXEC-150/151)
 	"$(SCRIPT_BASH)" scripts/check-exec-dispositions.sh "$(REPO_ROOT)"
 
+# =============================================================================
+# Exclusive Execution Posture (REQ-EXEC-170 series)
+# =============================================================================
+
+.PHONY: build-exec-policy install-exec-policy enable-exec-policy disable-exec-policy check-exec-policy uninstall-exec-policy
+build-exec-policy: ## Build the exec-policy loader + BPF object (REQ-EXEC-110 series)
+	echo "build-exec-policy: not yet implemented (eBPF loader crate pending, REQ-EXEC-110 series)" >&2; \
+	exit 1
+
+install-exec-policy: ## Stage exec policy: loader, profile, gate, unit (ROOT)
+	"$(SCRIPT_BASH)" scripts/exec-policy stage
+
+enable-exec-policy: ## Enforce exec policy (ROOT; requires CONFIRM=1)
+	CONFIRM="$(CONFIRM)" "$(SCRIPT_BASH)" scripts/exec-policy enable
+
+disable-exec-policy: ## Return exec policy to audit mode (ROOT)
+	"$(SCRIPT_BASH)" scripts/exec-policy disable
+
+check-exec-policy: ## Read-only state of the exclusive execution posture
+	"$(SCRIPT_BASH)" scripts/exec-policy check
+
+uninstall-exec-policy: ## Remove staged exec-policy layers; keep policy/mode (ROOT)
+	"$(SCRIPT_BASH)" scripts/exec-policy unstage
+
 .PHONY: lint
 lint: ## Run cargo fmt --check + clippy
 	$(CARGO) fmt --all -- --check
