@@ -278,15 +278,24 @@ fn get_current_branch(git_path: &str, cwd: Option<&str>) -> Result<String, ()> {
 
 fn is_protected_branch(git_path: &str, cwd: Option<&str>) -> bool {
     match get_current_branch(git_path, cwd) {
-        Ok(ref b) => {
-            let lower = b.to_lowercase();
-            PROTECTED_BRANCHES.contains(&lower.as_str())
-                || PROTECTED_BRANCH_PREFIXES
-                    .iter()
-                    .any(|p| lower.starts_with(p))
-        }
+        Ok(b) => is_protected_branch_name(&b),
         Err(_) => false,
     }
+}
+
+/// ASCII-only, case-insensitive classification (REQ-GGUARD-060). The catalog
+/// is compiled lowercase ASCII; a non-ASCII branch name can never match an
+/// entry, so it is rejected outright rather than run through Unicode
+/// case folding (which can map characters like U+017F onto ASCII letters).
+fn is_protected_branch_name(branch: &str) -> bool {
+    if !branch.is_ascii() {
+        return false;
+    }
+    let lower = branch.to_ascii_lowercase();
+    PROTECTED_BRANCHES.contains(&lower.as_str())
+        || PROTECTED_BRANCH_PREFIXES
+            .iter()
+            .any(|p| lower.starts_with(p))
 }
 
 /// Detect checkout/switch variants that discard worktree state. Blocked even

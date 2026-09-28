@@ -14,6 +14,9 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
+#[path = "build_support/protected_branches.rs"]
+mod protected_branches;
+
 fn default_version() -> u32 {
     1
 }
@@ -332,6 +335,7 @@ fn main() {
     let config_keys: ConfigKeysConfig = read_yaml(&config_dir, "git_guard_config_keys.yaml");
     let protected: ProtectedBranchesConfig =
         read_yaml(&config_dir, "git_guard_protected_branches.yaml");
+    protected_branches::validate(&protected);
     let environment: EnvironmentConfig = read_yaml(&config_dir, "git_guard_environment.yaml");
     let limits: ResourceLimitsConfig = read_yaml(&config_dir, "git_guard_resource_limits.yaml");
     let paths: PathsConfig = read_yaml(&config_dir, "shared_paths.yaml");

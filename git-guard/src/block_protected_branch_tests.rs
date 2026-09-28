@@ -50,6 +50,62 @@ fn evaluate(argv: &[&str], git: &str, cwd: &str) -> Result<(), GuardError> {
 }
 
 #[test]
+fn every_catalog_entry_classifies_as_protected() {
+    for name in PROTECTED_BRANCHES {
+        assert!(
+            is_protected_branch_name(name),
+            "exact catalog entry {name:?} must classify protected"
+        );
+    }
+    for prefix in PROTECTED_BRANCH_PREFIXES {
+        let sample = format!("{prefix}1.0");
+        assert!(
+            is_protected_branch_name(&sample),
+            "prefix catalog entry {prefix:?} must classify protected"
+        );
+    }
+}
+
+#[test]
+fn classification_is_ascii_case_insensitive() {
+    for name in PROTECTED_BRANCHES {
+        assert!(is_protected_branch_name(&name.to_ascii_uppercase()));
+    }
+    for prefix in PROTECTED_BRANCH_PREFIXES {
+        let sample = format!("{prefix}x").to_ascii_uppercase();
+        assert!(is_protected_branch_name(&sample));
+    }
+}
+
+#[test]
+fn non_ascii_branch_never_matches_ascii_catalog() {
+    // U+017F (long s) lowercases to ASCII 's' under Unicode folding, so a
+    // naive to_lowercase() would match "release/". ASCII-exact must not.
+    assert!(!is_protected_branch_name("relea\u{017f}e/1.0"));
+    assert!(!is_protected_branch_name("ma\u{0131}n"));
+    assert!(!is_protected_branch_name("\u{212a}ain"));
+}
+
+#[test]
+fn near_miss_names_do_not_overmatch() {
+    for name in [
+        "mainline",
+        "maintenance",
+        "developing",
+        "staging2",
+        "released",
+        "release-1",
+        "feature/main",
+        "somebranch",
+    ] {
+        assert!(
+            !is_protected_branch_name(name),
+            "{name:?} must not be treated as protected"
+        );
+    }
+}
+
+#[test]
 fn protected_branch_pull_without_safe_flag_blocked() {
     let Some(git) = find_git() else {
         return;
