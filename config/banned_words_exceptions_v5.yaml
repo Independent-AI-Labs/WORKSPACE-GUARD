@@ -421,31 +421,7 @@ exceptions:
     review_date: '2026-09-06'
     removal: Remove when the file no longer quotes the rule.
   - rule: unsafe-s
-    path: ^git-guard/src/exec\.rs$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-ci
-    review_date: '2026-09-06'
-    removal: Remove when the file no longer quotes the rule.
-  - rule: unsafe-s
     path: ^git-guard/src/exec_tests\.rs$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-ci
-    review_date: '2026-09-06'
-    removal: Remove when the file no longer quotes the rule.
-  - rule: unsafe-s
-    path: ^git-guard/src/gitdir\.rs$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-ci
-    review_date: '2026-09-06'
-    removal: Remove when the file no longer quotes the rule.
-  - rule: unsafe-s
-    path: ^git-guard/src/main\.rs$
-    rationale: Quoted forbidden vocabulary required by this file's reviewed role.
-    owner: workspace-ci
-    review_date: '2026-09-06'
-    removal: Remove when the file no longer quotes the rule.
-  - rule: unsafe-s
-    path: ^git-guard/src/reconcile\.rs$
     rationale: Quoted forbidden vocabulary required by this file's reviewed role.
     owner: workspace-ci
     review_date: '2026-09-06'
@@ -456,3 +432,9 @@ exceptions:
     owner: workspace-ci
     review_date: '2026-09-06'
     removal: Remove when the file no longer quotes the rule.
+  - rule: unsafe-s
+    path: ^git-guard/src/linux_ffi\.rs$
+    rationale: The single reviewed unsafe FFI boundary module for the guard.
+    owner: workspace-guard
+    review_date: '2026-09-28'
+    removal: Remove when the module no longer contains an unsafe block.

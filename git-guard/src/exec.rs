@@ -235,43 +235,27 @@ pub fn execve_real_git(
         })
         .collect();
 
-    let pid;
     #[cfg(feature = "capability-mode")]
     let mutating = state
         .and_then(|s| s.subcommand.as_deref())
         .map(crate::reconcile::is_mutating)
         .unwrap_or(false);
-    // SAFETY: libc::fork is an irreducible async-signal-safe primitive with no
-    // safe nix substitute that preserves the exact fork-without-atfork-handler
-    // semantics the guard depends on. Any allocation or lock acquisition between
-    // fork and exec would be a defect; the only calls in the child below are
-    // raise_child_dac_override() (caps syscalls), nix::execve (execve(2)), and
-    // libc::_exit, all async-signal-safe.
-    unsafe {
-        pid = libc::fork();
-    }
-    match pid {
-        -1 => Err(GuardError::GitOriginalMissing),
-        0 => {
+    // Post-fork child work uses only async-signal-safe primitives: fork and
+    // _exit come from linux_ffi (REQ-GGUARD-121); stderr and execve go through
+    // nix's safe API.
+    match crate::linux_ffi::fork() {
+        Err(_) => Err(GuardError::GitOriginalMissing),
+        Ok(None) => {
             if raise_child_dac_override().is_err() {
                 const MSG: &[u8] =
                     b"FATAL: failed to loan CAP_DAC_OVERRIDE to git.original; reinstall guard\n";
-                // SAFETY: write(2) is async-signal-safe; used only in the post-fork
-                // child before execve.
-                unsafe {
-                    libc::write(libc::STDERR_FILENO, MSG.as_ptr().cast(), MSG.len());
-                    libc::_exit(2);
-                }
+                let _ = nix::unistd::write(std::io::stderr(), MSG);
+                crate::linux_ffi::exit_now(2);
             }
             let _ = nix::unistd::execve(git_path, &argv_c, &envp);
-            // SAFETY: libc::_exit is the only async-signal-safe exit path;
-            // std::process::exit and Drop runtimes are forbidden in the
-            // post-fork child. nix has no _exit wrapper.
-            unsafe {
-                libc::_exit(3);
-            }
+            crate::linux_ffi::exit_now(3);
         }
-        _ => {
+        Ok(Some(pid)) => {
             let child_pid = Pid::from_raw(pid);
             // Post-exec relock: reclaim files git.original created back to
             // root:root. Reuses the git dir resolved once in main.rs; when
@@ -458,6 +442,9 @@ pub fn check_workspace_ci_contract(
 /// True when `path` is a regular, non-symlink file owned by uid 0.
 /// Runtime trust gate for files the guard honors but an agent could
 /// otherwise rewrite (mirrors verify_git_original's ownership rule).
+// Raw libc::fork/_exit test fixtures are confined to this one module and
+// carry the same async-signal-safe contract as production (REQ-GGUARD-121).
 #[cfg(test)]
+#[allow(unsafe_code)]
 #[path = "exec_tests.rs"]
 mod tests;

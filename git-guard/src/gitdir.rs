@@ -80,7 +80,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use nix::unistd::{chown, Gid, Uid};
+use nix::fcntl::AtFlags;
+use nix::unistd::{chown, fchownat, Gid, Uid};
 
 use crate::GIT_ORIGINAL_PATH;
 
@@ -386,23 +387,21 @@ fn chown_root(path: &Path) -> std::io::Result<()> {
         .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
 }
 
-/// lchown(2) does not follow symlinks: required for symlinks so we chown
-/// the link itself rather than the target. nix has no lchown wrapper as of
-/// 0.29 (nix::unistd::chown follows symlinks, which would chown the wrong
-/// file unnoticed), so this is an irreducible unsafe FFI block.
-// SAFETY: libc::lchown(3) takes a NUL-terminated path string and two
-// numeric ids (0, 0 for root:root). `c` is a valid CString produced from
-// the OsStr bytes of `path`, so c.as_ptr() is a valid NUL-terminated
-// pointer for the duration of the call. lchown does not follow symlinks,
-// so there is no dereference hazard. The return value is the libc errno
-// convention (-1 on error, errno set).
+/// lchown(2) semantics without following symlinks: required for symlinks so
+/// we chown the link itself rather than the target. `fchownat(2)` with
+/// `AT_SYMLINK_NOFOLLOW` is exactly `lchown`; nix exposes this safely, so no
+/// unsafe block is needed (REQ-GGUARD-121). The path is passed as a `CStr`, so
+/// non-UTF-8 bytes survive unchanged.
 fn lchown_root(path: &Path) -> std::io::Result<()> {
     let c = cpath(path)?;
-    let rc = unsafe { libc::lchown(c.as_ptr(), 0, 0) };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    fchownat(
+        None,
+        c.as_c_str(),
+        Some(Uid::from_raw(0)),
+        Some(Gid::from_raw(0)),
+        AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
 }
 
 /// chmod(2) using std::fs::set_permissions, which is safe and

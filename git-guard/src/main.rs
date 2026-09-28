@@ -1,3 +1,8 @@
+#![deny(unsafe_code)]
+// The only module allowed to contain `unsafe` (REQ-GGUARD-121).
+#[allow(unsafe_code)]
+mod linux_ffi;
+
 use std::ffi::OsString;
 #[cfg(all(target_os = "linux", not(feature = "root-only")))]
 use std::os::linux::fs::MetadataExt;
@@ -77,7 +82,7 @@ pub use guard_config::*;
 /// fire in the SUID scenario (e.g. removing real-euid disparities, denying
 /// sudo-only config keys). It MUST NOT fire just because euid==0.
 pub fn is_sudo() -> bool {
-    aux_secure() != 0
+    linux_ffi::at_secure() != 0
 }
 
 /// Whether sudo-gated git config keys (`user.email`, `user.name`, …) may be
@@ -85,20 +90,6 @@ pub fn is_sudo() -> bool {
 /// AT_SECURE alone is not sufficient in capability mode.
 pub fn is_config_privileged() -> bool {
     geteuid().as_raw() == 0
-}
-
-/// Read the AT_SECURE auxv flag set by the kernel at exec(2). No `nix`
-/// wrapper exists for `getauxval` as of nix 0.29, so this is an irreducible
-/// unsafe FFI call.
-// SAFETY: getauxval(3) is a libc function that reads the process auxiliary
-// vector, a kernel-populated in-memory array available at process start.
-// The argument AT_SECURE is a libc integer constant naming a well-known
-// key. The kernel guarantees the auxv is initialised before user code runs
-// and never mutated thereafter. The function returns an unsigned long with
-// no nullability pitfalls. This is the only correct secure-execution
-// detection primitive; the dynamic linker uses the same call internally.
-fn aux_secure() -> usize {
-    unsafe { libc::getauxval(libc::AT_SECURE) as usize }
 }
 
 pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
@@ -171,8 +162,9 @@ const REQUIRED_WORKLOAD_CAPS: [caps::Capability; 5] = [
 
 #[cfg(not(feature = "root-only"))]
 fn no_new_privs_enabled() -> bool {
-    const PR_GET_NO_NEW_PRIVS: libc::c_int = 39;
-    unsafe { libc::prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) == 1 }
+    // Safe typed nix wrapper; a syscall error is treated as "not enabled"
+    // (fail closed) rather than collapsed into the plain 0/1 value.
+    nix::sys::prctl::get_no_new_privs().unwrap_or(false)
 }
 
 #[cfg(not(feature = "root-only"))]

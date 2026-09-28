@@ -40,9 +40,9 @@
 //! root; the invariant is theirs to keep, SPEC-GIT-GUARD section 8.7).
 
 use std::fs;
+use std::os::fd::AsFd;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use nix::unistd::{chown, Gid, Uid};
@@ -319,18 +319,10 @@ fn warn_if_unlocked(path: &Path) {
 /// "immutable".
 pub(crate) fn immutable_flag(path: &Path) -> Option<bool> {
     let fd = fs::File::open(path).ok()?;
-    let mut flags: libc::c_int = 0;
-    // SAFETY: ioctl(2) with FS_IOC_GETFLAGS takes an int* as its third
-    // argument. `flags` is a live, properly aligned c_int whose address
-    // is passed by mutable reference; the kernel writes sizeof(c_int)
-    // bytes to it. The fd is open for the duration of the call. This is
-    // an irreducible FFI site (REQ-GGUARD-121): nix exposes no safe
-    // wrapper for inode-flag reads.
-    let rc = unsafe { libc::ioctl(fd.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) };
-    if rc != 0 {
-        return None;
-    }
-    Some(flags & FS_IMMUTABLE_FL != 0)
+    // The one reviewed ioctl wrapper (REQ-GGUARD-121); any error means
+    // "unknown", never "immutable".
+    let flags = crate::linux_ffi::immutable_flags(fd.as_fd()).ok()?;
+    Some(flags & FS_IMMUTABLE_FL as u32 != 0)
 }
 
 fn warn(msg: &str) {
