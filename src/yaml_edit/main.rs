@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 // workspace-yaml-edit: sudo-gated secure YAML policy editor
 // (SPEC-YAML-EDIT). The only supported mechanism for scripted edits
 // to guard-locked YAML policy files. Files stay root:root at all

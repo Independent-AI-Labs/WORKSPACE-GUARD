@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nix::unistd::{execve, getuid, Uid, User};
+use nix::unistd::{execve, geteuid, getuid, Uid, User};
 use regex::bytes::Regex;
 
 mod shell_config {
@@ -439,7 +439,7 @@ fn main() {
     // so failing closed for euid 0 only breaks every root make target
     // and package-manager lifecycle script without adding any security.
     // Keep the AT_SECURE gate for everyone else.
-    let euid = unsafe { libc::geteuid() };
+    let euid = geteuid().as_raw();
     if at_secure() == 0 && euid != 0 {
         eprintln!("shell guard: not running in a capability context (AT_SECURE == 0)");
         process::exit(3);

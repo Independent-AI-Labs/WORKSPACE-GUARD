@@ -173,6 +173,11 @@ check: ## Run cargo check (all feature combinations)
 	CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) check --workspace --features binary-guard
 	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --workspace
 	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --no-default-features --features root-only
+	"$(SCRIPT_BASH)" scripts/check-unsafe-boundary.sh "$(REPO_ROOT)"
+
+.PHONY: check-unsafe-boundary
+check-unsafe-boundary: ## Gate: production unsafe Rust confined to the reviewed module (REQ-GGUARD-121)
+	"$(SCRIPT_BASH)" scripts/check-unsafe-boundary.sh "$(REPO_ROOT)"
 
 .PHONY: lint
 lint: ## Run cargo fmt --check + clippy

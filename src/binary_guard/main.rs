@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 // workspace-binary-guard: generic SUID/capability guard binary.
 //
 // One binary is built and copied to every contained path. At runtime the

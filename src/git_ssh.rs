@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Git SSH wrapper: exec ssh authenticated by a root-provisioned per-user
 //! ed25519 key, without ever writing key material to agent-readable disk.
 //! Installed as /usr/lib/workspace-guard/git-ssh-wrapper with cap_dac_override.
