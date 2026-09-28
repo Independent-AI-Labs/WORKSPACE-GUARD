@@ -115,17 +115,17 @@ requirement decisions.
 
 ## REQ-GGUARD-010: Option Separator Semantics
 
-- [ ] Remove the post-parse global `--hard` scan from `git-guard/src/args.rs`; it
+- [x] Remove the post-parse global `--hard` scan from `git-guard/src/args.rs`; it
   incorrectly reclassifies post-separator data as an option.
-- [ ] Replace `parse_args_hard_after_separator_blocked` with a pass-through
+- [x] Replace `parse_args_hard_after_separator_blocked` with a pass-through
   assertion.
-- [ ] Add pre/post-separator matrix tests for `--hard`, `--no-verify`,
+- [x] Add pre/post-separator matrix tests for `--hard`, `--no-verify`,
   `--force`, `-f`, `--force-with-lease`, `--amend`, `-D`, and `--delete`.
-- [ ] Add tests proving a blocked subcommand remains blocked when followed by
+- [x] Add tests proving a blocked subcommand remains blocked when followed by
   `--` and pathspecs.
-- [ ] Add tests proving argv forwarded to real Git is byte-for-byte unchanged,
+- [x] Add tests proving argv forwarded to real Git is byte-for-byte unchanged,
   including non-UTF-8 post-separator data.
-- [ ] Keep malformed global forms such as `git -- --hard` as pass-through to
+- [x] Keep malformed global forms such as `git -- --hard` as pass-through to
   real Git, which remains the syntax authority.
 
 ## REQ-GGUARD-011: Operand-Aware Subcommand Discovery
