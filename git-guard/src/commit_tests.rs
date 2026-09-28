@@ -72,6 +72,20 @@ fn scan_ignores_plain_and_post_separator_tokens() {
 }
 
 #[test]
+fn scan_message_operand_is_not_amend() {
+    // REQ-GGUARD-030: a message value must not be read as a policy flag.
+    for tokens in [
+        &["-m", "--amend"][..],
+        &["-am", "--amend"],
+        &["--message", "--amend"],
+        &["--message=--amend"],
+    ] {
+        assert!(!scan(tokens).has_amend, "message value flagged: {tokens:?}");
+    }
+    assert!(scan(&["--amend"]).has_amend);
+}
+
+#[test]
 fn parse_args_flags_commit_author_override_but_not_global_dash_c() {
     assert!(parse(&["git", "commit", "--author=X <x@y>"]).has_author_override);
     assert!(parse(&["git", "commit", "-C", "HEAD"]).has_author_override);

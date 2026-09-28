@@ -98,6 +98,64 @@ fn note_config_key(
     }
 }
 
+/// True when `token` takes a separate following operand in the grammar of
+/// `sub`, so its operand must be consumed instead of classified as a policy
+/// flag (REQ-GGUARD-030). Values carried inside the token (`-mMSG`,
+/// `--message=MSG`) are never separate operands. This is the minimal
+/// command-specific arity knowledge the scanner needs; real Git stays the
+/// syntax authority for everything else.
+pub(crate) fn option_takes_operand(sub: &str, token: &str) -> bool {
+    if token.contains('=') {
+        return false;
+    }
+    let message_sub = matches!(sub, "commit" | "tag" | "merge" | "cherry-pick" | "revert");
+    match token {
+        "-m" | "--message" | "-F" | "--file" => message_sub,
+        "--author" | "--date" | "--cleanup" | "--template" | "--trailer" | "--fixup"
+        | "--squash" | "--reuse-message" | "--reedit-message" | "-C" | "-c" => sub == "commit",
+        "--strategy" | "--strategy-option" | "-s" | "-X" => sub == "merge",
+        "--mainline" => matches!(sub, "cherry-pick" | "revert"),
+        "--push-option" | "-o" => sub == "push",
+        "--onto" | "--exec" | "-x" => sub == "rebase",
+        _ => {
+            // Bundled short options whose value-taker is the final character,
+            // e.g. `-am` (commit -a -m <msg>). A value-taker followed by more
+            // characters carries its value inside the token.
+            if let Some(body) = token.strip_prefix('-') {
+                if !body.starts_with('-') && !body.is_empty() {
+                    if let Some(pos) = body.find(['m', 'F']) {
+                        return pos == body.len() - 1 && message_sub;
+                    }
+                }
+            }
+            false
+        }
+    }
+}
+
+/// The tokens after a subcommand, stopping at `--`, with the separate
+/// operands of value-taking options removed (REQ-GGUARD-030). Option tokens
+/// themselves are yielded so callers can still classify them.
+pub(crate) fn scan_tokens<'a>(sub: &str, tokens: &'a [&'a [u8]]) -> Vec<&'a [u8]> {
+    let mut out = Vec::new();
+    let mut skip = false;
+    for &token in tokens {
+        if skip {
+            skip = false;
+            continue;
+        }
+        let s = std::str::from_utf8(token).unwrap_or("");
+        if s == "--" {
+            break;
+        }
+        if option_takes_operand(sub, s) {
+            skip = true;
+        }
+        out.push(token);
+    }
+    out
+}
+
 pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     let mut state = ArgState {
         subcommand: None,
@@ -123,6 +181,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     let mut past_separator = false;
     let mut expecting_config = false;
     let mut pending_config_flag: Option<usize> = None;
+    let mut skip_operand = false;
     let mut i = 1;
 
     while i < argv.len() {
@@ -135,6 +194,14 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
 
         if arg == b"--" {
             past_separator = true;
+            i += 1;
+            continue;
+        }
+
+        if skip_operand {
+            // The previous option consumed this token as its operand
+            // (REQ-GGUARD-030): never classify a value as a policy flag.
+            skip_operand = false;
             i += 1;
             continue;
         }
@@ -243,6 +310,17 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 }
                 _ => {}
             }
+            // REQ-GGUARD-030: consume the operand of a value-taking long
+            // option (e.g. `--message`, `--author`) so a value such as
+            // `--no-verify` is not misread as a policy flag. Dangerous
+            // options were already rejected by the match above.
+            if let Some(sub) = state.subcommand.as_deref() {
+                if option_takes_operand(sub, arg_str) {
+                    skip_operand = true;
+                    i += 1;
+                    continue;
+                }
+            }
             if arg_str == "--force" {
                 state.has_force_flag = true;
             }
@@ -279,6 +357,25 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         }
 
         if arg.starts_with(b"-") && arg.len() > 1 {
+            // `-x` is the short form of `rebase --exec`, which runs an
+            // arbitrary command for each rewritten commit. Reject it for
+            // rebase before any operand consumption so it cannot be hidden
+            // behind the arity table.
+            if state.subcommand.as_deref() == Some("rebase") && arg[1..].contains(&b'x') {
+                return Err(GuardError::Blocked {
+                    reason: "git rebase -x/--exec (runs an arbitrary command per commit)".into(),
+                    hint: "Remove --exec/-x: it enables arbitrary command execution".into(),
+                });
+            }
+            // REQ-GGUARD-030: a bundled short value-taker ending the token
+            // (`-m`, `-am`) consumes the next token as its operand.
+            if let Some(sub) = state.subcommand.as_deref() {
+                if option_takes_operand(sub, arg_str) {
+                    skip_operand = true;
+                    i += 1;
+                    continue;
+                }
+            }
             let flags = &arg[1..];
             for (idx, &ch) in flags.iter().enumerate() {
                 match ch {
@@ -323,42 +420,15 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             state.subcommand = Some(resolved.clone());
             state.subcommand_raw = Some(arg_str.to_string());
 
-            if resolved == "push" {
-                let mut past_dash = false;
-                for &sarg in &argv[i + 1..] {
-                    let s = std::str::from_utf8(sarg).unwrap_or("");
-                    if s == "--" {
-                        past_dash = true;
-                        continue;
-                    }
-                    if past_dash {
-                        continue;
-                    }
-                    if s == "--force" || s == "-f" {
-                        state.has_force_flag = true;
-                    }
-                    if s == "--force-with-lease" || s.starts_with("--force-with-lease=") {
-                        state.has_force_with_lease_flag = true;
-                    }
-                    if s == "--delete" || s == "-d" {
-                        state.has_delete_flag = true;
-                    }
-                }
-            }
+            // Push's force/delete options are already classified by the main
+            // option loop above (separator-aware and operand-aware), so the
+            // former separate scan is gone (REQ-GGUARD-030).
             if resolved == "commit" {
                 crate::commit::scan_commit_args(&argv[i + 1..], &mut state);
             }
             if resolved == "merge" {
-                let mut past_dash = false;
-                for &sarg in &argv[i + 1..] {
+                for &sarg in &scan_tokens("merge", &argv[i + 1..]) {
                     let s = std::str::from_utf8(sarg).unwrap_or("");
-                    if s == "--" {
-                        past_dash = true;
-                        continue;
-                    }
-                    if past_dash {
-                        continue;
-                    }
                     if s == "--ff-only" {
                         state.has_ff_only = true;
                     }
@@ -368,16 +438,8 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 }
             }
             if resolved == "rebase" {
-                let mut past_dash = false;
-                for &sarg in &argv[i + 1..] {
+                for &sarg in &scan_tokens("rebase", &argv[i + 1..]) {
                     let s = std::str::from_utf8(sarg).unwrap_or("");
-                    if s == "--" {
-                        past_dash = true;
-                        continue;
-                    }
-                    if past_dash {
-                        continue;
-                    }
                     if s == "--continue" || s == "--abort" || s == "--skip" {
                         state.has_rebase_safe_flag = true;
                     }

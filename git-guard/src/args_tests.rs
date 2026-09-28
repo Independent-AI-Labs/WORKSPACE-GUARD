@@ -400,6 +400,40 @@ fn parse_args_push_force_with_lease_attached_flag() {
 }
 
 #[test]
+fn parse_args_message_values_are_not_policy_flags() {
+    // REQ-GGUARD-030: an operand of a value-taking option is data, not a
+    // policy flag. Before the arity table these were misclassified.
+    let cases: &[(&[&str], &str)] = &[
+        (&["git", "commit", "-m", "--no-verify"], "no-verify"),
+        (&["git", "commit", "--message", "--amend"], "amend"),
+        (&["git", "commit", "-am", "--amend"], "amend"),
+        (&["git", "tag", "-m", "--no-verify", "v1"], "no-verify"),
+        (&["git", "merge", "-m", "--abort", "topic"], "merge-abort"),
+        (
+            &["git", "cherry-pick", "-m", "--no-verify", "abc123"],
+            "no-verify",
+        ),
+    ];
+    for (raw, what) in cases {
+        let args = bytes(raw);
+        let state = parse_args(&args).unwrap_or_else(|e| panic!("{what}: blocked: {e:?}"));
+        assert!(!state.has_amend, "{what}: message set has_amend");
+        assert!(
+            !state.has_merge_abort,
+            "{what}: message set has_merge_abort"
+        );
+        assert!(!state.has_force_flag, "{what}: message set has_force_flag");
+    }
+}
+
+#[test]
+fn parse_args_rebase_exec_short_blocked() {
+    // REQ-GGUARD-030: `-x` is `rebase --exec`, arbitrary command execution.
+    let args = bytes(&["git", "rebase", "-x", "rm -rf /", "main"]);
+    assert!(parse_args(&args).is_err());
+}
+
+#[test]
 fn parse_args_branch_d_flag() {
     let args = bytes(&["git", "branch", "-D", "foo"]);
     let state = parse_args(&args).unwrap();

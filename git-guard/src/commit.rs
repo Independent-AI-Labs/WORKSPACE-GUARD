@@ -14,16 +14,11 @@ use crate::GuardError;
 /// forms precede the subcommand and never reach this scanner, so position
 /// disambiguates them byte-exactly.
 pub fn scan_commit_args(tokens: &[&[u8]], state: &mut ArgState) {
-    let mut past_dash = false;
-    for &token in tokens {
+    // REQ-GGUARD-030: consume the separate operands of value-taking options
+    // (`-m`, `-c`, `--author`, ...) so a message value such as `--amend` is
+    // not misread as a policy flag.
+    for token in crate::args::scan_tokens("commit", tokens) {
         let s = std::str::from_utf8(token).unwrap_or("");
-        if s == "--" {
-            past_dash = true;
-            continue;
-        }
-        if past_dash {
-            continue;
-        }
         if s.starts_with("--amend") {
             state.has_amend = true;
         }

@@ -259,13 +259,13 @@ requirement decisions.
 
 ## REQ-GGUARD-030: Command-Specific Destructive Options
 
-- [ ] Replace global token/short-character scanning with command-specific
+- [x] Replace global token/short-character scanning with command-specific
   option-arity tables that consume operands before recording policy flags.
 - [ ] Remove global `--hard` handling; rely on the compiled `reset` subcommand
   block.
 - [ ] Treat `-n` as hook bypass only for commands whose Git grammar defines it
   that way; add `git log -n 5` and equivalent allowed controls.
-- [ ] Block hook-bypass `--no-verify` across every Git command that supports it,
+- [x] Block hook-bypass `--no-verify` across every Git command that supports it,
   with command-specific short aliases and operand-lookalike controls.
 - [x] Block branch `-f`/`--force`; add the missing regression for force-resetting
   an existing branch.
@@ -274,7 +274,7 @@ requirement decisions.
   `--force`, and `--no-verify` are not misclassified.
 - [ ] Add pre-separator blocked and post-separator allowed matrices for every
   destructive command-option pair.
-- [ ] Correct the push remediation hint so it does not recommend
+- [x] Correct the push remediation hint so it does not recommend
   `--force-with-lease`, which the policy also blocks.
 - [ ] Add differential parser tests against the pinned system Git for option
   arity, attached forms, short bundles, and separator behavior.
