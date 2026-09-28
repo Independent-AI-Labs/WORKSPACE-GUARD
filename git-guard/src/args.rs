@@ -100,15 +100,6 @@ fn note_config_key(
     }
 }
 
-pub fn check_null_bytes(argv: &[&[u8]]) -> Result<(), GuardError> {
-    for arg in argv {
-        if arg.contains(&0u8) {
-            return Err(GuardError::NullByteInArg);
-        }
-    }
-    Ok(())
-}
-
 pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     let mut state = ArgState {
         subcommand: None,

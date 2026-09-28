@@ -90,7 +90,6 @@ fn evaluate_case(case: &AttackSurfaceCase) -> Result<(), String> {
 
 fn evaluate_case_inner(case: &AttackSurfaceCase) -> Result<(), String> {
     let bytes = argv_bytes(&case.argv);
-    args::check_null_bytes(&bytes).map_err(|e| format!("null-byte check: {e:?}"))?;
 
     let state = match args::parse_args(&bytes) {
         Ok(s) => s,

@@ -56,7 +56,6 @@ fn evaluate_case(case: &PolicyMatrixCase) -> Result<(), String> {
     }
 
     let bytes = argv_bytes(&case.argv);
-    args::check_null_bytes(&bytes).map_err(|e| format!("null-byte check: {e:?}"))?;
 
     let mut state = match args::parse_args(&bytes) {
         Ok(s) => s,

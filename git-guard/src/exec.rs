@@ -188,6 +188,26 @@ fn should_drop_child_env(key: &str, privileged: bool) -> bool {
                 || crate::SUDO_GATED_EDITOR_ENV_VARS.contains(&key)))
 }
 
+/// Convert caller arguments into NUL-terminated C strings, preserving every
+/// byte (including non-UTF-8) and the argument order.
+///
+/// An embedded NUL cannot cross `execve` at all, so it is a typed caller
+/// error (exit 2) rather than a substituted or truncated argument. This is
+/// the single owner of the argv-conversion invariant (REQ-GGUARD-014).
+pub(crate) fn argv_to_cstrings(argv_os: &[OsString]) -> Result<Vec<CString>, GuardError> {
+    argv_os
+        .iter()
+        .enumerate()
+        .map(|(i, arg)| {
+            CString::new(arg.as_bytes()).map_err(|_| {
+                GuardError::InvalidInvocation(format!(
+                    "argv[{i}] contains an embedded NUL byte; refusing to invoke real git"
+                ))
+            })
+        })
+        .collect()
+}
+
 pub fn execve_real_git(
     argv_os: &[OsString],
     state: Option<&ArgState>,
@@ -203,7 +223,7 @@ pub fn execve_real_git(
     // euid==0, not AT_SECURE: the kernel also sets AT_SECURE for
     // file-capability binaries run by non-root, so is_sudo() is true for
     // every agent git invocation. Gating the drop on AT_SECURE would keep
-    // GIT_AUTHOR_*/GIT_COMMITTER_* and forge authorship (TODO.md:613).
+    // GIT_AUTHOR_*/GIT_COMMITTER_* and forge authorship (REQ-GGUARD-073).
     let privileged = crate::is_config_privileged();
 
     verify_git_original()?;
@@ -215,16 +235,13 @@ pub fn execve_real_git(
     let git_path = CStr::from_bytes_with_nul(GIT_ORIGINAL.as_bytes())
         .map_err(|_| GuardError::GitOriginalMissing)?;
 
-    let mut argv_c: Vec<CString> = Vec::new();
-    argv_c.push(CString::new("/usr/bin/git.original").unwrap());
-
-    for arg in argv_os.iter().skip(1) {
-        let mut bytes = arg.as_bytes().to_vec();
-        bytes.push(0);
-        match CStr::from_bytes_with_nul(&bytes) {
-            Ok(c) => argv_c.push(c.to_owned()),
-            Err(_) => argv_c.push(CString::new("<binary-arg>").unwrap()),
-        }
+    // Real Git is invoked via the fixed pathname; argv[0] is replaced but
+    // every other argument is forwarded byte-for-byte.
+    let mut argv_c = argv_to_cstrings(argv_os)?;
+    let fixed_argv0 = CString::new("/usr/bin/git.original").expect("static path has no NUL");
+    match argv_c.first_mut() {
+        Some(slot) => *slot = fixed_argv0,
+        None => argv_c.push(fixed_argv0),
     }
 
     let mut env_map: HashMap<OsString, OsString> = std::env::vars_os()

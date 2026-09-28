@@ -44,7 +44,9 @@ pub enum GuardError {
     MissingCapabilities(String),
     GitOriginalMissing,
     GitOriginalBadPerms,
-    NullByteInArg,
+    /// The caller's argv cannot be delivered to real Git: an argument
+    /// holds a byte (embedded NUL) that cannot cross execve. Exit 2.
+    InvalidInvocation(String),
     Blocked {
         reason: String,
         hint: String,
@@ -359,7 +361,6 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
     }
 
     let argv: Vec<&[u8]> = argv_os.iter().map(|a| a.as_bytes()).collect();
-    args::check_null_bytes(&argv)?;
 
     let t = trace_start("parse_args");
     let mut state = args::parse_args(&argv)?;
@@ -434,6 +435,10 @@ pub static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 #[path = "config_consistency_tests.rs"]
 mod config_consistency;
+
+#[cfg(test)]
+#[path = "argv_convert_tests.rs"]
+mod argv_convert_tests;
 
 #[cfg(test)]
 #[path = "config_consistency_catalog_tests.rs"]

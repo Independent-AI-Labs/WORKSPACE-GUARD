@@ -46,19 +46,6 @@ fn resolve_abbrev_case_insensitive() {
 }
 
 #[test]
-fn null_bytes_no_null() {
-    let args = bytes(&["git", "status", "--short"]);
-    assert!(check_null_bytes(&args).is_ok());
-}
-
-#[test]
-fn null_bytes_contains_null() {
-    let arg = b"stat\0us".to_vec();
-    let args: Vec<&[u8]> = vec![b"git", &arg];
-    assert!(check_null_bytes(&args).is_err());
-}
-
-#[test]
 fn parse_args_no_verify_long_blocked() {
     let args = bytes(&["git", "commit", "--no-verify", "-m", "msg"]);
     let result = parse_args(&args);

@@ -43,7 +43,6 @@ fn init_main_repo(dir: &Path, git: &str) -> bool {
 
 fn evaluate(argv: &[&str], git: &str, cwd: &str) -> Result<(), GuardError> {
     let bytes: Vec<&[u8]> = argv.iter().map(|s| s.as_bytes()).collect();
-    args::check_null_bytes(&bytes)?;
     let state = args::parse_args(&bytes)?;
     let sub = state.subcommand.as_deref().unwrap_or("");
     let os: Vec<OsString> = argv.iter().map(OsString::from).collect();

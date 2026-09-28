@@ -20,7 +20,7 @@ impl GuardError {
     pub fn exit_code(&self) -> i32 {
         match self {
             GuardError::Blocked { .. } => 1,
-            GuardError::NullByteInArg => 2,
+            GuardError::InvalidInvocation(_) => 2,
             GuardError::MissingCap
             | GuardError::MissingCapabilities(_)
             | GuardError::GitOriginalMissing
@@ -51,9 +51,7 @@ impl std::fmt::Display for GuardError {
                 "FATAL: /usr/bin/git.original has unsafe ownership or mode \
                  (need root:root 0700); run make install-guard-host-exec"
             ),
-            GuardError::NullByteInArg => {
-                write!(f, "FATAL: invalid invocation: NUL byte in argument")
-            }
+            GuardError::InvalidInvocation(msg) => write!(f, "FATAL: {msg}"),
             GuardError::Blocked { .. } => write!(f, "BLOCKED"),
             GuardError::ContractFailed(msg) => write!(f, "{msg}"),
             GuardError::GuardUnavailable(msg) => write!(f, "FATAL: {msg}"),
@@ -76,7 +74,7 @@ mod tests {
 
     #[test]
     fn malformed_invocation_is_exit_2() {
-        assert_eq!(GuardError::NullByteInArg.exit_code(), 2);
+        assert_eq!(GuardError::InvalidInvocation(String::new()).exit_code(), 2);
     }
 
     #[test]
