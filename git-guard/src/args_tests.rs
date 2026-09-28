@@ -317,9 +317,41 @@ fn parse_args_hard_flag_blocked() {
 }
 
 #[test]
-fn parse_args_hard_after_separator_blocked() {
-    let args = bytes(&["git", "fetch", "--", "--hard"]);
-    assert!(parse_args(&args).is_err());
+fn parse_args_separator_data_is_not_reinterpreted_as_options() {
+    // REQ-GGUARD-010: everything after `--` is a pathspec/operand. None of
+    // these blocked option spellings may be recognized, and the subcommand
+    // discovered before the separator must stand.
+    for tail in [
+        "--hard",
+        "--no-verify",
+        "--force",
+        "-f",
+        "--force-with-lease",
+        "--amend",
+        "-D",
+        "--delete",
+    ] {
+        let args = bytes(&["git", "reset", "--", tail]);
+        let state = parse_args(&args).expect("post-separator data must parse");
+        assert_eq!(state.subcommand.as_deref(), Some("reset"));
+        assert!(!state.has_force_flag, "{tail} set has_force_flag");
+        assert!(
+            !state.has_force_with_lease_flag,
+            "{tail} set has_force_with_lease_flag"
+        );
+        assert!(!state.has_amend, "{tail} set has_amend");
+        assert!(!state.has_branch_d, "{tail} set has_branch_d");
+        assert!(!state.has_delete_flag, "{tail} set has_delete_flag");
+    }
+}
+
+#[test]
+fn parse_args_non_utf8_after_separator_is_preserved() {
+    // REQ-GGUARD-010/123: a non-UTF-8 post-separator operand is forwarded
+    // byte-for-byte and does not affect subcommand discovery.
+    let raw: Vec<&[u8]> = vec![b"git", b"fetch", b"--", b"\xff\xfe"];
+    let state = parse_args(&raw).expect("non-UTF-8 pathspec must parse");
+    assert_eq!(state.subcommand.as_deref(), Some("fetch"));
 }
 
 #[test]

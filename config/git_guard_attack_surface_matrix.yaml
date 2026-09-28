@@ -346,11 +346,6 @@ cases:
     expect: blocked
     reason_contains: --hard
 
-  - id: atk-hard-after-separator
-    argv: [git, fetch, --, --hard]
-    expect: blocked
-    reason_contains: --hard
-
   - id: atk-no-verify
     argv: [git, commit, --no-verify, -m, x]
     expect: blocked

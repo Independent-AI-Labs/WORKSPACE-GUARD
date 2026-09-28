@@ -252,11 +252,6 @@ cases:
     argv: [git, reset, --hard]
     expect: blocked
 
-  - id: hard-bypass-after-separator
-    argv: [git, --, --hard]
-    expect: blocked
-    reason_contains: --hard
-
   - id: no-verify-blocked
     argv: [git, commit, --no-verify, -m, x]
     expect: blocked
@@ -449,12 +444,6 @@ cases:
     argv: [git, com, -m, msg]
     expect: allowed
 
-  - id: fetch-hard-after-separator
-    argv: [git, fetch, --, --hard]
-    expect: blocked
-    reason_contains: --hard
-
-  # --- safe pass-through ---
   - id: status-allowed
     argv: [git, status]
     expect: allowed

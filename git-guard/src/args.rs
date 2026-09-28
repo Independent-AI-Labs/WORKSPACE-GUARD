@@ -385,15 +385,11 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         i += 1;
     }
 
-    // --hard must never pass, including after `--` (pathspec bypass).
-    for arg in argv.iter().skip(1) {
-        if arg == b"--hard" {
-            return Err(GuardError::Blocked {
-                reason: "--hard flag".into(),
-                hint: "Remove --hard from the command".into(),
-            });
-        }
-    }
+    // REQ-GGUARD-010: data after `--` is a pathspec or operand, never a
+    // global option, so it is not re-scanned here. A pre-separator `--hard`
+    // is still rejected by the option loop above, and `git reset --hard`
+    // stays blocked because `reset` is a blocked subcommand. Real Git
+    // remains the syntax authority for malformed forms like `git -- --hard`.
 
     // REQ-GGUARD-030: `-n` is the `--no-verify` short alias only on the
     // subcommands whose grammar defines it (commit, am). Elsewhere it is

@@ -127,8 +127,17 @@ mod root_only {
     }
 
     #[test]
-    fn guard_blocks_hard_after_separator() {
-        assert_guard_blocks(&["--", "--hard"], "git separator hard");
+    fn guard_forwards_hard_after_separator_to_git() {
+        // REQ-GGUARD-010: post-separator data is a pathspec, not an option.
+        // The guard must not report BLOCKED; real Git is the syntax authority.
+        let mut cmd = guard_cmd();
+        cmd.args(["--", "--hard"]);
+        let output = cmd.output().expect("failed to execute guard");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("BLOCKED"),
+            "post-separator --hard must not be blocked: {stderr}"
+        );
     }
 
     fn assert_guard_blocks(argv: &[&str], label: &str) {
