@@ -213,9 +213,11 @@ fn abbreviation_never_sanitizes() {
 }
 
 #[test]
-fn post_subcommand_option_never_stripped() {
-    let err = plan_argv(LIST, &["git", "log", "-c", "core.hooksPath=/evil"]).unwrap_err();
-    assert!(matches!(err, GuardError::Blocked { .. }));
+fn post_subcommand_option_is_command_local() {
+    // REQ-GGUARD-031: after the subcommand, `-c` is not config, so there
+    // is nothing for sanitize to strip or block; the command is forwarded.
+    let plan = plan_argv(LIST, &["git", "log", "-c", "core.hooksPath=/evil"]).unwrap();
+    assert!(plan.is_none());
 }
 
 #[test]

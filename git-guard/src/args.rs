@@ -68,31 +68,56 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
     raw.to_string()
 }
 
+/// Split a config-option payload on its first `=` and return the exact
+/// pre-`=` key bytes. Everything after the first `=` is an opaque value
+/// that is never retained. A payload with no `=` is an implicit-true key
+/// (both `-c key` and `-ckey`), so the attached form cannot evade policy by
+/// omitting the `=` (REQ-GGUARD-041). An empty, non-ASCII, or non-UTF-8 key
+/// is a malformed invocation (exit 2) before any subcommand runs; keys are
+/// never lossily converted to an empty string. Case folding happens only in
+/// the matcher, so the retained key (audit evidence) is byte-exact.
+fn parse_config_key(payload: &[u8]) -> Result<String, GuardError> {
+    let key = match payload.iter().position(|&b| b == b'=') {
+        Some(eq) => &payload[..eq],
+        None => payload,
+    };
+    if key.is_empty() {
+        return Err(GuardError::InvalidInvocation(
+            "config option has an empty key".into(),
+        ));
+    }
+    if !key.is_ascii() {
+        return Err(GuardError::InvalidInvocation(
+            "config option key is not ASCII".into(),
+        ));
+    }
+    Ok(std::str::from_utf8(key)
+        .expect("ASCII is valid UTF-8")
+        .to_string())
+}
+
 /// Record a blocked config key and, when the originating option token is
 /// known, the span covering it for later stripping. `operand_idx` is set
-/// for the separate-operand forms (`-c key=value`, `--config key=value`).
+/// for the separate-operand forms (`-c key=value`, `--config-env key=env`).
+/// Only normalized keys are retained; values and `--config-env` variable
+/// names never enter parser state (REQ-GGUARD-031).
 fn note_config_key(
     state: &mut ArgState,
     flag_idx: Option<usize>,
     operand_idx: Option<usize>,
     key: &str,
 ) {
-    if key.is_empty() {
-        return;
-    }
     if !is_config_key_blocked(key, crate::is_config_privileged()) {
         return;
     }
     state.dangerous_config_keys.push(key.to_string());
     if let Some(f) = flag_idx {
-        let post = state.subcommand_raw.is_some();
         match state.config_spans.iter_mut().find(|s| s.flag_idx == f) {
             Some(span) => span.keys.push(key.to_string()),
             None => state.config_spans.push(ConfigSpan {
                 flag_idx: f,
                 operand_idx,
                 keys: vec![key.to_string()],
-                post_subcommand: post,
             }),
         }
     }
@@ -179,7 +204,9 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     };
 
     let mut past_separator = false;
-    let mut expecting_config = false;
+    // Some(config flag argv index) while a separate `-c`/`--config-env`
+    // payload is pending. Only meaningful before the subcommand: global
+    // config options must precede the subcommand (REQ-GGUARD-031).
     let mut pending_config_flag: Option<usize> = None;
     let mut skip_operand = false;
     let mut i = 1;
@@ -206,25 +233,17 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             continue;
         }
 
-        if expecting_config {
-            if let Some(pos) = arg_str.find('=') {
-                note_config_key(
-                    &mut state,
-                    pending_config_flag,
-                    Some(i),
-                    arg_str[..pos].trim(),
-                );
-            } else {
-                note_config_key(&mut state, pending_config_flag, Some(i), arg_str.trim());
-            }
-            expecting_config = false;
+        if let Some(flag) = pending_config_flag {
+            let key = parse_config_key(arg)?;
+            note_config_key(&mut state, Some(flag), Some(i), &key);
             pending_config_flag = None;
             i += 1;
             continue;
         }
 
-        if arg == b"-c" {
-            expecting_config = true;
+        // Global config options are parsed only before the subcommand;
+        // afterward `-c`/`-C` are command-local (e.g. commit message reuse).
+        if arg == b"-c" && state.subcommand.is_none() {
             pending_config_flag = Some(i);
             i += 1;
             continue;
@@ -237,15 +256,14 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             continue;
         }
 
-        if arg.len() >= 3 && arg[0] == b'-' && arg[1] == b'c' && arg[2] != b'\0' {
-            let rest = &arg[2..];
-            if let Ok(rest_str) = std::str::from_utf8(rest) {
-                if let Some(eq_pos) = rest_str.find('=') {
-                    note_config_key(&mut state, Some(i), None, rest_str[..eq_pos].trim());
-                } else {
-                    note_config_key(&mut state, Some(i), None, rest_str.trim());
-                }
-            }
+        if state.subcommand.is_none()
+            && arg.len() >= 3
+            && arg[0] == b'-'
+            && arg[1] == b'c'
+            && arg[2] != b'\0'
+        {
+            let key = parse_config_key(&arg[2..])?;
+            note_config_key(&mut state, Some(i), None, &key);
             i += 1;
             continue;
         }
@@ -268,14 +286,11 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                         hint: "Remove this flag: it enables arbitrary command execution".into(),
                     });
                 }
-                "--config" => {
-                    expecting_config = true;
-                    pending_config_flag = Some(i);
-                    i += 1;
-                    continue;
-                }
-                "--config-env" => {
-                    expecting_config = true;
+                // `--config-env` is the real global option; the value is
+                // `name=envvar`, so only the key before the first `=` is
+                // retained. The nonstandard `--config`/`--config=` spellings
+                // are no longer config options (REQ-GGUARD-031).
+                "--config-env" if state.subcommand.is_none() => {
                     pending_config_flag = Some(i);
                     i += 1;
                     continue;
@@ -290,19 +305,9 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                         hint: "Remove this flag: it enables arbitrary command execution".into(),
                     });
                 }
-                s if s.starts_with("--config=") => {
-                    let val = &s["--config=".len()..];
-                    if let Some(eq) = val.find('=') {
-                        note_config_key(&mut state, Some(i), None, val[..eq].trim());
-                    }
-                    i += 1;
-                    continue;
-                }
-                s if s.starts_with("--config-env=") => {
-                    let val = &s["--config-env=".len()..];
-                    if let Some(eq) = val.find('=') {
-                        note_config_key(&mut state, Some(i), None, val[..eq].trim());
-                    }
+                s if state.subcommand.is_none() && s.starts_with("--config-env=") => {
+                    let key = parse_config_key(&s.as_bytes()["--config-env=".len()..])?;
+                    note_config_key(&mut state, Some(i), None, &key);
                     i += 1;
                     continue;
                 }
@@ -340,16 +345,6 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if arg_str == "--delete" {
                 state.has_delete_flag = true;
             }
-            if arg_str.contains('=') && arg_str.starts_with("--") {
-                let eq_pos = arg_str.find('=').unwrap();
-                let flag_key = &arg_str[2..eq_pos];
-                if flag_key == "c" {
-                    let val = &arg_str[eq_pos + 1..];
-                    if let Some(val_eq) = val.find('=') {
-                        note_config_key(&mut state, Some(i), None, val[..val_eq].trim());
-                    }
-                }
-            }
             i += 1;
             continue;
         }
@@ -378,21 +373,17 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             for (idx, &ch) in flags.iter().enumerate() {
                 match ch {
                     b'c' => {
-                        let remaining = &flags[idx + 1..];
-                        if !remaining.is_empty() {
-                            if let Ok(rest_str) = std::str::from_utf8(remaining) {
-                                if let Some(eq_pos) = rest_str.find('=') {
-                                    note_config_key(
-                                        &mut state,
-                                        Some(i),
-                                        None,
-                                        rest_str[..eq_pos].trim(),
-                                    );
-                                }
+                        // Config interpretation is disabled once the
+                        // subcommand is known (REQ-GGUARD-031); the attached
+                        // `-c<rest>` form was already handled above.
+                        if state.subcommand.is_none() {
+                            let remaining = &flags[idx + 1..];
+                            if !remaining.is_empty() {
+                                let key = parse_config_key(remaining)?;
+                                note_config_key(&mut state, Some(i), None, &key);
+                            } else {
+                                pending_config_flag = Some(i);
                             }
-                        } else {
-                            expecting_config = true;
-                            pending_config_flag = Some(i);
                         }
                         break;
                     }
@@ -504,3 +495,7 @@ pub fn repo_location_args(argv_os: &[OsString]) -> Vec<OsString> {
 #[cfg(test)]
 #[path = "args_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "args_config_tests.rs"]
+mod config_tests;

@@ -147,17 +147,19 @@ fn parse_args_config_span_separate_operand() {
     let span = &state.config_spans[0];
     assert_eq!(span.flag_idx, 1);
     assert_eq!(span.operand_idx, Some(2));
-    assert!(!span.post_subcommand);
     assert_eq!(span.keys, vec!["core.hooksPath".to_string()]);
     assert_eq!(state.subcommand_raw.as_deref(), Some("log"));
 }
 
 #[test]
-fn parse_args_config_span_post_subcommand_flagged() {
+fn parse_args_config_after_subcommand_not_parsed() {
+    // REQ-GGUARD-031: global config options must precede the subcommand;
+    // once the subcommand is known, `-c` is a command-local option and is
+    // not interpreted as config.
     let args = bytes(&["git", "log", "-c", "core.hooksPath=/evil"]);
     let state = parse_args(&args).unwrap();
-    assert_eq!(state.config_spans.len(), 1);
-    assert!(state.config_spans[0].post_subcommand);
+    assert!(state.config_spans.is_empty());
+    assert!(state.dangerous_config_keys.is_empty());
 }
 
 #[test]
@@ -209,17 +211,17 @@ fn parse_args_wildcard_url_insteadof() {
 }
 
 #[test]
-fn parse_args_config_long_form() {
-    let args = bytes(&["git", "--config", "core.hooksPath=/evil", "commit"]);
-    let state = parse_args(&args).unwrap();
-    assert!(!state.dangerous_config_keys.is_empty());
-}
-
-#[test]
-fn parse_args_config_equals_form() {
-    let args = bytes(&["git", "--config=core.hooksPath=/evil", "commit"]);
-    let state = parse_args(&args).unwrap();
-    assert!(!state.dangerous_config_keys.is_empty());
+fn parse_args_nonstandard_config_spellings_not_config() {
+    // REQ-GGUARD-031: `--config` is not a real Git global option; only
+    // `-c` and `--config-env` carry config. These spellings must not be
+    // interpreted as config (real Git rejects them).
+    for args in [
+        bytes(&["git", "--config", "core.hooksPath=/evil", "commit"]),
+        bytes(&["git", "--config=core.hooksPath=/evil", "commit"]),
+    ] {
+        let state = parse_args(&args).unwrap();
+        assert!(state.dangerous_config_keys.is_empty());
+    }
 }
 
 #[test]

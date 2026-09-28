@@ -20,7 +20,6 @@ pub struct ConfigSpan {
     pub flag_idx: usize,
     pub operand_idx: Option<usize>,
     pub keys: Vec<String>,
-    pub post_subcommand: bool,
 }
 
 /// Subcommands whose grammar defines `-n` as the `--no-verify` short
@@ -77,7 +76,7 @@ pub fn plan(
         return Err(blocked_first(state));
     }
     for span in &state.config_spans {
-        if span.post_subcommand || !span.keys.iter().all(|k| is_dangerous_config_key(k)) {
+        if !span.keys.iter().all(|k| is_dangerous_config_key(k)) {
             return Err(blocked_first(state));
         }
     }

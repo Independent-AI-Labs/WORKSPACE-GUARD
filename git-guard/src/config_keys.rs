@@ -1,7 +1,10 @@
 use crate::guard_config::{DANGEROUS_CONFIG_KEY_SEGMENTS, SUDO_GATED_CONFIG_KEY_SEGMENTS};
 
 pub fn is_dangerous_config_key(key: &str) -> bool {
-    let key_lower = key.trim().to_lowercase();
+    // REQ-GGUARD-041: fold ASCII only. Unicode case folding could turn a
+    // non-ASCII byte sequence into an ASCII pattern; patterns are ASCII, so
+    // ASCII folding is both sufficient and safer.
+    let key_lower = key.trim().to_ascii_lowercase();
     let segments: Vec<&str> = key_lower.split('.').collect();
 
     DANGEROUS_CONFIG_KEY_SEGMENTS
@@ -16,7 +19,7 @@ pub fn is_config_key_blocked(key: &str, sudo: bool) -> bool {
     if sudo {
         return false;
     }
-    let key_lower = key.trim().to_lowercase();
+    let key_lower = key.trim().to_ascii_lowercase();
     let segments: Vec<&str> = key_lower.split('.').collect();
     SUDO_GATED_CONFIG_KEY_SEGMENTS
         .iter()

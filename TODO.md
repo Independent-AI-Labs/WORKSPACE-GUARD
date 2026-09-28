@@ -281,13 +281,13 @@ requirement decisions.
 
 ## REQ-GGUARD-031: Config-Bearing Global Options
 
-- [ ] Replace the generic `expecting_config` boolean with explicit global-option
+- [x] Replace the generic `expecting_config` boolean with explicit global-option
   parsing for separate `-c`, attached `-c`, and equals-form `--config-env`.
-- [ ] Remove uppercase `-C` and nonstandard `--config` forms from config-key
+- [x] Remove uppercase `-C` and nonstandard `--config` forms from config-key
   parsing; `-C` must consume its directory operand under REQ-GGUARD-011.
-- [ ] Stop global config-option interpretation after subcommand discovery and
+- [x] Stop global config-option interpretation after subcommand discovery and
   at the applicable `--` separator.
-- [ ] Store only normalized config keys in parser state; never retain values or
+- [x] Store only normalized config keys in parser state; never retain values or
   `--config-env` environment-variable names in policy state; retain original
   argv separately as byte-exact diagnostic and audit evidence.
 - [ ] Check every repeated override and block when any key matches dangerous or
@@ -1498,7 +1498,7 @@ requirement decisions.
 - [ ] Recognize ASCII policy prefixes independently of opaque attached values so
   blocked keys/flags cannot evade inspection merely because their value contains
   non-UTF-8 bytes.
-- [ ] Parse `-c`/`--config-env` key boundaries directly as bytes, split only at
+- [x] Parse `-c`/`--config-env` key boundaries directly as bytes, split only at
   the specified first `=`, apply the exact ASCII key grammar/case fold, and remove
   `trim()` or any other mutation of the inspected/forwarded key.
 - [ ] Keep config values, option operands, pathspecs, refs, remote names/URLs,
