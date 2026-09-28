@@ -1643,3 +1643,94 @@ reported as installed.
   headers and pin its behavior with known-good and known-bad fixtures.
 - [ ] WORKSPACE-CI deploy: seal each published artifact with a root-signed
   digest manifest verified at install, in addition to the immutable flag.
+
+## REQ-YE-900: Make Recipe Payload Isolation
+
+Fix the self-blocking policy-edit path (AUDIT-EXCLUSIVE-POSTURE-2026-09 F-01).
+
+- [ ] `Makefile` `yaml-add`/`yaml-remove`: read `FIELDS` at runtime as
+  `"$$FIELDS"` instead of the make-expanded `"$(FIELDS)"` so the scanned
+  `-c` body is static.
+- [ ] `Makefile` `yaml-set`/`yaml-bootstrap`: read `"$$FILE" "$$KEY" "$$VALUE"`
+  at runtime.
+- [ ] `Makefile` `yaml-format`: read `"$$FILE"` at runtime.
+- [ ] Add a regression in `tests/shell/20-yaml-edit.bats` asserting the
+  mutation recipes reference payloads only through `$$` environment expansion.
+- [ ] Update `SPEC-YAML-EDIT.md` §8 and REQ-YE-401: the payload is never
+  interpolated into scanned command text.
+- [ ] Verify with a payload containing `|awk` and `bash -c` that the recipe
+  body no longer trips `alt-interp`/`inline-shell`.
+
+## REQ-SHG-007: Real `/bin/sh` Target Coverage
+
+- [ ] Install the guard at the real `/bin/sh` target (currently `dash`), or
+  repoint `/bin/sh` to the guarded pair.
+- [ ] Add matrix cases for `sh script` and direct `execve` of the resolved
+  target.
+- [ ] Update `REQ-SHG-002/007`, `SPEC-SHELL-GUARD` §12.1, and the QEMU guest
+  suite. Closes AUDIT-RESIDUAL-COVERAGE D-04 / C-05.
+
+## REQ-EXEC-POLICY: Exclusive Execution Posture
+
+Requirements [REQ-EXEC-POLICY](docs/requirements/REQ-EXEC-POLICY.md); design
+[SPEC-EXEC-POLICY](docs/specifications/SPEC-EXEC-POLICY.md). Do not start the
+kernel work before REQ-YE-900 lands (policy files are edited only through the
+secure editor).
+
+### Policy and provenance
+
+- [ ] Add `config/exec_allowlist.yaml` (+ `.schema.yaml`) with `path`, `sha256`,
+  `allow_uid`, `note`; validate the schema and hashes at build time
+  (REQ-EXEC-140-142).
+- [ ] Add the build-time rule-disposition gate: every rule id in
+  `config/shell_guard_policy.yaml` must appear in SPEC-EXEC-POLICY §6
+  (REQ-EXEC-150-151), with a negative test (REQ-EXEC-184).
+
+### Kernel authority (eBPF LSM)
+
+- [ ] Add the `exec-policy` Rust crate: loader and BPF object (aya/libbpf) for
+  `bprm_check_security` with a pinned allowlist map (REQ-EXEC-110-118).
+- [ ] Hash-token maintenance (`inode_*` companion) and path+hash allow logic
+  (REQ-EXEC-111); deny anonymous/`memfd` exec (REQ-EXEC-112).
+- [ ] Loader readiness token + session `ExecCondition` (fail closed)
+  (REQ-EXEC-103, REQ-EXEC-116).
+- [ ] Effect hooks: `task_kill`, `sb_mount`/`sb_umount`, `file_open`/
+  `inode_permission`, `inode_setxattr`, `kernel_read_file`/
+  `kernel_module_request`, `socket_create`/`socket_connect`
+  (REQ-EXEC-130-136).
+
+### Fallback layers
+
+- [ ] AppArmor enforce profile bound to the agent session (REQ-EXEC-120).
+- [ ] Session wrapper applying Landlock `EXECUTE` deny + `no_new_privs`
+  (REQ-EXEC-121).
+- [ ] Install/reconcile wires all three layers; drift check covers them
+  (REQ-EXEC-122-123).
+
+### Deployment and recovery
+
+- [ ] `make build-exec-policy`, `make install-exec-policy`,
+  `make check-exec-policy` (REQ-EXEC-170-172).
+- [ ] Document the operator boot-param change
+  `lsm=landlock,lockdown,yama,integrity,apparmor,bpf` and reboot
+  (REQ-EXEC-115, REQ-EXEC-174).
+- [ ] Recovery runbook: unconfined root stops the loader / complain mode
+  (REQ-EXEC-173).
+- [ ] Audit: denial events + loader/map/hook transitions (REQ-EXEC-160-162).
+
+### Verification
+
+- [ ] Kernel matrix in a real guest: allow/deny, renamed copy, `dash`/`zsh`,
+  interpreters, `memfd`, `task_kill`, device write, module load, `AF_ALG`
+  (REQ-EXEC-180).
+- [ ] Fail-closed session test and no-agent-writable-policy test
+  (REQ-EXEC-181-182).
+- [ ] Rust + shell suites for policy parse, hash mismatch, readiness gate,
+  install/reconcile/check, fallbacks (REQ-EXEC-183).
+
+### Rule retirement
+
+- [ ] After each `kernel-authoritative` proof, remove the corresponding rule
+  from `config/shell_guard_policy.yaml` (secure editor) and its matrix cases,
+  then re-run the gates (REQ-EXEC-152, REQ-SHG-901). Keep all `content-policy`
+  rules.

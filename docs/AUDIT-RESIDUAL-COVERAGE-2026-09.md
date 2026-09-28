@@ -84,6 +84,15 @@ Source: [SPEC-SHELL-GUARD](specifications/SPEC-SHELL-GUARD.md) section 16 and
 | R-10 | Suppression performed inside an interpreter | Sandbox + audit | Sandbox absent; auditd absent | OPEN |
 | R-11 | `memfd` staging changes the visible `$0`/`BASH_SOURCE` | `SHG_SCRIPT_PATH` contract | Documented and handled | Not a security residual |
 
+**Supersession (2026-09-28).** R-01, R-02, R-06, and R-10 are effect/identity
+gaps that the textual scanner cannot close. They are re-assigned to the
+always-on exclusive execution posture: the kernel authority of
+[SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md) (`bprm_check`
+path+content-hash allowlist, plus `task_kill`/`file_open`/etc.). The
+per-rule mapping is [SPEC-EXEC-POLICY §6](specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix);
+the findings are [AUDIT-EXCLUSIVE-POSTURE-2026-09](AUDIT-EXCLUSIVE-POSTURE-2026-09.md).
+Until the authority is attached these remain OPEN/PARTIAL as tabled.
+
 ### Sandbox-gap residuals
 
 Source: [GAP-ANALYSIS-HARD-NUKE](GAP-ANALYSIS-HARD-NUKE.md) section 11.
@@ -178,8 +187,12 @@ rationale.
 (`alt-shell`). A direct `execve` of `/bin/dash` from a non-Bash parent does not
 pass the scanner.
 
-Required direction: extend shell-guard coverage to the actual `/bin/sh`
-target, or record the direct-exec path as a residual with its containment.
+Required direction (updated 2026-09-28): cover the actual `/bin/sh` target or
+repoint `/bin/sh` to the guarded pair (REQ-SHG-007), and close the direct-exec
+class entirely with the kernel authority of
+[SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md) (`bprm_check`,
+path+hash). See
+[AUDIT-EXCLUSIVE-POSTURE-2026-09](AUDIT-EXCLUSIVE-POSTURE-2026-09.md) F-02/F-03.
 
 ### D-05 MEDIUM: The workspace registry path diverges from the specification
 

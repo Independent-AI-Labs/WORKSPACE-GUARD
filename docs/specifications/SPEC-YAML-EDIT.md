@@ -458,6 +458,15 @@ multi-word values (reasons, patterns with spaces) work. Mutating
 targets print `ERROR: <target> needs root: sudo make <target>` and
 exit 1 as non-root.
 
+**Payload isolation (REQ-YE-900).** The recipes read `FILE`, `KEY`,
+`VALUE`, `FIELDS`, and `EXPECT_SHA256` at runtime from the exported
+environment (`"$$FIELDS"`, `"$$VALUE"`, …), never via make expansion into
+the `-c` text. The scanned `-c` body is therefore static: a payload that
+contains an interpreter alternation (`...|awk...`) or `bash -c` cannot
+match the shell guard's `alt-interp`/`inline-shell` rules, so editing the
+shell-guard policy and matrix through the secure editor works
+(AUDIT-EXCLUSIVE-POSTURE-2026-09 F-01).
+
 Install: `make install-yaml-edit` (root) runs
 `install -o root -g root -m 0755 target/release/workspace-yaml-edit /usr/bin/`,
 following the `install-lock-runtime` precedent (WG-owned install, no

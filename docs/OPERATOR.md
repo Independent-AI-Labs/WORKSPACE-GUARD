@@ -101,6 +101,28 @@ Useful flags: `--dry-run` (print a unified diff, no install, no root
 needed), `--allow-no-match` (remove: no-match exits 0), `--string`
 (set: force string typing).
 
+Payload isolation (REQ-YE-403): the recipes read `FILE`, `KEY`, `VALUE`, and
+`FIELDS` from the exported environment at runtime; the payload is never
+interpolated into the scanned shell command text. A value containing an
+interpreter alternation (`...|awk...`) or an inline-shell spelling is therefore
+not blocked by the shell guard, which is required to edit the shell-guard
+policy and matrix themselves.
+
+## Exclusive execution posture
+
+The host is moving to a deny-by-default, kernel-enforced execution posture
+([SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md),
+[REQ-EXEC-POLICY](requirements/REQ-EXEC-POLICY.md)). Operator steps:
+
+- Add `bpf` to the kernel LSM list and reboot once:
+  `lsm=landlock,lockdown,yama,integrity,apparmor,bpf`.
+- `sudo make install-exec-policy` installs the loader, program, pinned map
+  seed, AppArmor profile, and session wrapper; `make check-exec-policy`
+  verifies them.
+- Root remains break-glass and unconfined. If an over-restrictive policy
+  wedges a session, recover from an unconfined root shell: stop the loader and
+  set the AppArmor profile to complain mode.
+
 Use `yaml-bootstrap` once to create a missing top-level scalar key; it
 rejects keys that already exist. Use `yaml-set` for subsequent updates.
 

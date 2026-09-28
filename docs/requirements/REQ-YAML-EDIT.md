@@ -262,6 +262,14 @@ splitting). The replacement:
   shall print `ERROR: <target> needs root: sudo make <target>` and
   exit 1.
 
+- **REQ-YE-403** *(payload isolation, REQ-YE-900)*: The mutating recipes
+  shall read `FILE`, `KEY`, `VALUE`, `FIELDS`, and `EXPECT_SHA256` from
+  the exported environment at runtime and shall not interpolate their
+  values into the scanned shell command text. A field or value that
+  contains an interpreter alternation or an inline-shell spelling shall
+  not be blocked by the shell guard, so the shell-guard policy and matrix
+  can be edited through the secure editor.
+
 - **REQ-YE-402**: No filesystem release/relock cycle (chattr strip,
   ownership flip, timer, or state file) shall be performed as part of
   editing a YAML policy file. The `root:root` ownership lock applied

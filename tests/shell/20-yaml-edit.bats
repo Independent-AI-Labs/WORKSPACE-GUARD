@@ -404,6 +404,17 @@ EOF
     assert_output --partial "needs root"
 }
 
+@test "yaml mutation recipes isolate the payload from scanned command text" {
+    # REQ-YE-900 / AUDIT-EXCLUSIVE-POSTURE-2026-09 F-01: the payload is read
+    # from the exported environment at runtime, never interpolated into the
+    # scanned -c body, so a payload containing e.g. "|awk" or "bash -c"
+    # cannot match alt-interp/inline-shell.
+    local mk="$GUARD_ROOT/Makefile"
+    grep -qF 'read -ra _ye_fields <<< "$$FIELDS"' "$mk"
+    grep -qF 'set "$$FILE" "$$KEY" "$$VALUE"' "$mk"
+    ! grep -qF '<<< "$(FIELDS)"' "$mk"
+}
+
 @test "new Make mutation targets propagate root-gate failures" {
     [ "$(id -u)" -eq 0 ] && skip "non-root refusal untestable as root"
     run make -C "$GUARD_ROOT" yaml-unset FILE=nope.yaml KEY='hooks[].safety'

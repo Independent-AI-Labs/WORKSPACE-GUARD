@@ -26,6 +26,14 @@ WORKSPACE-GUARD does **not** implement Landlock, seccomp BPF, namespace
 setup, or a userspace kernel. Those come from **standard OSS engines**.
 This repo ships a thin launcher, YAML policy, and install wiring only.
 
+The per-workload sandbox described here is distinct from the **always-on
+exclusive execution posture** specified in
+[SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md) (eBPF LSM `security_bprm_check`
+deny-by-default, AppArmor interim, Landlock session backstop). A sandbox
+profile's Landlock/seccomp rules complement that posture and shall not weaken
+it; the posture applies to the host session whether or not a sandbox is
+launched.
+
 ---
 
 ## 2. Architecture

@@ -367,3 +367,20 @@ text, not arbitrary syscalls, direct process launches, container internals,
 editor/tool writes, or interpreter behavior. That requirement needs a
 separate execution broker and sandbox layer with syscall, process, filesystem,
 and network controls.
+
+## Follow-up (2026-09-28): Exclusive Execution Posture
+
+This audit's central conclusion is adopted as normative policy. The execution
+authority is moved into the kernel: an eBPF LSM program on
+`security_bprm_check` with a path+content-hash allowlist, AppArmor as the
+interim authority, and Landlock as the session backstop.
+
+- Design and the **rule-by-rule disposition matrix**:
+  [SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix).
+- Requirements: [REQ-EXEC-POLICY](requirements/REQ-EXEC-POLICY.md).
+- New/continued findings (unguarded Make recipes; text-interpolation
+  self-block; `/bin/sh` target; renamed shells; absent kernel authority;
+  inactive BPF LSM): [AUDIT-EXCLUSIVE-POSTURE-2026-09](AUDIT-EXCLUSIVE-POSTURE-2026-09.md).
+
+The shell guard is demoted to the content-policy layer; `kernel-authoritative`
+rules in its policy are retired after kernel proof (REQ-EXEC-152).

@@ -173,13 +173,34 @@ The core insight: if the _real_ binary is mode 0700 root:root and the _guard_ bi
 - **REQ-GGUARD-161**: Each guard crate shall define its own `BLOCKED_SUBCOMMANDS`, `ALLOWED_VARS`, and `DANGEROUS_CONFIG_KEYS`.
 - **REQ-GGUARD-162**: Each guard crate shall define its own `<path>.original` constant for the real binary path.
 
+### 10. Exclusive Execution Posture
+
+- **REQ-GGUARD-200**: Process execution in the confined agent session shall be
+  deny-by-default, always on, and enforced in the kernel. The normative
+  requirements are [REQ-EXEC-100](docs/requirements/REQ-EXEC-POLICY.md) onward.
+- **REQ-GGUARD-201**: The enforcement authority shall be a kernel LSM
+  (`security_bprm_check`) rather than a userspace wrapper around a shell. The
+  design is [SPEC-EXEC-POLICY](docs/specifications/SPEC-EXEC-POLICY.md).
+- **REQ-GGUARD-202**: The posture shall fail closed: if the authority is absent,
+  the confined session shall not start.
+- **REQ-GGUARD-203**: Every rule in `config/shell_guard_policy.yaml` shall have
+  a disposition (`kernel-authoritative`, `hybrid`, `content-policy`, or
+  `session-layer`); no rule may exist without one.
+- **REQ-GGUARD-204**: Root shall remain break-glass and unconfined.
+- **REQ-GGUARD-205**: Kernel-enforced mandatory access control (AppArmor, eBPF
+  LSM) is an approved control layer of this program; the earlier blanket
+  exclusion of MACC is superseded for the execution surface.
+
 ---
 
 ## Non-Requirements
 
 The following are explicitly out of scope:
 
-- **Filesystem-level mandatory access control** (SELinux, AppArmor): assumed to be configured separately if needed
+- **Filesystem-level mandatory access control beyond the execution posture**
+  (e.g. SELinux/AppArmor confinement of arbitrary file and network access):
+  the approved MACC use is the execution posture of REQ-GGUARD-200-205; other
+  MACC policy is configured separately if needed
 - **Network-level controls**: the guard does not filter network access
 - **User authentication**: the guard does not re-authenticate the user
 - **Encryption**: the guard does not encrypt anything
@@ -207,3 +228,4 @@ The following are explicitly out of scope:
 | REQ-GGUARD-124-125 | Resource and descriptor limits                   |
 | REQ-GGUARD-140-144 | Deployment (`bootstrap_rust_guard.sh`, installer) |
 | REQ-GGUARD-160-162 | Framework architecture                           |
+| REQ-GGUARD-200-205 | Exclusive execution posture (`SPEC-EXEC-POLICY`) |

@@ -249,6 +249,7 @@ cannot be started. Do not run `install-sandbox` on IDE-shell hosts.
 
 | Document                                                      | Content                         |
 | ------------------------------------------------------------- | ------------------------------- |
+| [SPEC-EXEC-POLICY](docs/specifications/SPEC-EXEC-POLICY.md)   | Always-on exclusive execution posture and rule disposition |
 | [SPEC-BINARY-LOCK](docs/specifications/SPEC-BINARY-LOCK.md)   | Contain-via-guard procedure     |
 | [SPEC-SANDBOX](docs/specifications/SPEC-SANDBOX.md)           | Profiles and systemd unit       |
 | [SPEC-AUDIT](docs/specifications/SPEC-AUDIT.md)               | auditd and integrity monitoring |

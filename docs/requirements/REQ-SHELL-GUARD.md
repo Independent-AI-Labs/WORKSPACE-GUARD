@@ -77,6 +77,20 @@ handled by `make install-shell-guard`.
   shell binary layer only. Agent-side permission rules remain an
   independent, complementary layer.
 
+- **REQ-SHG-007**: The guard (or the kernel authority of
+  [REQ-EXEC-POLICY](REQ-EXEC-POLICY.md)) shall cover the real `/bin/sh`
+  target. Where `/bin/sh` does not resolve to bash, the guard shall be
+  installed at the resolved target (for example `dash`), or `/bin/sh`
+  shall be repointed to the guarded pair, so that `sh script` and direct
+  `execve` of the resolved target are mediated. The direct-exec gap of
+  AUDIT-RESIDUAL-COVERAGE D-04 shall be closed.
+
+- **REQ-SHG-008**: The shell guard is a content policy layer of the
+  exclusive execution posture, not the execution authority. The authority
+  is the kernel LSM of [SPEC-EXEC-POLICY](../specifications/SPEC-EXEC-POLICY.md).
+  Each rule in `config/shell_guard_policy.yaml` shall carry a disposition
+  per REQ-SHG-900.
+
 ---
 
 ## 2. Privileged Execution and Real-Shell Verification (REQ-SHG-100 series)
@@ -620,25 +634,59 @@ handled by `make install-shell-guard`.
 
 ---
 
-## 10. Non-Goals
+## 10. Exclusive Posture and Rule Disposition (REQ-SHG-900 series)
+
+- **REQ-SHG-900**: Every rule id in `config/shell_guard_policy.yaml`
+  shall have exactly one disposition in
+  [SPEC-EXEC-POLICY §6](../specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix):
+  `kernel-authoritative`, `hybrid`, `content-policy`, or `session-layer`.
+  A rule without a disposition fails the REQ-EXEC-151 gate.
+
+- **REQ-SHG-901**: A rule dispositioned `kernel-authoritative` shall be
+  removed from the policy file only after the corresponding kernel hook
+  is proven to deny the effect for path, renamed-copy, and syscall forms,
+  and an audit record is produced (REQ-EXEC-152).
+
+- **REQ-SHG-902**: Rules dispositioned `content-policy` (the output
+  suppression family (REQ-SHG-308/309/310), the inline-code contract
+  (`inline-shell`, `uv-inline-interp`, `inline-code-channel`)) shall
+  remain in the guard. They have no kernel-observable effect, or depend
+  on the `execve` argument vector the kernel LSM cannot reliably read.
+  Argument-vector enforcement is a later phase, not this one.
+
+- **REQ-SHG-903**: Environment sanitisation (§5), the `AT_SECURE`
+  capability gate (§2), and untrusted-script memfd staging (§4.1) are
+  `session-layer`/content behavior; they remain in the guard and are not
+  the kernel authority.
+
+- **REQ-SHG-904**: While a `kernel-authoritative` rule is still present,
+  it remains enabled as defense-in-depth. The two layers shall not
+  conflict: the kernel deny is authoritative, and the textual block
+  provides the explanatory report.
+
+---
+
+## 11. Non-Goals
 
 - **REQ-SHG-NG-01**: The shell guard is NOT a sandbox. It does not
   restrict filesystem access, network, or resource consumption of
   allowed commands. Sandbox layers are specified in
-  [REQ-SANDBOX](REQ-SANDBOX.md).
+  [REQ-SANDBOX](REQ-SANDBOX.md); the always-on execution posture is
+  [REQ-EXEC-POLICY](REQ-EXEC-POLICY.md).
 
 - **REQ-SHG-NG-02**: The guard does NOT attempt to block destruction
   performed through interpreters (`python3 -c 'os.kill(...)'`,
-  `perl -e ...`). That surface is bounded by the binary lock and
-  auditd layers, and documented as a residual risk.
+  `perl -e ...`). That surface is closed by the exclusive execution
+  posture (`bprm_check` denies non-allowlisted interpreter hashes) and
+  the effect hooks of REQ-EXEC-130-136; until that authority is attached,
+  it remains bounded by the binary lock and auditd layers.
 
 - **REQ-SHG-NG-03**: The guard does NOT WRAP shells other than bash
   and sh-resolving-to-bash, but it DOES block their invocation from
   within a guarded shell (REQ-SHG-307). A shell binary renamed or
   copied to an unlisted name (e.g. a user-compiled zsh at
-  `~/bin/mysh`) defeats basename matching; closing that residual is
-  an operator decision (remove or binary-lock alternative shells),
-  not enforced here.
+  `~/bin/mysh`) defeats basename matching; this residual is closed by
+  the content-hash allowlist of REQ-EXEC-111, not by the text scan.
 
 - **REQ-SHG-NG-04**: The guard never prompts. It blocks or allows.
   Interactive approval flows belong to the agent's permission layer.

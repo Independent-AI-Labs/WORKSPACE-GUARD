@@ -557,27 +557,27 @@ yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;pa
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
 	fi'
-	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$(FIELDS)"; \
-	"$(YAML_EDIT)" add "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)'
+	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$$FIELDS"; \
+	"$(YAML_EDIT)" add "$$FILE" "$$KEY" "$${_ye_fields[@]}" $(YAML_FLAGS)'
 
 yaml-remove: ## Remove matching entries: make yaml-remove FILE=.. KEY=.. FIELDS="hook=x" (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-remove needs root: sudo make yaml-remove" >&2; exit 1; \
 	fi'
-	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$(FIELDS)"; \
-	"$(YAML_EDIT)" remove "$(FILE)" "$(KEY)" "$${_ye_fields[@]}" $(YAML_FLAGS)'
+	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$$FIELDS"; \
+	"$(YAML_EDIT)" remove "$$FILE" "$$KEY" "$${_ye_fields[@]}" $(YAML_FLAGS)'
 
 yaml-set: ## Set a scalar: make yaml-set FILE=.. KEY=.. VALUE=.. (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-set needs root: sudo make yaml-set" >&2; exit 1; \
 	fi'
-	"$(YAML_SH)" -c '"$(YAML_EDIT)" set "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" set "$$FILE" "$$KEY" "$$VALUE" $(YAML_FLAGS)'
 
 yaml-bootstrap: ## Create a top-level scalar: make yaml-bootstrap FILE=.. KEY=.. VALUE=.. (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-bootstrap needs root: sudo make yaml-bootstrap" >&2; exit 1; \
 	fi'
-	"$(YAML_SH)" -c '"$(YAML_EDIT)" bootstrap "$(FILE)" "$(KEY)" "$(VALUE)" $(YAML_FLAGS)'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" bootstrap "$$FILE" "$$KEY" "$$VALUE" $(YAML_FLAGS)'
 
 yaml-unset: ## Remove fields by path: make yaml-unset FILE=.. KEY='hooks[].safety' (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \

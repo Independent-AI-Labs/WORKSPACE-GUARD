@@ -56,13 +56,24 @@ compiled in from `config/shell_guard_policy.yaml` via `build.rs`.
 
 ### Key Design Principle
 
-> **Deny-list on raw text, not allow-list.** The shell's legitimate
-> surface is unbounded; the catastrophic surface (kill the
-> supervisor, power off the host, destroy filesystems, strip
-> immutability, suppress output) is small and enumerable. The guard
-> blocks the catastrophic set wherever its pattern appears in the
-> text and passes everything else through. Patterns live in
-> root-owned YAML; adding a rule never requires a Rust change.
+> **Allowlist in kernel, deny-list in text.** The **kernel** owns the
+> execution authority: [SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md) allows
+> only reviewed executables by path and content hash. This guard is the
+> **content-policy layer**: the shell's legitimate surface is unbounded,
+> so the guard blocks the enumerable behavior set (inline code, output
+> suppression) and the catastrophic idioms that approximate an effect,
+> and passes everything else through. Patterns live in root-owned YAML;
+> adding a rule never requires a Rust change.
+
+Every rule in `config/shell_guard_policy.yaml` carries a **disposition**
+(§18): `kernel-authoritative` rules are enforced by the kernel authority and
+are retired once proven; `content-policy` rules stay here. The guard is not
+the authority; a non-bash parent was always able to `execve` directly
+(AUDIT-RESIDUAL-COVERAGE D-04).
+
+The guard covers `bash` and `sh`; where `/bin/sh` does not resolve to bash,
+the real target (`dash`) must be covered or `/bin/sh` repointed to the guarded
+pair (REQ-SHG-007).
 
 ---
 
@@ -846,6 +857,9 @@ immutable-flag reads use REQ-GGUARD-121's centralized reviewed wrapper, and
 
 ## 15. Security Properties
 
+- The execution authority is the kernel ([SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md)):
+  this guard is the content-policy layer. A `kernel-authoritative` rule's
+  security property is held by the kernel hook, not by the text scan.
 - A non-root agent CANNOT execute the real shell directly: it is
   0700 root:root and immutable.
 - A non-root agent CANNOT bypass the guard via env injection:
@@ -873,11 +887,18 @@ immutable-flag reads use REQ-GGUARD-121's centralized reviewed wrapper, and
 
 - **Interpreter indirection**: `python3 -c 'import os; os.kill(...)'`
   or `perl -e 'system "pkill", "x"'` perform the same syscalls
-  without a blocked command name. Bounded by the binary lock
-  (SPEC-BINARY-LOCK) and auditd (SPEC-AUDIT), not by this guard.
+  without a blocked command name. This is closed by the exclusive
+  execution posture: `bprm_check` denies non-allowlisted interpreter
+  hashes and the `task_kill`/effect hooks deny the syscall
+  ([SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md)). Until the authority is
+  attached it is bounded by the binary lock (SPEC-BINARY-LOCK) and
+  auditd (SPEC-AUDIT), not by this guard.
 - **Dynamic eval**: `eval "$x"` where `$x` expands to a blocked
   command is not statically knowable. Static-literal eval IS scanned
-  (REQ-SHG-305): the literal appears in the raw text.
+  (REQ-SHG-305): the literal appears in the raw text. The effect of any
+  resulting command is enforced by the kernel authority
+  ([SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md)), so the evasion no longer
+  grants a capability.
 - **Quote-splitting evasion**: `pki''ll`, `p\kill`, `$'pki'LL`-style
   reassembly produces a blocked command whose raw text never
   contains it. Raw-text matching cannot see through shell word
@@ -894,8 +915,9 @@ immutable-flag reads use REQ-GGUARD-121's centralized reviewed wrapper, and
   guarded shell is blocked by basename (§6 step 2). The residual is
   a shell binary renamed or copied to an unlisted name (e.g. a
   user-compiled zsh at `~/bin/mysh`), which basename matching cannot
-  recognise. Operators should additionally remove or binary-lock
-  alternative shells so they cannot be executed at all.
+  recognise. This is closed by the content-hash allowlist of
+  [SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md) (REQ-EXEC-111); the textual
+  rule is dispositioned `kernel-authoritative` and retired after proof.
 - **logind over D-Bus**: `dbus-send`/`busctl` to
   `org.freedesktop.login1.Manager.PowerOff` bypasses the `systemctl`
   verb block. Documented; containment is a D-Bus policy concern.
@@ -919,7 +941,50 @@ immutable-flag reads use REQ-GGUARD-121's centralized reviewed wrapper, and
 
 ## 17. Non-Goals
 
-Per REQ-SHELL-GUARD §10: not a sandbox; no interpreter-syscall
-control; no WRAPPING of shells beyond bash/sh (other shells are
-blocked, not wrapped); no interactive prompts; no full POSIX
-parser; no management of agent-side config.
+Per REQ-SHELL-GUARD §11: not a sandbox; no interpreter-syscall
+control **at this layer** (the kernel authority of
+[SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md) owns that); no WRAPPING of shells
+beyond bash/sh (other shells are blocked, and their kernel deny is the
+authority); no interactive prompts; no full POSIX parser; no management
+of agent-side config. This guard is not the execution authority.
+
+---
+
+## 18. Rule Disposition
+
+Every rule in `config/shell_guard_policy.yaml` has a disposition. The
+normative table with the per-rule kernel hook is
+[SPEC-EXEC-POLICY §6](SPEC-EXEC-POLICY.md#6-rule-disposition-matrix); the
+summary is below. Dispositions: **KA** kernel-authoritative (retire from this
+policy after the kernel proof), **HY** hybrid (kernel enforces the binary; the
+text rule covers the argv/exception case), **CP** content-policy (stays here),
+**SL** session-layer (environment/privilege, not a pattern).
+
+| Rule id | Disposition | Kernel hook / note |
+| --- | --- | --- |
+| `power-verb` | KA | `bprm_check` + polkit |
+| `process-by-name` | KA | `bprm_check` |
+| `power-command` | KA | `bprm_check` |
+| `fs-destroy` | KA | `bprm_check` + `file_open` |
+| `alt-shell` | KA | `bprm_check` (hash defeats rename/copy) |
+| `busybox-shell` | HY | `bprm_check` denies `busybox`; `sh` arg is argv |
+| `kill-mass` | KA | `task_kill` |
+| `chattr-strip` | KA | no `CAP_LINUX_IMMUTABLE` + `inode_setxattr` |
+| `rm-rootfs` | HY | filesystem permission + `inode_permission` |
+| `dd-device` | KA | `file_open` on device inode |
+| `mount-protected` | KA | `sb_mount`/`sb_umount` |
+| `swap-teardown` | KA | `bprm_check` |
+| `suppress-pipe` | CP | none (text/UX contract) |
+| `suppress-null` | CP | none (text/UX contract) |
+| `suppress-swallow` | CP | none (text/UX contract) |
+| `alt-interp` | KA | `bprm_check` denies interpreter hashes |
+| `podman-command` | KA | `bprm_check` + namespaces/mounts |
+| `inline-shell` | CP | `-c` arg not readable at `bprm_check` |
+| `uv-inline-interp` | CP | argv-dependent |
+| `inline-code-channel` | CP | shell grammar, not a syscall |
+| environment sanitisation (§8) | SL | session layer |
+| `AT_SECURE` gate (§3.2) | SL | privilege model |
+| untrusted-script memfd staging (§9.1) | SL | session/wrapper |
+
+A new rule added to the policy file without a disposition row here and in
+SPEC-EXEC-POLICY §6 fails the REQ-EXEC-151 gate.
