@@ -613,7 +613,7 @@ yaml-format: ## Canonicalize indentless block sequences (ROOT): make yaml-format
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-format needs root: sudo make yaml-format" >&2; exit 1; \
 	fi'
-	"$(YAML_EDIT)" format "$(FILE)"
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" format "$$FILE"'
 
 # =============================================================================
 # Host Provision

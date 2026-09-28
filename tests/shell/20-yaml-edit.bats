@@ -412,6 +412,7 @@ EOF
     local mk="$GUARD_ROOT/Makefile"
     grep -qF 'read -ra _ye_fields <<< "$$FIELDS"' "$mk"
     grep -qF 'set "$$FILE" "$$KEY" "$$VALUE"' "$mk"
+    grep -qF 'format "$$FILE"' "$mk"
     ! grep -qF '<<< "$(FIELDS)"' "$mk"
 }
 

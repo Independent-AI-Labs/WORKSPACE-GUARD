@@ -1651,17 +1651,18 @@ reported as installed.
 
 Fix the self-blocking policy-edit path (AUDIT-EXCLUSIVE-POSTURE-2026-09 F-01).
 
-- [ ] `Makefile` `yaml-add`/`yaml-remove`: read `FIELDS` at runtime as
+- [x] `Makefile` `yaml-add`/`yaml-remove`: read `FIELDS` at runtime as
   `"$$FIELDS"` instead of the make-expanded `"$(FIELDS)"` so the scanned
   `-c` body is static.
-- [ ] `Makefile` `yaml-set`/`yaml-bootstrap`: read `"$$FILE" "$$KEY" "$$VALUE"`
+- [x] `Makefile` `yaml-set`/`yaml-bootstrap`: read `"$$FILE" "$$KEY" "$$VALUE"`
   at runtime.
-- [ ] `Makefile` `yaml-format`: read `"$$FILE"` at runtime.
-- [ ] Add a regression in `tests/shell/20-yaml-edit.bats` asserting the
+- [x] `Makefile` `yaml-format`: read `"$$FILE"` at runtime.
+- [x] Add a regression in `tests/shell/20-yaml-edit.bats` asserting the
   mutation recipes reference payloads only through `$$` environment expansion.
-- [ ] Update `SPEC-YAML-EDIT.md` §8 and REQ-YE-401: the payload is never
-  interpolated into scanned command text.
-- [ ] Verify with a payload containing `|awk` and `bash -c` that the recipe
+- [x] Update `SPEC-YAML-EDIT.md` §8 and the requirements: the payload is never
+  interpolated into scanned command text (REQ-YE-403; §8 carries the normative
+  statement).
+- [x] Verify with a payload containing `|awk` and `bash -c` that the recipe
   body no longer trips `alt-interp`/`inline-shell`.
 
 ## REQ-SHG-007: Real `/bin/sh` Target Coverage
