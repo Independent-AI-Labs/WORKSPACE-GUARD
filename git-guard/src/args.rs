@@ -135,6 +135,9 @@ pub(crate) fn option_takes_operand(sub: &str, token: &str) -> bool {
     }
     let message_sub = matches!(sub, "commit" | "tag" | "merge" | "cherry-pick" | "revert");
     match token {
+        // `git branch -m/--move <newname>` and `-c/--copy <old> <new>` take a
+        // name operand, which may itself begin with `-` (REQ-GGUARD-030).
+        "-m" | "--move" | "-c" | "--copy" if sub == "branch" => true,
         "-m" | "--message" | "-F" | "--file" => message_sub,
         "--author" | "--date" | "--cleanup" | "--template" | "--trailer" | "--fixup"
         | "--squash" | "--reuse-message" | "--reedit-message" | "-C" | "-c" => sub == "commit",
@@ -499,3 +502,7 @@ mod tests;
 #[cfg(test)]
 #[path = "args_config_tests.rs"]
 mod config_tests;
+
+#[cfg(test)]
+#[path = "args_operand_tests.rs"]
+mod operand_tests;

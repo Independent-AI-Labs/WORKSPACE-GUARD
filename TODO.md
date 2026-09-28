@@ -270,7 +270,7 @@ requirement decisions.
 - [x] Block branch `-f`/`--force`; add the missing regression for force-resetting
   an existing branch.
 - [x] Block push `--force-with-lease=<value>` in addition to the bare form.
-- [ ] Parse tag and branch message/name operands so values such as `-f`,
+- [x] Parse tag and branch message/name operands so values such as `-f`,
   `--force`, and `--no-verify` are not misclassified.
 - [ ] Add pre-separator blocked and post-separator allowed matrices for every
   destructive command-option pair.
