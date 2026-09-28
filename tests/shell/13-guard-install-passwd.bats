@@ -36,7 +36,7 @@ teardown() { guard_teardown; }
 }
 
 @test "guard-install-passwd: cap-fatal stderr is not a policy block" {
-    stderr='FATAL: missing workload capabilities (cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid)'
+    stderr='FATAL: missing workload capabilities (cap_setpcap,cap_chown,cap_dac_override,cap_fowner)'
     run grep -q 'missing workload capabilities' <<<"$stderr"
     [ "$status" -eq 0 ]
 }

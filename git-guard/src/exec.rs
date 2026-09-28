@@ -36,12 +36,11 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
     // from the file's +ep flags and does not need Ambient. Keeping
     // Ambient empty ensures policy-check sub-calls (block.rs git_cmd)
     // that fork+exec git.original from the parent get NO caps.
-    const INHERITABLE_CAPS: [caps::Capability; 5] = [
+    const INHERITABLE_CAPS: [caps::Capability; 4] = [
         caps::Capability::CAP_SETPCAP,
         caps::Capability::CAP_CHOWN,
         caps::Capability::CAP_DAC_OVERRIDE,
         caps::Capability::CAP_FOWNER,
-        caps::Capability::CAP_FSETID,
     ];
     for cap in INHERITABLE_CAPS.iter().copied() {
         caps::raise(None, caps::CapSet::Inheritable, cap).map_err(|_| GuardError::MissingCap)?;

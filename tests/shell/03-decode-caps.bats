@@ -118,7 +118,7 @@ STUB
 
 @test "decode-caps: multiple caps collapse cleanly onto one row" {
     load_guard_lib decode-caps
-    printf '%s\n' '/usr/bin/git cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_setpcap=ep' > "$TEST_TMPDIR/in"
+    printf '%s\n' '/usr/bin/git cap_chown,cap_dac_override,cap_fowner,cap_setpcap=ep' > "$TEST_TMPDIR/in"
     export GUARD_GETCAP_FIXTURE="$TEST_TMPDIR/in"
     out="$TEST_TMPDIR/out"
     discover_caps_live "$out"

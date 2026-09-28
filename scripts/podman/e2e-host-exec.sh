@@ -53,12 +53,16 @@ fi
 
 _raw="$(getcap /usr/bin/git)"
 _line="${_raw%%$'\n'*}"
-for _cap in cap_chown cap_dac_override cap_fowner cap_fsetid cap_setpcap; do
+for _cap in cap_chown cap_dac_override cap_fowner cap_setpcap; do
     if [[ "$_line" != *"$_cap"* ]]; then
         echo "ERROR: /usr/bin/git missing $_cap (got '${_line:-none}')" >&2
         exit 1
     fi
 done
+if [[ "$_line" == *"cap_fsetid"* ]]; then
+    echo "ERROR: /usr/bin/git must not carry cap_fsetid (got '${_line:-none}')" >&2
+    exit 1
+fi
 if [[ "$_line" != *"=ep" ]]; then
     echo "ERROR: /usr/bin/git caps must include =ep (got '${_line:-none}')" >&2
     exit 1

@@ -87,7 +87,6 @@ fn raise_ambient_caps_matches_kernel_inheritable_rule() {
         caps::Capability::CAP_CHOWN,
         caps::Capability::CAP_DAC_OVERRIDE,
         caps::Capability::CAP_FOWNER,
-        caps::Capability::CAP_FSETID,
     ]
     .iter()
     .all(|c| {

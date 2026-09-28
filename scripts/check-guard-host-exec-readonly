@@ -52,7 +52,7 @@ if [[ -x /usr/sbin/getcap ]]; then
     actual_caps="${actual_caps#*/usr/bin/git }"
     actual_caps="${actual_caps%=ep}"
     actual_caps="$(printf '%s\n' "$actual_caps" | tr ',' '\n' | sed '/^$/d' | LC_ALL=C sort | paste -sd, -)"
-    expected_caps="cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_setpcap"
+    expected_caps="cap_chown,cap_dac_override,cap_fowner,cap_setpcap"
     if [[ "$actual_caps" == "$expected_caps" ]]; then
         ok "/usr/bin/git has required host-exec capabilities"
     else

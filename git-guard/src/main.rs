@@ -153,12 +153,11 @@ fn check_privileges() -> Result<(), GuardError> {
 }
 
 #[cfg(not(feature = "root-only"))]
-const REQUIRED_WORKLOAD_CAPS: [caps::Capability; 5] = [
+const REQUIRED_WORKLOAD_CAPS: [caps::Capability; 4] = [
     caps::Capability::CAP_SETPCAP,
     caps::Capability::CAP_CHOWN,
     caps::Capability::CAP_DAC_OVERRIDE,
     caps::Capability::CAP_FOWNER,
-    caps::Capability::CAP_FSETID,
 ];
 
 #[cfg(not(feature = "root-only"))]
@@ -265,7 +264,7 @@ fn check_privileges() -> Result<(), GuardError> {
         }
     }
     if !missing.is_empty() {
-        let caps_list = "cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid";
+        let caps_list = "cap_setpcap,cap_chown,cap_dac_override,cap_fowner";
         let hint = deployment_class_hint(class);
         return Err(GuardError::MissingCapabilities(format!(
             "FATAL: missing workload capabilities ({caps_list}); missing: [{}]. {hint}",

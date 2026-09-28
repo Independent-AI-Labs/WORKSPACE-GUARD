@@ -18,8 +18,8 @@ Type=exec
 
 # Git-guard workload caps (ambient delivery under NoNewPrivs).
 # /usr/bin/git has no file caps; see config/ambient-allowlist.yaml.
-CapabilityBoundingSet=CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID
-AmbientCapabilities=CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID
+CapabilityBoundingSet=CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
 NoNewPrivileges=yes
 
 # Address family restriction (AF_ALG block for Copy Fail CVE-2026-31431).

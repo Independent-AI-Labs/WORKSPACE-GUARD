@@ -37,7 +37,7 @@ impl std::fmt::Display for GuardError {
             GuardError::MissingCap => write!(
                 f,
                 "FATAL: missing workload capabilities (needs \
-                 cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid); \
+                 cap_setpcap,cap_chown,cap_dac_override,cap_fowner); \
                  run make install-guard-host-exec"
             ),
             GuardError::MissingCapabilities(msg) => write!(f, "{msg}"),

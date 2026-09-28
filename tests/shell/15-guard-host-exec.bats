@@ -43,7 +43,7 @@ teardown() { guard_teardown; }
     [ "$status" -eq 0 ]
 }
 
-@test "guard-host-exec: file cap string is five-cap ep set" {
+@test "guard-host-exec: file cap string is four-cap ep set" {
     local ci_root
     ci_root="${CI_ROOT:-/opt/workspace-ci}"
     run bash -c "
@@ -51,5 +51,5 @@ teardown() { guard_teardown; }
         guard_workload_file_cap_string
     "
     [ "$status" -eq 0 ]
-    [ "$output" = "cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid=ep" ]
+    [ "$output" = "cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep" ]
 }

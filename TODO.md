@@ -6,25 +6,31 @@ requirement decisions.
 
 ## REQ-GGUARD-001: Four-Capability Host-Exec Model
 
-- [ ] Remove `CAP_FSETID` from `git-guard/src/main.rs` required workload capabilities
+- [x] Remove `CAP_FSETID` from `git-guard/src/main.rs` required workload capabilities
   and diagnostics.
-- [ ] Remove `CAP_FSETID` from `git-guard/src/exec.rs` inheritable capability setup.
-- [ ] Change `GUARD_WORKLOAD_FILE_CAP_STRING` in
+- [x] Remove `CAP_FSETID` from `git-guard/src/exec.rs` inheritable capability setup.
+- [x] Change `GUARD_WORKLOAD_FILE_CAP_STRING` in
   `WORKSPACE-CI/lib/guard-drift.sh` to
-  `cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep`.
-- [ ] Update host-exec installer and drift tests for the exact four-capability
-  set.
-- [ ] Update `scripts/podman/e2e-host-exec.sh` to require the four approved
+  `cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep` (done in the
+  WORKSPACE-CI repo; deploy to `/opt/workspace-ci` on the host).
+- [x] Update host-exec installer and drift tests for the exact four-capability
+  set (installer reads the shared string; `tests/shell/15` asserts it).
+- [x] Update `scripts/podman/e2e-host-exec.sh` to require the four approved
   capabilities and reject `cap_fsetid`.
-- [ ] Update capability fixtures and diagnostics in
+- [x] Update capability fixtures and diagnostics in
   `tests/shell/03-decode-caps.bats`, `tests/shell/13-guard-install-passwd.bats`,
   and `tests/shell/15-guard-host-exec.bats`.
 - [ ] Update `config/cap-allowlist.yaml` through the sudo-gated YAML editor to
   allow exactly `cap_setpcap`, `cap_chown`, `cap_dac_override`, and
-  `cap_fowner` for `/usr/bin/git`.
-- [ ] Rebuild and run the Rust and shell gates.
+  `cap_fowner` for `/usr/bin/git`. Operator action: the file is root-owned,
+  immutable, and currently omits `/usr/bin/git` by design (host-exec uses file
+  caps, sandbox-service uses ambient); reconcile the policy decision first.
+- [x] Rebuild and run the Rust and shell gates.
 - [ ] Reconcile the live host through `make install-guard-host-exec` and verify
   that `/usr/bin/git` has exactly the four approved file capabilities.
+  Operator action; also regenerate `res/fcap-baseline.yaml` (`make
+  sync-gtfobins`) and update `config/ambient-allowlist.yaml` through the secure
+  editor to drop `cap_fsetid`.
 
 ## REQ-GGUARD-003: Deployment-Class Capability Verification
 
@@ -1106,10 +1112,12 @@ requirement decisions.
   stages and one exhaustive exit-3 dispatcher.
 - [ ] Change root-only effective-UID failure and every current privilege/default
   exit 2 to exit 3 while preserving the exact failed condition.
-- [ ] Remove stale `CAP_FSETID` requirements from capability arrays, messages,
+- [x] Remove stale `CAP_FSETID` requirements from capability arrays, messages,
   tests, generated expectations, and sandbox-service
   `CapabilityBoundingSet`/`AmbientCapabilities`; require only the four
-  REQ-GGUARD-001 caps.
+  REQ-GGUARD-001 caps. Remaining operator follow-ups (live reconcile,
+  `res/fcap-baseline.yaml` regeneration, `config/ambient-allowlist.yaml`) are
+  tracked under REQ-GGUARD-001.
 - [ ] Replace boolean `PR_GET_NO_NEW_PRIVS` probing with a typed safe-wrapper
   result; value 0 passes host-exec, value 1 and syscall errors fail exit 3.
 - [ ] Preserve capability query errors separately from verified absent caps and
