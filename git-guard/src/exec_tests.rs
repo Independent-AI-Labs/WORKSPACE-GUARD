@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 fn exec_test_scratch(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(

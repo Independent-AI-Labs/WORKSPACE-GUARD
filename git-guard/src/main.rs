@@ -16,6 +16,7 @@ mod config_keys;
 mod exec;
 mod exit_class;
 mod fetch;
+mod git_binary;
 #[cfg(feature = "capability-mode")]
 mod gitdir;
 #[cfg(feature = "capability-mode")]

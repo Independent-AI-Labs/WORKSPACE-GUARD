@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, OsString};
-use std::fs;
-use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
@@ -21,6 +19,11 @@ use crate::{
 #[cfg(test)]
 use crate::ALLOWED_VARS;
 
+// Re-exported so callers keep one import site for the real-Git
+// verification contract (REQ-GGUARD-006); the inode probe is test-only.
+#[cfg(test)]
+pub(crate) use crate::git_binary::is_guard_binary;
+pub(crate) use crate::git_binary::verify_git_original;
 #[cfg(feature = "capability-mode")]
 pub fn raise_ambient_caps() -> Result<(), GuardError> {
     // Raise all guard caps into the Inheritable set so forked children
@@ -103,48 +106,6 @@ fn post_exec_reconcile(git_dir: Option<&Path>, mutating: bool, git_code: i32) {
 pub fn set_resource_limits() {
     let _ = setrlimit(Resource::RLIMIT_NOFILE, NOFILE_LIMIT, NOFILE_LIMIT);
     let _ = setrlimit(Resource::RLIMIT_CORE, CORE_LIMIT, CORE_LIMIT);
-}
-
-fn verify_git_original() -> Result<(), GuardError> {
-    let path = Path::new("/usr/bin/git.original");
-    match fs::metadata(path) {
-        Ok(meta) => {
-            if !meta.is_file() {
-                return Err(GuardError::GitOriginalMissing);
-            }
-            if meta.st_uid() != 0 {
-                return Err(GuardError::GitOriginalBadPerms);
-            }
-            if meta.st_mode() & 0o777 != 0o700 {
-                return Err(GuardError::GitOriginalBadPerms);
-            }
-            if is_guard_binary(path) {
-                eprintln!(
-                    "FATAL: /usr/bin/git.original is the guard itself, not real git. \
-                     Restore: apt install --reinstall git"
-                );
-                return Err(GuardError::GitOriginalMissing);
-            }
-            Ok(())
-        }
-        Err(_) => Err(GuardError::GitOriginalMissing),
-    }
-}
-
-/// True when `path` IS the running guard binary itself: same device and
-/// inode as /proc/self/exe. O(1) metadata comparison; the previous
-/// implementation read the entire git.original binary into memory and
-/// window-scanned it for a sentinel string on every git invocation.
-fn is_guard_binary(path: &Path) -> bool {
-    let target = match fs::metadata(path) {
-        Ok(m) => m,
-        Err(_) => return false,
-    };
-    let self_meta = match fs::metadata("/proc/self/exe") {
-        Ok(m) => m,
-        Err(_) => return false,
-    };
-    target.st_dev() == self_meta.st_dev() && target.st_ino() == self_meta.st_ino()
 }
 
 fn collect_sudo_gated_env_warnings(privileged: bool) -> Vec<String> {
