@@ -1552,3 +1552,94 @@ requirement decisions.
 - [ ] Retain synthetic embedded-NUL tests for caller argv exit 2 and guard-owned
   construction exit 3, proving conversion completes before fork and no requested
   Git executes on either failure.
+
+## Residual Coverage Audit Follow-Ups
+
+Audit: `docs/AUDIT-RESIDUAL-COVERAGE-2026-09.md`. Each accepted residual is
+checked against the control layers installed on the host. These tasks close the
+open gaps and correct the ledgers so an absent or roadmap backstop is not
+reported as installed.
+
+### Audit Deliverables And Original Tasks
+
+- [x] Write the residual-to-deployed-layer matrix against the live host.
+- [x] Verify the git guard, shell guard, binary lock, home lock, CI contract,
+  and host confinement are installed.
+- [x] Identify the absent backstops (audit and inventory, sandbox).
+- [ ] Add a "backstop installed" column to every residual table under
+  `docs/specifications/` and `docs/requirements/` (C-02).
+- [ ] Split each residual ledger into "backstop installed" and "backstop
+  roadmap or absent" groups.
+- [ ] Re-check the matrix after each control-layer install or uninstall.
+
+### Findings
+
+- [ ] D-01: Install the audit and inventory layer (`auditd`, `auditctl`, AIDE),
+  or mark R-01, R-02, R-03, R-09, R-10, R-13, R-17, R-18, R-23, and R-24 OPEN
+  in the specification ledgers until it is installed.
+- [ ] D-02: Correct `/var/log/workspace-guard` to `root:root` exact `0750` and
+  verify it in `guard-check` (see REQ-GGUARD-090).
+- [ ] D-03: Contain `sudo` under the binary lock, or record it as an
+  intentional operator exception with its rationale.
+- [ ] D-04: Extend shell-guard coverage to the resolved `/bin/sh` target
+  (`dash`), or record the direct-exec path as a residual.
+- [ ] D-05: Provision `/etc/workspace-guard/workspace-roots` (see
+  REQ-GGUARD-081), or reconcile the registry path with the implemented
+  `/usr/lib/workspace-guard/workspace-root`.
+- [ ] D-06: State the home-lock exclusion for `~/.ssh/id_ed25519_new`, or bring
+  the file under the lock.
+- [ ] D-07: Record the `/usr/bin/ldconfig.real` mode exception, or restore the
+  binary-lock mode in `SPEC-BINARY-LOCK`.
+- [ ] D-08: Name the kernel device-permission bound (`/dev/*`
+  `brw-rw---- root:disk`) in the residual ledger so the bound is not lost.
+
+### Open And Partial Residuals
+
+- [ ] R-01: Close interpreter indirection outside guarded Bash, or record its
+  bound.
+- [ ] R-02: Close dynamic `eval`, or record it OPEN.
+- [ ] R-03: Close quote-splitting evasion, or record it OPEN.
+- [ ] R-05: Record kernel device permissions as the bound for `dd of=` symlink
+  indirection.
+- [ ] R-06: Close renamed or copied alternative shells, or record the
+  policy-only residual.
+- [ ] R-07: Verify or add a `logind`/D-Bus power policy.
+- [ ] R-08: Record the unreadable-script case as root-adjacent only.
+- [ ] R-09: Add detection for trusted-tier argument evaluation.
+- [ ] R-10: Close interpreter-internal suppression, or record it OPEN.
+- [ ] R-12: Close non-Bash block-device and host harm, or record the enforced
+  device bound.
+- [ ] R-13: Close page-cache corruption against unwrapped SUID binaries.
+- [ ] R-19: Make the apt hook contain a newly installed SUID binary, or record
+  the hook as warn-only.
+- [ ] R-20: Schedule the SGID drift check, or record it OPEN.
+- [ ] R-21: Close the kernel or sudo CVE path.
+- [ ] R-23: Detect page-cache corruption that stays off disk.
+- [ ] R-24: Restore AIDE baseline detection for the guard binaries.
+- [ ] R-25: Schedule the SGID drift check for the audit and inventory layer.
+- [ ] R-27: Record the auditd rule-immutability gap.
+- [ ] R-29: Record the capless external `git-<name>` helper residual.
+
+### Recommendations
+
+- [ ] C-01: Install the audit and inventory layer (High).
+- [ ] C-02: Add the backstop column to each residual table (High).
+- [ ] C-03: Correct the audit-directory mode (High).
+- [ ] C-04: Decide and document `sudo` (Medium).
+- [ ] C-05: Cover the real `/bin/sh` target (Medium).
+- [ ] C-06: Provision the workspace registry path (Medium).
+- [ ] C-07: Land the Program II-B sandbox launcher, or downgrade every
+  sandbox-named residual to OPEN (Medium).
+- [ ] C-08: Record the `ldconfig.real` mode and the device-permission bound
+  (Low).
+
+### Advisory Follow-Ups (cross-repo, not WORKSPACE-GUARD requirements)
+
+- [ ] WORKSPACE-CI: classify each rule in `lib/check_banned_words.py`,
+  `config/blocked_commit_patterns.yaml`, and `lib/check_resolution_shapes.py`
+  as either effect-mediated by a deployed guard or a lint-only signal, then
+  rewrite or demote the latter.
+- [ ] WORKSPACE-CI: mark the source scanner suite as lint, not boundary, in its
+  headers and pin its behavior with known-good and known-bad fixtures.
+- [ ] WORKSPACE-CI deploy: seal each published artifact with a root-signed
+  digest manifest verified at install, in addition to the immutable flag.
