@@ -246,7 +246,10 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if arg_str == "--force" {
                 state.has_force_flag = true;
             }
-            if arg_str == "--force-with-lease" {
+            // REQ-GGUARD-030: the bare and attached (`--force-with-lease=<ref>`)
+            // spellings are the same destructive option; matching only the bare
+            // form let the attached form evade the push block.
+            if arg_str == "--force-with-lease" || arg_str.starts_with("--force-with-lease=") {
                 state.has_force_with_lease_flag = true;
             }
             if arg_str.starts_with("--amend") {
@@ -334,7 +337,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                     if s == "--force" || s == "-f" {
                         state.has_force_flag = true;
                     }
-                    if s == "--force-with-lease" {
+                    if s == "--force-with-lease" || s.starts_with("--force-with-lease=") {
                         state.has_force_with_lease_flag = true;
                     }
                     if s == "--delete" || s == "-d" {

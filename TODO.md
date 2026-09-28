@@ -267,9 +267,9 @@ requirement decisions.
   that way; add `git log -n 5` and equivalent allowed controls.
 - [ ] Block hook-bypass `--no-verify` across every Git command that supports it,
   with command-specific short aliases and operand-lookalike controls.
-- [ ] Block branch `-f`/`--force`; add the missing regression for force-resetting
+- [x] Block branch `-f`/`--force`; add the missing regression for force-resetting
   an existing branch.
-- [ ] Block push `--force-with-lease=<value>` in addition to the bare form.
+- [x] Block push `--force-with-lease=<value>` in addition to the bare form.
 - [ ] Parse tag and branch message/name operands so values such as `-f`,
   `--force`, and `--no-verify` are not misclassified.
 - [ ] Add pre-separator blocked and post-separator allowed matrices for every

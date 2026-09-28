@@ -383,6 +383,23 @@ fn parse_args_push_force_with_lease_flag() {
 }
 
 #[test]
+fn parse_args_push_force_with_lease_attached_flag() {
+    // REQ-GGUARD-030: `--force-with-lease=<ref>` is the same destructive
+    // option as the bare form and must not slip past the push block.
+    for arg in [
+        "--force-with-lease=origin/main",
+        "--force-with-lease=main:a1b2c3",
+    ] {
+        let args = bytes(&["git", "push", arg, "origin"]);
+        let state = parse_args(&args).unwrap();
+        assert!(
+            state.has_force_with_lease_flag,
+            "{arg} did not set has_force_with_lease_flag"
+        );
+    }
+}
+
+#[test]
 fn parse_args_branch_d_flag() {
     let args = bytes(&["git", "branch", "-D", "foo"]);
     let state = parse_args(&args).unwrap();

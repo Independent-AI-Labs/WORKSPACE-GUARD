@@ -118,6 +118,17 @@ pub fn check_subcommand_rules(
         });
     }
 
+    // REQ-GGUARD-030: `git branch -f/--force` force-resets an existing branch
+    // ref to another commit (the missing regression for that force-reset).
+    if subcommand == "branch" && state.has_force_flag {
+        return Err(GuardError::Blocked {
+            reason: "git branch -f / --force (force reset existing branch)".into(),
+            hint:
+                "Update the branch without forcing it: check out and move it with a normal commit"
+                    .into(),
+        });
+    }
+
     if subcommand == "branch" && state.has_branch_force_rename {
         return Err(GuardError::Blocked {
             reason: "git branch -M (force rename)".into(),

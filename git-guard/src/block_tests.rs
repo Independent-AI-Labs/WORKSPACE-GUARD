@@ -343,6 +343,16 @@ fn push_force_with_lease_blocked() {
 }
 
 #[test]
+fn branch_force_blocked() {
+    // REQ-GGUARD-030: force-resetting an existing branch must block.
+    let mut state = empty_state("branch");
+    state.has_force_flag = true;
+    let argv_os = argv(&["git", "branch", "-f", "feature", "HEAD~1"]);
+    let result = check_blocked(&state, "branch", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
 fn tag_delete_uppercase_blocked() {
     let mut state = empty_state("tag");
     state.has_branch_d = true;
