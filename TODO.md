@@ -438,23 +438,23 @@ requirement decisions.
 
 ## REQ-GGUARD-053: Foreground Push Detection
 
-- [ ] Extract `/proc/self/stat` decoding into a small parser that locates the
+- [x] Extract `/proc/self/stat` decoding into a small parser that locates the
   final `)` and reads relative indexes 2 (`pgrp`) and 5 (`tpgid`) after `comm`;
   replace the current incorrect `ppid`/`tty_nr` indexes 1 and 4.
-- [ ] Return a typed parse failure for missing delimiters, too few fields,
+- [x] Return a typed parse failure for missing delimiters, too few fields,
   non-numeric fields, and integer overflow instead of substituting zero or
   silently allowing.
-- [ ] Map stat open/read and parse failures to an exit-1 policy block before
+- [x] Map stat open/read and parse failures to an exit-1 policy block before
   real Git executes; do not emit a non-blocking warning.
-- [ ] Allow `tpgid <= 0`, allow positive `tpgid == pgrp`, and block positive
+- [x] Allow `tpgid <= 0`, allow positive `tpgid == pgrp`, and block positive
   `tpgid != pgrp` for both root and non-root.
-- [ ] Add parser fixtures for foreground, background, no-terminal `-1`, zero,
+- [x] Add parser fixtures for foreground, background, no-terminal `-1`, zero,
   process names containing spaces and parentheses, missing final `)`, truncated
   fields, non-numeric values, and signed-integer overflow.
 - [ ] Add Linux integration tests that run push decision probes in a foreground
   process group, a background process group, and without a controlling terminal;
   use a fake real-Git target and assert blocked cases never execute it.
-- [ ] Remove or update tests and messages that characterize unavailable
+- [x] Remove or update tests and messages that characterize unavailable
   background-push detection as a warning.
 
 ## REQ-GGUARD-054: Sudo-Gated Commit Amend

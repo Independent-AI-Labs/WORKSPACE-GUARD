@@ -154,22 +154,23 @@ pub fn check_subcommand_rules(
     }
 
     if subcommand == "push" {
+        // REQ-GGUARD-053: fail closed. An unreadable, truncated, or malformed
+        // stat line means the foreground check cannot be verified, so the push
+        // is refused as a policy block instead of being allowed through.
         let stat = fs::read_to_string("/proc/self/stat").map_err(|e| GuardError::Blocked {
             reason: format!("cannot read /proc/self/stat: {}", e),
             hint: "The background-push check cannot be verified; refusing to push".into(),
         })?;
-        if let Some(pos) = stat.rfind(')') {
-            let fields: Vec<&str> = stat[pos + 1..].split_whitespace().collect();
-            if fields.len() > 4 {
-                let pgrp: i32 = fields[1].parse().unwrap_or(0);
-                let tpgid: i32 = fields[4].parse().unwrap_or(0);
-                if tpgid > 0 && pgrp != tpgid {
-                    return Err(GuardError::Blocked {
-                        reason: "git push from background process".into(),
-                        hint: "Run 'git push' in the foreground so hooks can interact".into(),
-                    });
-                }
-            }
+        let (pgrp, tpgid) =
+            parse_stat_process_groups(&stat).map_err(|why| GuardError::Blocked {
+                reason: format!("/proc/self/stat is malformed: {why}"),
+                hint: "The background-push check cannot be verified; refusing to push".into(),
+            })?;
+        if push_is_backgrounded(pgrp, tpgid) {
+            return Err(GuardError::Blocked {
+                reason: "git push from background process".into(),
+                hint: "Run 'git push' in the foreground so hooks can interact".into(),
+            });
         }
     }
 
@@ -253,6 +254,35 @@ pub fn check_subcommand_rules(
     }
 
     Ok(())
+}
+
+/// Decode the process-group fields the background-push check needs from a
+/// `/proc/<pid>/stat` line (REQ-GGUARD-053). `comm` (field 2) is wrapped in
+/// parentheses and may itself contain spaces or `)`, so the fields are read
+/// relative to the final `)`: relative index 2 is `pgrp` and relative index 5
+/// is `tpgid`. Any missing delimiter, short field list, non-integer, or
+/// out-of-range value is a typed failure; the caller turns it into a block.
+fn parse_stat_process_groups(stat: &str) -> Result<(i32, i32), &'static str> {
+    let close = stat.rfind(')').ok_or("missing comm delimiter")?;
+    let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+    if fields.len() <= 5 {
+        return Err("too few fields after comm");
+    }
+    let pgrp = fields[2]
+        .parse::<i32>()
+        .map_err(|_| "pgrp is not an integer")?;
+    let tpgid = fields[5]
+        .parse::<i32>()
+        .map_err(|_| "tpgid is not an integer")?;
+    Ok((pgrp, tpgid))
+}
+
+/// REQ-GGUARD-053: a push is backgrounded when it has a controlling terminal
+/// (`tpgid > 0`) whose foreground process group differs from the push's own.
+/// `tpgid <= 0` (no controlling terminal) is treated as foreground, and the
+/// decision is the same for root and non-root.
+fn push_is_backgrounded(pgrp: i32, tpgid: i32) -> bool {
+    tpgid > 0 && tpgid != pgrp
 }
 
 fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
@@ -448,3 +478,7 @@ fn extract_worktree_verb(argv_os: &[OsString]) -> String {
 #[cfg(test)]
 #[path = "block_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "block_fgpush_tests.rs"]
+mod fgpush_tests;
