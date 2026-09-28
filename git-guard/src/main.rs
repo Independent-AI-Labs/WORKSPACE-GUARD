@@ -14,6 +14,7 @@ mod ci_integrity;
 mod commit;
 mod config_keys;
 mod exec;
+mod exit_class;
 mod fetch;
 #[cfg(feature = "capability-mode")]
 mod gitdir;
@@ -131,25 +132,9 @@ fn main() {
             eprintln!("{}", msg);
             process::exit(4);
         }
-        Err(GuardError::GuardUnavailable(msg)) => {
-            eprintln!("FATAL: {}", msg);
-            process::exit(3);
-        }
-        Err(GuardError::MissingCap) => {
-            eprintln!(
-                "FATAL: missing workload capabilities (needs \
-                 cap_setpcap,cap_chown,cap_dac_override,cap_fowner,cap_fsetid); \
-                 run make install-guard-host-exec"
-            );
-            process::exit(2);
-        }
-        Err(GuardError::MissingCapabilities(msg)) => {
-            eprintln!("{msg}");
-            process::exit(2);
-        }
         Err(e) => {
-            eprintln!("FATAL: {:?}", e);
-            process::exit(2);
+            eprintln!("{}", e);
+            process::exit(e.exit_code());
         }
     }
 }
@@ -163,7 +148,7 @@ fn check_privileges() -> Result<(), GuardError> {
              Build without --features root-only for capability-based mode.",
             euid
         );
-        process::exit(2);
+        process::exit(3);
     }
     eprintln!(
         "[workspace-guard] running in root-only mode (soft barrier). \
