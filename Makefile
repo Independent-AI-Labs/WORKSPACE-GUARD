@@ -174,10 +174,15 @@ check: ## Run cargo check (all feature combinations)
 	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --workspace
 	cd "$(_GG_DIR)" && CARGO_TARGET_DIR="$(_GG_AGENT_TARGET)" $(CARGO) check --no-default-features --features root-only
 	"$(SCRIPT_BASH)" scripts/check-unsafe-boundary.sh "$(REPO_ROOT)"
+	"$(SCRIPT_BASH)" scripts/check-exec-dispositions.sh "$(REPO_ROOT)"
 
 .PHONY: check-unsafe-boundary
 check-unsafe-boundary: ## Gate: production unsafe Rust confined to the reviewed module (REQ-GGUARD-121)
 	"$(SCRIPT_BASH)" scripts/check-unsafe-boundary.sh "$(REPO_ROOT)"
+
+.PHONY: check-exec-dispositions
+check-exec-dispositions: ## Gate: every shell-guard rule has a disposition row (REQ-EXEC-150/151)
+	"$(SCRIPT_BASH)" scripts/check-exec-dispositions.sh "$(REPO_ROOT)"
 
 .PHONY: lint
 lint: ## Run cargo fmt --check + clippy

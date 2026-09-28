@@ -126,6 +126,8 @@ policy is normative in
   `kernel-authoritative`, `hybrid`, `content-policy`, or `session-layer`.
 - **REQ-EXEC-151**: A build-time or shell gate shall fail if a policy rule has
   no disposition entry, so a rule cannot be added without a disposition.
+  Implemented by `scripts/check-exec-dispositions.sh`, run from `make check`
+  (`make check-exec-dispositions`) and the pre-push gate.
 - **REQ-EXEC-152**: A `kernel-authoritative` rule may be removed from the
   policy file only after the corresponding hook is proven to deny the effect
   for path, renamed-copy, and syscall forms and an audit record is produced.

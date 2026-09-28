@@ -1686,9 +1686,11 @@ secure editor).
 - [ ] Add `config/exec_allowlist.yaml` (+ `.schema.yaml`) with `path`, `sha256`,
   `allow_uid`, `note`; validate the schema and hashes at build time
   (REQ-EXEC-140-142).
-- [ ] Add the build-time rule-disposition gate: every rule id in
+- [x] Add the build-time rule-disposition gate: every rule id in
   `config/shell_guard_policy.yaml` must appear in SPEC-EXEC-POLICY §6
   (REQ-EXEC-150-151), with a negative test (REQ-EXEC-184).
+  `scripts/check-exec-dispositions.sh`, wired into `make check` and covered by
+  `tests/shell/25-exec-dispositions.bats`.
 
 ### Kernel authority (eBPF LSM)
 

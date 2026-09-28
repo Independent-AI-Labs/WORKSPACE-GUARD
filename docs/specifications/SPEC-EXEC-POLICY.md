@@ -300,9 +300,11 @@ destination and mode follow [SPEC-AUDIT](SPEC-AUDIT.md).
   denied; loader-absent session refuses to start.
 - **Shell suite**: `tests/shell/` covers install/reconcile/check and the
   AppArmor/Landlock secondary layers.
-- **MATRIX-DISPOSITION test**: a build-time check that every rule id in
-  `config/shell_guard_policy.yaml` appears in section 6 with a disposition, so
-  a new rule cannot be added without a disposition.
+- **MATRIX-DISPOSITION gate**: `scripts/check-exec-dispositions.sh` fails when
+  any rule id in `config/shell_guard_policy.yaml` is absent from the section 6
+  matrix, so a new rule cannot be added without a disposition. Run from
+  `make check`; `tests/shell/25-exec-dispositions.bats` covers it, including
+  the fail-closed missing-spec case (REQ-EXEC-151, REQ-EXEC-184).
 
 ---
 
