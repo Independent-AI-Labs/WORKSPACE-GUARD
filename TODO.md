@@ -1359,26 +1359,26 @@ requirement decisions.
 
 ## REQ-GGUARD-121: Centralized Unsafe Boundary
 
-- [ ] Add one `git-guard/src/linux_ffi.rs` module and move the four approved production
+- [x] Add one `git-guard/src/linux_ffi.rs` module and move the four approved production
   operations into minimal wrappers: `getauxval(AT_SECURE)`, `fork`, `_exit`, and
   `ioctl(FS_IOC_GETFLAGS)`.
 - [ ] Add crate-level `#![deny(unsafe_code)]` to every binary/library root and a
   narrow module-local allowance only for `linux_ffi`; prohibit additional lint
   allowances, inline assembly, unsafe functions/traits, and raw pointer/fd escape
   APIs.
-- [ ] Write an adjacent complete `// SAFETY:` contract for each of the four
+- [x] Write an adjacent complete `// SAFETY:` contract for each of the four
   blocks covering pointer validity, alignment, lifetime, accepted values,
   return/error interpretation, and post-fork restrictions.
 - [ ] Make the immutable-flag wrapper accept a borrowed verified file descriptor
   and return typed flags/error; remove duplicate ioctl implementations from
   `reconcile.rs` and `shell_guard.rs` and expose no arbitrary ioctl command.
-- [ ] Replace `libc::geteuid` in shell/integration code with
+- [x] Replace `libc::geteuid` in shell/integration code with
   `nix::unistd::geteuid`; replace raw `prctl(PR_GET_NO_NEW_PRIVS)` with the safe
   typed `nix` wrapper and preserve syscall error separately from values 0/1.
-- [ ] Replace `libc::lchown` with safe `nix::unistd::fchownat` no-follow handling,
+- [x] Replace `libc::lchown` with safe `nix::unistd::fchownat` no-follow handling,
   preserving CString/path errors and exact syscall status without following a
   symlink.
-- [ ] Remove raw child `libc::write` diagnostics. Create a close-on-exec status
+- [x] Remove raw child `libc::write` diagnostics. Create a close-on-exec status
   pipe before fork and use safe allocation-free writes of fixed typed setup/exec
   statuses; successful exec closes the channel and the parent owns all visible
   diagnostics.
@@ -1389,16 +1389,16 @@ requirement decisions.
 - [ ] Enumerate the exact post-fork call graph and add a mechanical source/build
   check allowing only reviewed capability syscalls, fixed status write,
   `execve`, and `_exit` before successful exec.
-- [ ] Convert child setup/exec status into typed parent-side
+- [x] Convert child setup/exec status into typed parent-side
   `GuardUnavailable` stages with exact OS evidence; remove child-selected public
   exit 2/3 and ad hoc stderr text that can be confused with real Git outcomes.
-- [ ] Confine raw `libc::fork`/`libc::_exit` tests to one dedicated test module
+- [x] Confine raw `libc::fork`/`libc::_exit` tests to one dedicated test module
   with equivalent safety contracts; migrate every other unit/integration test to
   safe UID/syscall wrappers.
 - [ ] Add a repository build gate scanning all Rust targets, build scripts,
   examples, benches, and tests for unsafe blocks/functions/traits, inline asm,
   direct `libc::*`, lint allowances, and approved call count/location drift.
-- [ ] Update `config/banned_words_exceptions.yaml` only through the sudo-gated
+- [x] Update `config/banned_words_exceptions.yaml` only through the sudo-gated
   YAML editor so the unsafe exception names exactly `git-guard/src/linux_ffi.rs` and the
   dedicated raw-fork test module; remove broad historical FFI descriptions and
   every retired source path.
