@@ -310,3 +310,31 @@ fn absent_record_is_not_workspace() {
 fn workspace_contract_uses_only_live_paths() {
     assert_eq!(CONTRACT_SCRIPT, "/opt/workspace-ci/lib/checks_quality.sh");
 }
+
+#[test]
+fn child_status_exec_close_reads_as_executed() {
+    let (read_fd, write_fd) = nix::unistd::pipe2(OFlag::O_CLOEXEC).expect("pipe2");
+    drop(write_fd);
+    match read_child_status(&read_fd) {
+        ChildStatus::Executed => {}
+        _ => panic!("EOF on the status pipe must map to Executed"),
+    }
+}
+
+#[test]
+fn child_status_maps_failure_bytes() {
+    let cases = [
+        (CHILD_SETUP_CAP_FAIL, "cap"),
+        (CHILD_SETUP_EXEC_FAIL, "exec"),
+    ];
+    for (byte, label) in cases {
+        let (read_fd, write_fd) = nix::unistd::pipe2(OFlag::O_CLOEXEC).expect("pipe2");
+        nix::unistd::write(&write_fd, &[byte]).expect("write status");
+        drop(write_fd);
+        let ok = matches!(
+            (label, read_child_status(&read_fd)),
+            ("cap", ChildStatus::CapFailed) | ("exec", ChildStatus::ExecFailed)
+        );
+        assert!(ok, "unexpected status for {label}");
+    }
+}

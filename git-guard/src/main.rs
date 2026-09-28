@@ -15,6 +15,7 @@ mod agent_identity;
 mod args;
 mod block;
 mod child;
+mod child_status;
 mod ci_integrity;
 mod commit;
 mod config_keys;

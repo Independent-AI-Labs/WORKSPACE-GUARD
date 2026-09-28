@@ -3,11 +3,15 @@ use std::ffi::{CStr, CString, OsString};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
+use nix::fcntl::OFlag;
 use nix::sys::resource::{setrlimit, Resource};
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
 
+use crate::child_status::{
+    read_child_status, ChildStatus, CHILD_SETUP_CAP_FAIL, CHILD_SETUP_EXEC_FAIL, CHILD_SETUP_EXIT,
+};
 use crate::{
     args::ArgState,
     remote::repo_targets_provisioned_host,
@@ -240,23 +244,44 @@ pub fn execve_real_git(
         .and_then(|s| s.subcommand.as_deref())
         .map(crate::reconcile::is_mutating)
         .unwrap_or(false);
+    // The child reports setup/exec failure over a close-on-exec pipe
+    // (REQ-GGUARD-121): one fixed status byte on failure, EOF once execve
+    // succeeds and the kernel closes the CLOEXEC write end. The child writes
+    // no diagnostic text and picks no public exit code; the parent owns all
+    // visible diagnostics and maps the typed status to a GuardError.
+    let (status_read, status_write) = nix::unistd::pipe2(OFlag::O_CLOEXEC).map_err(|_| {
+        GuardError::GuardUnavailable("failed to create the child status pipe".to_string())
+    })?;
     // Post-fork child work uses only async-signal-safe primitives: fork and
-    // _exit come from linux_ffi (REQ-GGUARD-121); stderr and execve go through
-    // nix's safe API.
+    // _exit come from linux_ffi; the fixed status write and execve go through
+    // nix's safe API. Nothing in the child allocates, formats, locks, or
+    // unwinds.
     match crate::linux_ffi::fork() {
         Err(_) => Err(GuardError::GitOriginalMissing),
         Ok(None) => {
+            drop(status_read);
             if raise_child_dac_override().is_err() {
-                const MSG: &[u8] =
-                    b"FATAL: failed to loan CAP_DAC_OVERRIDE to git.original; reinstall guard\n";
-                let _ = nix::unistd::write(std::io::stderr(), MSG);
-                crate::linux_ffi::exit_now(2);
+                let _ = nix::unistd::write(&status_write, &[CHILD_SETUP_CAP_FAIL]);
+                crate::linux_ffi::exit_now(CHILD_SETUP_EXIT);
             }
             let _ = nix::unistd::execve(git_path, &argv_c, &envp);
-            crate::linux_ffi::exit_now(3);
+            let _ = nix::unistd::write(&status_write, &[CHILD_SETUP_EXEC_FAIL]);
+            crate::linux_ffi::exit_now(CHILD_SETUP_EXIT);
         }
         Ok(Some(pid)) => {
+            drop(status_write);
             let child_pid = Pid::from_raw(pid);
+            match read_child_status(&status_read) {
+                ChildStatus::CapFailed => {
+                    let _ = waitpid(child_pid, None);
+                    return Err(GuardError::MissingCap);
+                }
+                ChildStatus::ExecFailed => {
+                    let _ = waitpid(child_pid, None);
+                    return Err(GuardError::GitOriginalMissing);
+                }
+                ChildStatus::Executed => {}
+            }
             // Post-exec relock: reclaim files git.original created back to
             // root:root. Reuses the git dir resolved once in main.rs; when
             // no git dir was resolved (no subcommand, or not a repo) the
