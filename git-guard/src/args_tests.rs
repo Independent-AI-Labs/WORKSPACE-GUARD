@@ -311,9 +311,15 @@ fn parse_args_config_key_with_spaces() {
 }
 
 #[test]
-fn parse_args_hard_flag_blocked() {
-    let args = bytes(&["git", "--hard", "reset"]);
-    assert!(parse_args(&args).is_err());
+fn parse_args_hard_is_not_a_global_option() {
+    // REQ-GGUARD-030: the global "--hard" scan is gone. `git reset --hard`
+    // stays blocked as a destructive subcommand, and a bare `git --hard` is
+    // forwarded to real Git (invalid syntax), so parsing must not special-case
+    // the token.
+    let state = parse_args(&bytes(&["git", "--hard", "reset"])).unwrap();
+    assert_eq!(state.subcommand.as_deref(), Some("reset"));
+    let bare = parse_args(&bytes(&["git", "--hard"])).unwrap();
+    assert!(bare.subcommand.is_none());
 }
 
 #[test]

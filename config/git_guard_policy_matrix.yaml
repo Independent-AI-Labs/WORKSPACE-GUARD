@@ -12,11 +12,6 @@ version: 1
 
 cases:
   # --- unconditionally blocked subcommands ---
-  - id: reset-hard
-    argv: [git, reset, --hard]
-    expect: blocked
-    reason_contains: --hard
-
   - id: reset-soft
     argv: [git, reset, --soft]
     expect: blocked
@@ -248,10 +243,6 @@ cases:
     reason_contains: switch
 
   # --- global destructive flags ---
-  - id: hard-flag-global
-    argv: [git, reset, --hard]
-    expect: blocked
-
   - id: no-verify-blocked
     argv: [git, commit, --no-verify, -m, x]
     expect: blocked

@@ -261,7 +261,7 @@ requirement decisions.
 
 - [x] Replace global token/short-character scanning with command-specific
   option-arity tables that consume operands before recording policy flags.
-- [ ] Remove global `--hard` handling; rely on the compiled `reset` subcommand
+- [x] Remove global `--hard` handling; rely on the compiled `reset` subcommand
   block.
 - [ ] Treat `-n` as hook bypass only for commands whose Git grammar defines it
   that way; add `git log -n 5` and equivalent allowed controls.

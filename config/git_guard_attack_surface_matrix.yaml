@@ -128,11 +128,6 @@ cases:
     reason_contains: sudo-gated
 
   # --- reset.c (blocked) ---
-  - id: atk-reset-hard
-    argv: [git, reset, --hard]
-    expect: blocked
-    reason_contains: --hard
-
   - id: atk-reset-mixed
     argv: [git, reset, HEAD~1]
     expect: blocked
@@ -341,11 +336,6 @@ cases:
     reason_contains: tag -d
 
   # --- global destructive flags (args.rs) ---
-  - id: atk-global-hard
-    argv: [git, --hard]
-    expect: blocked
-    reason_contains: --hard
-
   - id: atk-no-verify
     argv: [git, commit, --no-verify, -m, x]
     expect: blocked

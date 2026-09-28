@@ -252,12 +252,10 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
 
         if arg.starts_with(b"--") {
             match arg_str {
-                "--hard" => {
-                    return Err(GuardError::Blocked {
-                        reason: "--hard flag".into(),
-                        hint: "Remove --hard from the command".into(),
-                    });
-                }
+                // REQ-GGUARD-030: no global "--hard" handling. It only means
+                // something to `git reset`, which is an unconditionally
+                // blocked subcommand; a bare `git --hard` is invalid syntax
+                // that real Git rejects.
                 "--no-verify" => {
                     return Err(GuardError::Blocked {
                         reason: "--no-verify flag".into(),
@@ -451,10 +449,10 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     }
 
     // REQ-GGUARD-010: data after `--` is a pathspec or operand, never a
-    // global option, so it is not re-scanned here. A pre-separator `--hard`
-    // is still rejected by the option loop above, and `git reset --hard`
-    // stays blocked because `reset` is a blocked subcommand. Real Git
-    // remains the syntax authority for malformed forms like `git -- --hard`.
+    // global option, so it is not re-scanned here. `git reset --hard` stays
+    // blocked because `reset` is an unconditionally blocked subcommand, and
+    // real Git remains the syntax authority for a bare `git --hard` or the
+    // malformed `git -- --hard`.
 
     // REQ-GGUARD-030: `-n` is the `--no-verify` short alias only on the
     // subcommands whose grammar defines it (commit, am). Elsewhere it is
