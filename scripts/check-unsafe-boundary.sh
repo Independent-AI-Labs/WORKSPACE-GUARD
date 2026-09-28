@@ -18,7 +18,6 @@ cd "$root"
 allowed=(
     "git-guard/src/linux_ffi.rs"
     "git-guard/src/exec_tests.rs"
-    "git-guard/tests/integration_test.rs"
     # Temporary deviation tracked by REQ-GGUARD-121: shell_guard still owns
     # its immutable-flag ioctl until the shared reviewed wrapper lands.
     "src/shell_guard/main.rs"

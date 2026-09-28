@@ -43,7 +43,7 @@ mod capability_mode {
     /// in a dev container may pass the cap check but then fails with
     /// GitOriginalMissing; skip that environment.
     fn capability_integration_enabled() -> bool {
-        unsafe { libc::geteuid() != 0 }
+        !nix::unistd::geteuid().is_root()
     }
 
     #[test]
