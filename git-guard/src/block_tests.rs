@@ -12,8 +12,6 @@ fn empty_state(subcommand: &str) -> ArgState {
         has_force_with_lease_flag: false,
         has_branch_d: false,
         has_branch_force_rename: false,
-        has_stash_drop: false,
-        has_stash_clear: false,
         safe_pull_flag: false,
         has_rebase_safe_flag: false,
         has_ff_only: false,
@@ -194,29 +192,52 @@ fn rebase_continue_allowed() {
 }
 
 #[test]
-fn stash_drop_blocked_even_for_root() {
-    let mut state = empty_state("stash");
-    state.has_stash_drop = true;
-    let argv_os = argv(&["git", "stash", "drop"]);
-    let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
-    assert!(
-        matches!(result, Err(GuardError::Blocked { .. })),
-        "stash drop is blocked for all users (REQ-GGUARD-050): {:?}",
-        result
-    );
+fn stash_is_blocked_unconditionally_without_operation_parsing() {
+    // REQ-GGUARD-050: the whole subcommand is blocked, so every verb --
+    // including the harmless-looking ones -- is denied identically.
+    let cases: &[&[&str]] = &[
+        &["git", "stash"],
+        &["git", "stash", "push"],
+        &["git", "stash", "save"],
+        &["git", "stash", "pop"],
+        &["git", "stash", "apply"],
+        &["git", "stash", "list"],
+        &["git", "stash", "show"],
+        &["git", "stash", "drop"],
+        &["git", "stash", "clear"],
+        &["git", "stash", "future-op"],
+        &["git", "stash", "--", "drop"],
+    ];
+    for case in cases {
+        let state = empty_state("stash");
+        let argv_os = argv(case);
+        let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "{case:?} must be blocked (REQ-GGUARD-050): {result:?}"
+        );
+    }
 }
 
 #[test]
-fn stash_clear_blocked_even_for_root() {
-    let mut state = empty_state("stash");
-    state.has_stash_clear = true;
-    let argv_os = argv(&["git", "stash", "clear"]);
-    let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
-    assert!(
-        matches!(result, Err(GuardError::Blocked { .. })),
-        "stash clear is blocked for all users (REQ-GGUARD-050): {:?}",
-        result
-    );
+fn stash_hint_names_snapshot_alternatives_only() {
+    let state = empty_state("stash");
+    let argv_os = argv(&["git", "stash", "drop"]);
+    match check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None) {
+        Err(GuardError::Blocked { hint, .. }) => {
+            assert!(
+                hint.contains("git diff") && hint.contains("worktree"),
+                "hint must name sanctioned snapshot alternatives: {hint}"
+            );
+            for taboo in ["git stash", "stash pop", "stash list", "stash apply"] {
+                assert!(
+                    !hint.contains(taboo),
+                    "hint must not recommend another stash operation: {hint}"
+                );
+            }
+        }
+        other => panic!("stash must be blocked: {other:?}"),
+    }
 }
 
 #[test]

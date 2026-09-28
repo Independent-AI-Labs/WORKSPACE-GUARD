@@ -20,8 +20,6 @@ pub struct ArgState {
     pub has_force_with_lease_flag: bool,
     pub has_branch_d: bool,
     pub has_branch_force_rename: bool,
-    pub has_stash_drop: bool,
-    pub has_stash_clear: bool,
     pub safe_pull_flag: bool,
     pub has_rebase_safe_flag: bool,
     pub has_ff_only: bool,
@@ -111,8 +109,6 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         has_force_with_lease_flag: false,
         has_branch_d: false,
         has_branch_force_rename: false,
-        has_stash_drop: false,
-        has_stash_clear: false,
         safe_pull_flag: false,
         has_rebase_safe_flag: false,
         has_ff_only: false,
@@ -324,25 +320,6 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             state.subcommand = Some(resolved.clone());
             state.subcommand_raw = Some(arg_str.to_string());
 
-            if resolved == "stash" {
-                let mut past_dash = false;
-                for &sarg in &argv[i + 1..] {
-                    let s = std::str::from_utf8(sarg).unwrap_or("");
-                    if s == "--" {
-                        past_dash = true;
-                        continue;
-                    }
-                    if past_dash {
-                        continue;
-                    }
-                    if s == "drop" {
-                        state.has_stash_drop = true;
-                    }
-                    if s == "clear" {
-                        state.has_stash_clear = true;
-                    }
-                }
-            }
             if resolved == "push" {
                 let mut past_dash = false;
                 for &sarg in &argv[i + 1..] {

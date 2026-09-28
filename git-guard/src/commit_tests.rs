@@ -13,8 +13,6 @@ fn empty_state() -> ArgState {
         has_force_with_lease_flag: false,
         has_branch_d: false,
         has_branch_force_rename: false,
-        has_stash_drop: false,
-        has_stash_clear: false,
         safe_pull_flag: false,
         has_rebase_safe_flag: false,
         has_ff_only: false,

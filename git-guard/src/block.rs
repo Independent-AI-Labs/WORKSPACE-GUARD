@@ -1,6 +1,5 @@
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::process::ExitStatusExt;
 
 use crate::{
     args::ArgState, GuardError, BLOCKED_BYPASS_VARS, BLOCKED_SUBCOMMANDS, PROTECTED_BRANCHES,
@@ -54,6 +53,17 @@ pub fn check_categories(
             });
         }
     } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
+        // Stash is blocked unconditionally (REQ-GGUARD-050): the whole
+        // operation loses work, so no stash verb is parsed or suggested.
+        if subcommand == "stash" {
+            return Err(GuardError::Blocked {
+                reason: "destructive subcommand: git stash".into(),
+                hint: "Snapshot with 'git diff > /tmp/change.patch' or use \
+                       'git worktree add /tmp/wt' for temporary work; restore \
+                       explicitly instead of stashing"
+                    .into(),
+            });
+        }
         return Err(GuardError::Blocked {
             reason: format!("destructive subcommand: git {}", subcommand),
             hint: format!(
@@ -101,19 +111,6 @@ pub fn check_subcommand_rules(
         });
     }
 
-    if subcommand == "stash" && (state.has_stash_drop || state.has_stash_clear) && !operator_root {
-        let what = if state.has_stash_drop {
-            "drop"
-        } else {
-            "clear"
-        };
-        return Err(GuardError::Blocked {
-            reason: format!("git stash {}", what),
-            hint: "Use 'git stash pop' to restore without losing, or 'git stash list' to review"
-                .into(),
-        });
-    }
-
     if subcommand == "branch" && state.has_branch_d {
         return Err(GuardError::Blocked {
             reason: "git branch -D (force delete)".into(),
@@ -145,9 +142,7 @@ pub fn check_subcommand_rules(
     if subcommand == "push" && (state.has_force_flag || state.has_force_with_lease_flag) {
         return Err(GuardError::Blocked {
             reason: "git push --force".into(),
-            hint:
-                "Use 'git push' without --force, or --force-with-lease if you understand the risks"
-                    .into(),
+            hint: "Use an ordinary 'git push' without any force option".into(),
         });
     }
 
@@ -216,45 +211,6 @@ pub fn check_subcommand_rules(
                     hint: "Allowed worktree verbs: add (without -f), list, lock, unlock, move."
                         .into(),
                 });
-            }
-        }
-    }
-
-    if subcommand == "revert" {
-        let target = extract_revert_target(argv_os);
-        if let Ok(branch) = get_current_branch(git_path, cwd) {
-            if branch != "HEAD" && !branch.is_empty() {
-                let exists = run_git(
-                    git_path,
-                    cwd,
-                    &[
-                        "git",
-                        "rev-parse",
-                        "--verify",
-                        &format!("{}^{{commit}}", target),
-                    ],
-                );
-                let on_remote = run_git(
-                    git_path,
-                    cwd,
-                    &[
-                        "git",
-                        "merge-base",
-                        "--is-ancestor",
-                        &target,
-                        &format!("origin/{}", branch),
-                    ],
-                );
-                if exists.success() && !on_remote.success() {
-                    return Err(GuardError::Blocked {
-                        reason: format!(
-                            "git revert on {} which is not on origin/{}",
-                            target, branch
-                        ),
-                        hint: "Edit forward with a new commit instead of reverting un-pushed work"
-                            .into(),
-                    });
-                }
             }
         }
     }
@@ -465,16 +421,6 @@ fn path_exists_on_disk(s: &str, cwd: Option<&str>) -> bool {
     }
 }
 
-fn extract_revert_target(argv_os: &[OsString]) -> String {
-    for arg in argv_os.iter().skip(1) {
-        let s = arg.to_string_lossy();
-        if !s.starts_with('-') && s != "revert" {
-            return s.to_string();
-        }
-    }
-    "HEAD".to_string()
-}
-
 /// First positional after `worktree` (the verb), skipping global git
 /// options. `git worktree` with no verb is `list`, which is read-only.
 fn extract_worktree_verb(argv_os: &[OsString]) -> String {
@@ -488,15 +434,6 @@ fn extract_worktree_verb(argv_os: &[OsString]) -> String {
         }
     }
     String::new()
-}
-
-fn run_git(git_path: &str, cwd: Option<&str>, args: &[&str]) -> std::process::ExitStatus {
-    git_cmd(git_path, cwd)
-        .args(&args[1..])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap_or_else(|_| std::process::ExitStatus::from_raw(1))
 }
 
 #[cfg(test)]

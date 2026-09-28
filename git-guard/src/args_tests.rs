@@ -274,10 +274,12 @@ fn parse_args_exec_equals_blocked() {
 }
 
 #[test]
-fn parse_args_separator_stash_drop_is_pathspec() {
-    let args = bytes(&["git", "stash", "--", "drop"]);
+fn parse_args_stash_has_no_operation_state() {
+    // REQ-GGUARD-050: stash is blocked wholesale, so the parser must not
+    // grow per-operation state for any verb after the subcommand.
+    let args = bytes(&["git", "stash", "drop", "clear", "--", "pop"]);
     let state = parse_args(&args).unwrap();
-    assert!(!state.has_stash_drop);
+    assert_eq!(state.subcommand.as_deref(), Some("stash"));
 }
 
 #[test]
@@ -353,20 +355,6 @@ fn parse_args_branch_d_flag() {
     let args = bytes(&["git", "branch", "-D", "foo"]);
     let state = parse_args(&args).unwrap();
     assert!(state.has_branch_d);
-}
-
-#[test]
-fn parse_args_stash_drop() {
-    let args = bytes(&["git", "stash", "drop"]);
-    let state = parse_args(&args).unwrap();
-    assert!(state.has_stash_drop);
-}
-
-#[test]
-fn parse_args_stash_clear() {
-    let args = bytes(&["git", "stash", "clear"]);
-    let state = parse_args(&args).unwrap();
-    assert!(state.has_stash_clear);
 }
 
 #[test]
