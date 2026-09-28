@@ -300,7 +300,10 @@ fn lock_tree(path: &Path, git_dir: &Path) {
 
 /// Resolve the absolute git dir for this invocation. Called ONCE per
 /// guard invocation from main.rs; both lock passes reuse the result.
-pub fn resolve_git_dir(argv_os: &[OsString]) -> Option<PathBuf> {
+/// `location` is the leading global location options from the parse
+/// (REQ-GGUARD-011), so the lock follows the same repository the real Git
+/// child will operate on.
+pub fn resolve_git_dir(location: &[OsString]) -> Option<PathBuf> {
     let mut cmd = Command::new(GIT_ORIGINAL_PATH);
     crate::agent_identity::apply_agent_hardened_git_env(&mut cmd, false);
     // Preserve repo-location env overrides; env_clear would drop them and
@@ -311,7 +314,7 @@ pub fn resolve_git_dir(argv_os: &[OsString]) -> Option<PathBuf> {
         }
     }
     let out = cmd
-        .args(crate::args::repo_location_args(argv_os))
+        .args(location)
         .args(["rev-parse", "--absolute-git-dir"])
         .output()
         .ok()?;

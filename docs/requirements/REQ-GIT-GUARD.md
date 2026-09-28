@@ -77,6 +77,11 @@ This document specifies the requirements for the Rust binary. The installation/d
   handling shall cover `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`,
   and `--config-env`; repeated `-C` options shall be supported. `-C` is a
   directory-changing option and shall never be interpreted as a config key.
+  The parsed location options (`-C`, `--git-dir`, `--work-tree`, separate and
+  attached forms) shall be shared with repository resolution, ownership
+  locking, and the workspace contract check, so every consumer targets the
+  same repository as the forwarded invocation; a post-subcommand `-C` is
+  command-local (message reuse) and shall not relocate the repository.
   The first positional token remaining after valid global modifiers and their
   operands is the subcommand. If a terminal option is present or no subcommand
   exists, the invocation shall pass through unchanged. An unknown leading

@@ -22,6 +22,7 @@ fn empty_state() -> ArgState {
         dangerous_config_keys: Vec::new(),
         config_spans: Vec::new(),
         no_verify_short_idxs: Vec::new(),
+        location_args: Vec::new(),
     }
 }
 

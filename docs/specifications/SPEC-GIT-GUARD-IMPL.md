@@ -385,7 +385,7 @@ privilege boundary failure, but its authority is bounded by the capability set.
 | REQ-GGUARD-006 | §2.3 | Covered |
 | REQ-GGUARD-007 | §8.3 | Covered |
 | REQ-GGUARD-010 | §3.3 | Covered |
-| REQ-GGUARD-011 | §3.1 | Specified; implementation update tracked |
+| REQ-GGUARD-011 | §3.1 | Covered |
 | REQ-GGUARD-012 | §3.4 | Specified; implementation update tracked |
 | REQ-GGUARD-013 | §3.5 | Specified; implementation update tracked |
 | REQ-GGUARD-014 | §3.1 | Covered |

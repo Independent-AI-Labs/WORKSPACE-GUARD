@@ -335,9 +335,9 @@ pub fn execve_real_git(
 /// The guard's own cwd is intentionally irrelevant, so running from a
 /// directory outside any repo cannot dodge the contract check.
 /// Bounded by a timeout so a wedged resolver can never stall a commit.
-pub fn resolve_toplevel(argv_os: &[OsString], git_bin: &str) -> Option<String> {
+pub fn resolve_toplevel(location: &[OsString], git_bin: &str) -> Option<String> {
     let mut cmd = std::process::Command::new(git_bin);
-    cmd.args(crate::args::repo_location_args(argv_os));
+    cmd.args(location);
     crate::apply_safe_directory(&mut cmd);
     cmd.args(["rev-parse", "--show-toplevel"]);
     match crate::child::run_with_timeout(&mut cmd, None, std::time::Duration::from_secs(20)) {
@@ -355,13 +355,13 @@ pub fn resolve_toplevel(argv_os: &[OsString], git_bin: &str) -> Option<String> {
 
 pub fn check_workspace_ci_contract(
     subcommand: &str,
-    argv_os: &[OsString],
+    location: &[OsString],
 ) -> Result<(), GuardError> {
     // Fail closed: if the target repo cannot be resolved we cannot know
     // whether this commit/push is subject to the workspace contract, so
     // the safe default is to block. (git would reject the operation
     // outside a work tree anyway.)
-    let toplevel = match resolve_toplevel(argv_os, "/usr/bin/git.original") {
+    let toplevel = match resolve_toplevel(location, "/usr/bin/git.original") {
         Some(t) => t,
         None => {
             return Err(GuardError::ContractFailed(format!(

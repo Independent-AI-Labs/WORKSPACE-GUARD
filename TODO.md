@@ -147,9 +147,12 @@ requirement decisions.
   `--work-tree <path> reset`, and `--namespace <name> reset`.
 - [x] Add attached/equals-form and repeated-`-C` tests plus terminal-option and
   unknown-option tests.
-- [ ] Share the parsed global location options with `repo_location_args()` so
+- [x] Share the parsed global location options with `repo_location_args()` so
   policy, repository resolution, locking, contract checks, and real Git target
-  the same repository.
+  the same repository. `ArgState.location_args` is now the single source (the
+  parse records leading `-C`/`-C<dir>`/`--git-dir[=]`/`--work-tree[=]` and
+  excludes post-subcommand `-C`); `resolve_git_dir`,
+  `resolve_toplevel`, and `check_workspace_ci_contract` consume it.
 - [x] Update dangerous-config tests that currently treat uppercase `-C` as a
   config override.
 

@@ -29,13 +29,8 @@ fn resolve_toplevel_honors_dash_c_over_guard_cwd() {
         .status()
         .unwrap();
     assert!(st.success());
-    let argv = vec![
-        OsString::from("git"),
-        OsString::from("-C"),
-        dir.clone().into_os_string(),
-        OsString::from("commit"),
-    ];
-    let resolved = resolve_toplevel(&argv, "git").expect("must resolve scratch repo");
+    let location = vec![OsString::from("-C"), dir.clone().into_os_string()];
+    let resolved = resolve_toplevel(&location, "git").expect("must resolve scratch repo");
     // The test process cwd is the guard repo; a cwd-based resolver would
     // return it instead of the -C target.
     assert_eq!(
@@ -50,13 +45,8 @@ fn resolve_toplevel_returns_none_outside_any_repo() {
     // Fail-closed contract check relies on this: an unresolvable target
     // must surface as None so the caller blocks instead of skipping.
     let dir = exec_test_scratch("toplevel-none");
-    let argv = vec![
-        OsString::from("git"),
-        OsString::from("-C"),
-        dir.into_os_string(),
-        OsString::from("commit"),
-    ];
-    assert!(resolve_toplevel(&argv, "git").is_none());
+    let location = vec![OsString::from("-C"), dir.into_os_string()];
+    assert!(resolve_toplevel(&location, "git").is_none());
 }
 
 #[test]

@@ -15,26 +15,58 @@ fn lock_does_not_panic_on_nonexistent_git_dir() {
 #[test]
 fn repo_location_args_extracts_c_and_git_dir() {
     use std::ffi::OsString;
-    let argv = vec![
-        OsString::from("git"),
-        OsString::from("-C"),
-        OsString::from("/tmp/repo"),
-        OsString::from("--git-dir=/x/.git"),
-        OsString::from("status"),
-    ];
-    let got = crate::args::repo_location_args(&argv);
+    let argv: Vec<&[u8]> = vec![b"git", b"-C", b"/tmp/repo", b"--git-dir=/x/.git", b"status"];
+    let state = crate::args::parse_args(&argv).expect("clean leading globals");
     assert_eq!(
-        got,
-        vec![
+        crate::args::repo_location_args(&state),
+        &[
             OsString::from("-C"),
             OsString::from("/tmp/repo"),
             OsString::from("--git-dir=/x/.git"),
         ]
     );
-    assert!(
-        crate::args::repo_location_args(&[OsString::from("git"), OsString::from("status")])
-            .is_empty()
+    let plain: Vec<&[u8]> = vec![b"git", b"status"];
+    assert!(crate::args::repo_location_args(&crate::args::parse_args(&plain).unwrap()).is_empty());
+}
+
+#[test]
+fn repo_location_args_captures_attached_and_separate_work_tree() {
+    use std::ffi::OsString;
+    let attached: Vec<&[u8]> = vec![b"git", b"-C/tmp/repo", b"--work-tree=/w", b"status"];
+    assert_eq!(
+        crate::args::repo_location_args(&crate::args::parse_args(&attached).unwrap()),
+        &[
+            OsString::from("-C/tmp/repo"),
+            OsString::from("--work-tree=/w")
+        ]
     );
+    let separate: Vec<&[u8]> = vec![
+        b"git",
+        b"--git-dir",
+        b"/g",
+        b"--work-tree",
+        b"/w",
+        b"status",
+    ];
+    assert_eq!(
+        crate::args::repo_location_args(&crate::args::parse_args(&separate).unwrap()),
+        &[
+            OsString::from("--git-dir"),
+            OsString::from("/g"),
+            OsString::from("--work-tree"),
+            OsString::from("/w"),
+        ]
+    );
+}
+
+#[test]
+fn repo_location_args_excludes_post_subcommand_dash_c() {
+    // `git commit -C <sha>` reuses a commit message; the trailing -C is not
+    // a repository-location option and must not relocate the lock/contract
+    // check (REQ-GGUARD-011).
+    let argv: Vec<&[u8]> = vec![b"git", b"commit", b"-C", b"HEAD"];
+    let state = crate::args::parse_args(&argv).expect("clean commit reuse");
+    assert!(crate::args::repo_location_args(&state).is_empty());
 }
 
 #[test]

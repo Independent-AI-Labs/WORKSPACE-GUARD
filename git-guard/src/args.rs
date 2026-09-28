@@ -1,7 +1,7 @@
 use crate::sanitize::ConfigSpan;
 use crate::{GuardError, ABBREV_CANDIDATES, ABBREV_PREFERRED};
 use std::ffi::OsString;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 
 #[derive(Debug, Clone)]
 pub struct ArgState {
@@ -33,6 +33,13 @@ pub struct ArgState {
     /// Argv indexes of `-n`/`-N` tokens; blocked only when the resolved
     /// subcommand defines `-n` as `--no-verify` (REQ-GGUARD-030).
     pub no_verify_short_idxs: Vec<usize>,
+    /// Leading global repository-location options (`-C`, `--git-dir`,
+    /// `--work-tree`) in the exact tokens typed, so the ownership lock,
+    /// toplevel resolution, workspace contract check, and real Git all
+    /// target the same repository. Populated from this single parse
+    /// (REQ-GGUARD-011); post-subcommand `-C` (commit message reuse) is
+    /// never a location option.
+    pub location_args: Vec<OsString>,
 }
 
 fn resolve_subcommand_abbreviation(raw: &str) -> String {
@@ -95,6 +102,7 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         dangerous_config_keys: Vec::new(),
         config_spans: Vec::new(),
         no_verify_short_idxs: Vec::new(),
+        location_args: Vec::new(),
     };
 
     let mut past_separator = false;
@@ -145,7 +153,15 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
 
         if arg == b"-C" {
             // -C changes the working directory; it is never a config
-            // option (REQ-GGUARD-011). Skip the directory operand.
+            // option (REQ-GGUARD-011). Skip the directory operand. Only a
+            // leading -C relocates the repository; after the subcommand it
+            // is command-local (commit/tag message reuse) and excluded.
+            if state.subcommand.is_none() {
+                state.location_args.push(OsString::from_vec(arg.to_vec()));
+                if let Some(v) = argv.get(i + 1) {
+                    state.location_args.push(OsString::from_vec(v.to_vec()));
+                }
+            }
             i += 2;
             continue;
         }
@@ -215,10 +231,20 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 match classify_leading_global(arg, arg_str) {
                     Leading::Terminal => return Ok(state),
                     Leading::Modifier => {
+                        if arg_str.starts_with("--git-dir=") || arg_str.starts_with("--work-tree=")
+                        {
+                            state.location_args.push(OsString::from_vec(arg.to_vec()));
+                        }
                         i += 1;
                         continue;
                     }
                     Leading::Operand => {
+                        if arg_str == "--git-dir" || arg_str == "--work-tree" {
+                            state.location_args.push(OsString::from_vec(arg.to_vec()));
+                            if let Some(v) = argv.get(i + 1) {
+                                state.location_args.push(OsString::from_vec(v.to_vec()));
+                            }
+                        }
                         skip_operand = true;
                         i += 1;
                         continue;
@@ -274,6 +300,11 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             match classify_leading_global(arg, arg_str) {
                 Leading::Terminal => return Ok(state),
                 Leading::Modifier => {
+                    // Attached directory form `-C<dir>` (the bare `-C` was
+                    // consumed above); the directory is carried in the token.
+                    if arg.len() > 2 && arg[1] == b'C' {
+                        state.location_args.push(OsString::from_vec(arg.to_vec()));
+                    }
                     i += 1;
                     continue;
                 }
@@ -411,27 +442,14 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     Ok(state)
 }
 
-/// Extract the leading global options that change WHERE git locates the
-/// repository (-C <path>, --git-dir, --work-tree) so the lock resolves the
-/// same git dir the real git child will operate on. Without this, a call
-/// like `git -C /other/repo status` would lock the repo under the guard's
-/// own cwd (or none) instead of the target repo (observed: post-exec
-/// relock was a no-op for every `-C` invocation, errors discarded).
-pub fn repo_location_args(argv_os: &[OsString]) -> Vec<OsString> {
-    let mut out = Vec::new();
-    let mut it = argv_os.iter().skip(1);
-    while let Some(a) = it.next() {
-        let bytes = a.as_bytes();
-        if bytes == b"-C" || bytes == b"--git-dir" || bytes == b"--work-tree" {
-            if let Some(v) = it.next() {
-                out.push(a.clone());
-                out.push(v.clone());
-            }
-        } else if bytes.starts_with(b"--git-dir=") || bytes.starts_with(b"--work-tree=") {
-            out.push(a.clone());
-        }
-    }
-    out
+/// The leading global options that change WHERE git locates the repository
+/// (`-C <path>`, `-C<path>`, `--git-dir[=]`, `--work-tree[=]`), resolved by
+/// the same parse that discovers the subcommand so the ownership lock,
+/// toplevel resolution, workspace contract check, and real Git all target
+/// the same repository (REQ-GGUARD-011). Post-subcommand `-C` is command
+/// syntax (commit message reuse), not a location option, and is excluded.
+pub fn repo_location_args(state: &ArgState) -> &[OsString] {
+    &state.location_args
 }
 
 #[cfg(test)]

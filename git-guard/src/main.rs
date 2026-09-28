@@ -399,7 +399,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         #[cfg(feature = "capability-mode")]
         let git_dir = {
             let t = trace_start("resolve_git_dir+lock");
-            let gd = gitdir::resolve_git_dir(&argv_effective);
+            let gd = gitdir::resolve_git_dir(args::repo_location_args(&state));
             if let Some(ref g) = gd {
                 gitdir::lock(g);
                 let t = trace_start("check_sealed_repo");
@@ -412,7 +412,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 
         if CONTRACT_CHECK_SUBCOMMANDS.contains(&sub.as_str()) {
             let t = trace_start("ci_contract_check");
-            exec::check_workspace_ci_contract(sub, &argv_effective)?;
+            exec::check_workspace_ci_contract(sub, args::repo_location_args(&state))?;
             trace_end(t, "ci_contract_check");
         }
 
