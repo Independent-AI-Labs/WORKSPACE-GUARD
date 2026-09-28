@@ -263,7 +263,7 @@ requirement decisions.
   option-arity tables that consume operands before recording policy flags.
 - [x] Remove global `--hard` handling; rely on the compiled `reset` subcommand
   block.
-- [ ] Treat `-n` as hook bypass only for commands whose Git grammar defines it
+- [x] Treat `-n` as hook bypass only for commands whose Git grammar defines it
   that way; add `git log -n 5` and equivalent allowed controls.
 - [x] Block hook-bypass `--no-verify` across every Git command that supports it,
   with command-specific short aliases and operand-lookalike controls.
