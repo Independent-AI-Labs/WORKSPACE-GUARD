@@ -1,5 +1,5 @@
 use crate::sanitize::ConfigSpan;
-use crate::{is_config_key_blocked, GuardError, ABBREV_CANDIDATES, ABBREV_PREFERRED};
+use crate::{GuardError, ABBREV_CANDIDATES, ABBREV_PREFERRED};
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 
@@ -68,121 +68,12 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Split a config-option payload on its first `=` and return the exact
-/// pre-`=` key bytes. Everything after the first `=` is an opaque value
-/// that is never retained. A payload with no `=` is an implicit-true key
-/// (both `-c key` and `-ckey`), so the attached form cannot evade policy by
-/// omitting the `=` (REQ-GGUARD-041). An empty, non-ASCII, or non-UTF-8 key
-/// is a malformed invocation (exit 2) before any subcommand runs; keys are
-/// never lossily converted to an empty string. Case folding happens only in
-/// the matcher, so the retained key (audit evidence) is byte-exact.
-fn parse_config_key(payload: &[u8]) -> Result<String, GuardError> {
-    let key = match payload.iter().position(|&b| b == b'=') {
-        Some(eq) => &payload[..eq],
-        None => payload,
-    };
-    if key.is_empty() {
-        return Err(GuardError::InvalidInvocation(
-            "config option has an empty key".into(),
-        ));
-    }
-    if !key.is_ascii() {
-        return Err(GuardError::InvalidInvocation(
-            "config option key is not ASCII".into(),
-        ));
-    }
-    Ok(std::str::from_utf8(key)
-        .expect("ASCII is valid UTF-8")
-        .to_string())
-}
-
-/// Record a blocked config key and, when the originating option token is
-/// known, the span covering it for later stripping. `operand_idx` is set
-/// for the separate-operand forms (`-c key=value`, `--config-env key=env`).
-/// Only normalized keys are retained; values and `--config-env` variable
-/// names never enter parser state (REQ-GGUARD-031).
-fn note_config_key(
-    state: &mut ArgState,
-    flag_idx: Option<usize>,
-    operand_idx: Option<usize>,
-    key: &str,
-) {
-    if !is_config_key_blocked(key, crate::is_config_privileged()) {
-        return;
-    }
-    state.dangerous_config_keys.push(key.to_string());
-    if let Some(f) = flag_idx {
-        match state.config_spans.iter_mut().find(|s| s.flag_idx == f) {
-            Some(span) => span.keys.push(key.to_string()),
-            None => state.config_spans.push(ConfigSpan {
-                flag_idx: f,
-                operand_idx,
-                keys: vec![key.to_string()],
-            }),
-        }
-    }
-}
-
-/// True when `token` takes a separate following operand in the grammar of
-/// `sub`, so its operand must be consumed instead of classified as a policy
-/// flag (REQ-GGUARD-030). Values carried inside the token (`-mMSG`,
-/// `--message=MSG`) are never separate operands. This is the minimal
-/// command-specific arity knowledge the scanner needs; real Git stays the
-/// syntax authority for everything else.
-pub(crate) fn option_takes_operand(sub: &str, token: &str) -> bool {
-    if token.contains('=') {
-        return false;
-    }
-    let message_sub = matches!(sub, "commit" | "tag" | "merge" | "cherry-pick" | "revert");
-    match token {
-        // `git branch -m/--move <newname>` and `-c/--copy <old> <new>` take a
-        // name operand, which may itself begin with `-` (REQ-GGUARD-030).
-        "-m" | "--move" | "-c" | "--copy" if sub == "branch" => true,
-        "-m" | "--message" | "-F" | "--file" => message_sub,
-        "--author" | "--date" | "--cleanup" | "--template" | "--trailer" | "--fixup"
-        | "--squash" | "--reuse-message" | "--reedit-message" | "-C" | "-c" => sub == "commit",
-        "--strategy" | "--strategy-option" | "-s" | "-X" => sub == "merge",
-        "--mainline" => matches!(sub, "cherry-pick" | "revert"),
-        "--push-option" | "-o" => sub == "push",
-        "--onto" | "--exec" | "-x" => sub == "rebase",
-        _ => {
-            // Bundled short options whose value-taker is the final character,
-            // e.g. `-am` (commit -a -m <msg>). A value-taker followed by more
-            // characters carries its value inside the token.
-            if let Some(body) = token.strip_prefix('-') {
-                if !body.starts_with('-') && !body.is_empty() {
-                    if let Some(pos) = body.find(['m', 'F']) {
-                        return pos == body.len() - 1 && message_sub;
-                    }
-                }
-            }
-            false
-        }
-    }
-}
-
-/// The tokens after a subcommand, stopping at `--`, with the separate
-/// operands of value-taking options removed (REQ-GGUARD-030). Option tokens
-/// themselves are yielded so callers can still classify them.
-pub(crate) fn scan_tokens<'a>(sub: &str, tokens: &'a [&'a [u8]]) -> Vec<&'a [u8]> {
-    let mut out = Vec::new();
-    let mut skip = false;
-    for &token in tokens {
-        if skip {
-            skip = false;
-            continue;
-        }
-        let s = std::str::from_utf8(token).unwrap_or("");
-        if s == "--" {
-            break;
-        }
-        if option_takes_operand(sub, s) {
-            skip = true;
-        }
-        out.push(token);
-    }
-    out
-}
+#[path = "args_scan.rs"]
+pub(crate) mod scan;
+use scan::{
+    classify_leading_global, note_config_key, option_takes_operand, parse_config_key, scan_tokens,
+    Leading,
+};
 
 pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
     let mut state = ArgState {
@@ -316,6 +207,30 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
                 }
                 _ => {}
             }
+            // REQ-GGUARD-011: leading globals are resolved with an explicit
+            // arity table before subcommand discovery. An option whose arity
+            // is not known fails closed (exit 2); guessing could swallow a
+            // later destructive subcommand name.
+            if state.subcommand.is_none() {
+                match classify_leading_global(arg, arg_str) {
+                    Leading::Terminal => return Ok(state),
+                    Leading::Modifier => {
+                        i += 1;
+                        continue;
+                    }
+                    Leading::Operand => {
+                        skip_operand = true;
+                        i += 1;
+                        continue;
+                    }
+                    Leading::Unknown => {
+                        return Err(GuardError::InvalidInvocation(format!(
+                            "unknown leading option: {}",
+                            String::from_utf8_lossy(arg)
+                        )));
+                    }
+                }
+            }
             // REQ-GGUARD-030: consume the operand of a value-taking long
             // option (e.g. `--message`, `--author`) so a value such as
             // `--no-verify` is not misread as a policy flag. Dangerous
@@ -350,6 +265,30 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             }
             i += 1;
             continue;
+        }
+
+        // REQ-GGUARD-011: short leading globals. `-c`/`-C` (attached or
+        // separate) were consumed above; anything else is a known modifier
+        // or terminal option, an attached `-C` directory, or fails closed.
+        if state.subcommand.is_none() && arg.starts_with(b"-") && arg.len() > 1 {
+            match classify_leading_global(arg, arg_str) {
+                Leading::Terminal => return Ok(state),
+                Leading::Modifier => {
+                    i += 1;
+                    continue;
+                }
+                Leading::Operand => {
+                    skip_operand = true;
+                    i += 1;
+                    continue;
+                }
+                Leading::Unknown => {
+                    return Err(GuardError::InvalidInvocation(format!(
+                        "unknown leading option: {}",
+                        String::from_utf8_lossy(arg)
+                    )));
+                }
+            }
         }
 
         if arg.starts_with(b"-") && arg.len() > 1 {
@@ -500,9 +439,5 @@ pub fn repo_location_args(argv_os: &[OsString]) -> Vec<OsString> {
 mod tests;
 
 #[cfg(test)]
-#[path = "args_config_tests.rs"]
-mod config_tests;
-
-#[cfg(test)]
-#[path = "args_operand_tests.rs"]
-mod operand_tests;
+#[path = "args_more_tests.rs"]
+mod more_tests;

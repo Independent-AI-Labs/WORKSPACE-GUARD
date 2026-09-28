@@ -130,27 +130,27 @@ requirement decisions.
 
 ## REQ-GGUARD-011: Operand-Aware Subcommand Discovery
 
-- [ ] Replace first-non-dash subcommand discovery in `git-guard/src/args.rs` with a
+- [x] Replace first-non-dash subcommand discovery in `git-guard/src/args.rs` with a
   global-option arity table covering terminal, modifier, and value-taking
   options.
-- [ ] Consume separate, attached, and equals-form operands for `-C`, `-c`,
+- [x] Consume separate, attached, and equals-form operands for `-C`, `-c`,
   `--git-dir`, `--work-tree`, `--namespace`, and `--config-env`; support
   repeated `-C`.
-- [ ] Treat `-C` only as a directory option and remove it from dangerous-config
+- [x] Treat `-C` only as a directory option and remove it from dangerous-config
   parsing.
-- [ ] Make terminal query options leave the invocation without a subcommand and
+- [x] Make terminal query options leave the invocation without a subcommand and
   pass argv through unchanged.
-- [ ] Fail with exit code 2 when an unknown leading option makes operand arity
+- [x] Fail with exit code 2 when an unknown leading option makes operand arity
   and subcommand identification ambiguous.
-- [ ] Add bypass regressions for a blocked subcommand following every separate
+- [x] Add bypass regressions for a blocked subcommand following every separate
   value-taking global option, especially `--git-dir <path> reset`,
   `--work-tree <path> reset`, and `--namespace <name> reset`.
-- [ ] Add attached/equals-form and repeated-`-C` tests plus terminal-option and
+- [x] Add attached/equals-form and repeated-`-C` tests plus terminal-option and
   unknown-option tests.
 - [ ] Share the parsed global location options with `repo_location_args()` so
   policy, repository resolution, locking, contract checks, and real Git target
   the same repository.
-- [ ] Update dangerous-config tests that currently treat uppercase `-C` as a
+- [x] Update dangerous-config tests that currently treat uppercase `-C` as a
   config override.
 
 ## REQ-GGUARD-012: Exact Policy-Relevant Subcommands

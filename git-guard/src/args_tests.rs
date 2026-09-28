@@ -1,4 +1,5 @@
 use super::*;
+use crate::is_config_key_blocked;
 
 fn bytes<'a>(args: &[&'a str]) -> Vec<&'a [u8]> {
     args.iter().map(|s| s.as_bytes()).collect()
@@ -213,14 +214,17 @@ fn parse_args_wildcard_url_insteadof() {
 #[test]
 fn parse_args_nonstandard_config_spellings_not_config() {
     // REQ-GGUARD-031: `--config` is not a real Git global option; only
-    // `-c` and `--config-env` carry config. These spellings must not be
-    // interpreted as config (real Git rejects them).
+    // `-c` and `--config-env` carry config. These spellings are not
+    // interpreted as config; as unknown leading options they fail closed
+    // (REQ-GGUARD-011 exit 2).
     for args in [
         bytes(&["git", "--config", "core.hooksPath=/evil", "commit"]),
         bytes(&["git", "--config=core.hooksPath=/evil", "commit"]),
     ] {
-        let state = parse_args(&args).unwrap();
-        assert!(state.dangerous_config_keys.is_empty());
+        assert!(matches!(
+            parse_args(&args),
+            Err(GuardError::InvalidInvocation(_))
+        ));
     }
 }
 
@@ -314,14 +318,18 @@ fn parse_args_config_key_with_spaces() {
 
 #[test]
 fn parse_args_hard_is_not_a_global_option() {
-    // REQ-GGUARD-030: the global "--hard" scan is gone. `git reset --hard`
-    // stays blocked as a destructive subcommand, and a bare `git --hard` is
-    // forwarded to real Git (invalid syntax), so parsing must not special-case
-    // the token.
-    let state = parse_args(&bytes(&["git", "--hard", "reset"])).unwrap();
-    assert_eq!(state.subcommand.as_deref(), Some("reset"));
-    let bare = parse_args(&bytes(&["git", "--hard"])).unwrap();
-    assert!(bare.subcommand.is_none());
+    // REQ-GGUARD-030/011: there is no global "--hard" handling, and an
+    // unknown leading option now fails closed (exit 2) rather than being
+    // forwarded and risking a misidentified subcommand. `git reset --hard`
+    // stays blocked as a destructive subcommand.
+    assert!(matches!(
+        parse_args(&bytes(&["git", "--hard", "reset"])),
+        Err(GuardError::InvalidInvocation(_))
+    ));
+    assert!(matches!(
+        parse_args(&bytes(&["git", "--hard"])),
+        Err(GuardError::InvalidInvocation(_))
+    ));
 }
 
 #[test]

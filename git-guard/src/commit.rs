@@ -17,7 +17,7 @@ pub fn scan_commit_args(tokens: &[&[u8]], state: &mut ArgState) {
     // REQ-GGUARD-030: consume the separate operands of value-taking options
     // (`-m`, `-c`, `--author`, ...) so a message value such as `--amend` is
     // not misread as a policy flag.
-    for token in crate::args::scan_tokens("commit", tokens) {
+    for token in crate::args::scan::scan_tokens("commit", tokens) {
         let s = std::str::from_utf8(token).unwrap_or("");
         if s.starts_with("--amend") {
             state.has_amend = true;
