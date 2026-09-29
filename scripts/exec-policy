@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # exec-policy: exclusive-execution-posture lifecycle.
 #
-# Implements docs/specifications/SPEC-EXEC-POLICY.md section 9:
-#   stage    (root) install/reconcile loader, object, policy, AppArmor
-#            profile, session gate, and unit; default mode is audit.
-#   enable   (root) flip the pinned map to enforce, after the kernel
-#            authority is attached and the readiness token exists.
-#   disable  (root) flip back to audit (interim layers stay staged).
-#   check    (any) read-only state report; OK / AUDIT / NOT ACTIVE /
-#            NOT INSTALLED / DRIFTED.
-#   unstage  (root) remove the staged layers; policy and mode are kept.
+# Implements docs/specifications/SPEC-EXEC-POLICY.md section 9. Every lane
+# has exactly one owner and the posture is fail-closed: the agent session
+# starts only when all owners are verified, and no layer substitutes for
+# another.
+#
+#   stage    (root) install/reconcile the loader, BPF object, AppArmor
+#            profile, session gate, unit and drop-in; leave state unarmed.
+#   enable   (root) verify every owner, run the denial canary, write the
+#            readiness manifest, and set state=armed.
+#   disable  (root) remove the readiness manifest and set state=unarmed;
+#            the agent session then refuses to start.
+#   check    (any) read-only report; NOT INSTALLED / NOT ARMED / OK /
+#            DRIFTED.
+#   unstage  (root) remove the staged artifacts; policy and state remain.
 #
 # Test hooks: WEP_ROOT prefixes absolute paths, WEP_ALLOW_NONROOT skips the
-# euid gate, WEP_SYSTEMCTL / WEP_APPARMOR_PARSER / WEP_AA_COMPLAIN override
-# tool paths, WEP_CANARY runs a denial probe on enable,
-# WEP_LOADER_SRC / WEP_BPF_OBJ_SRC override built artifacts.
+# euid gate, WEP_SYSTEMCTL / WEP_APPARMOR_PARSER override tool paths,
+# WEP_CANARY runs a denial probe on enable, WEP_LOADER_SRC / WEP_BPF_OBJ_SRC
+# override built artifacts.
 
 set -uo pipefail
 
@@ -29,8 +34,9 @@ REPO_ROOT="${WEP_REPO_ROOT:-$(cd "$SELF_DIR/.." 2>"$DEVNULL" && pwd)}"
 
 ETC="$WEP_ROOT/etc/workspace-guard"
 POLICY="$ETC/exec_allowlist.yaml"
-MODE_FILE="$ETC/exec-policy-mode"
+STATE_FILE="$ETC/exec-policy-state"
 READY="$WEP_ROOT/run/workspace-exec-policy/ready"
+BPF_READY="$WEP_ROOT/run/workspace-exec-policy/bpf-ready"
 LOADER="$WEP_ROOT/usr/local/bin/workspace-exec-policyd"
 BPF_OBJ="$WEP_ROOT/usr/local/lib/workspace-guard/exec_policy.bpf.o"
 GATE="$WEP_ROOT/usr/local/bin/workspace-exec-policy-session-gate"
@@ -39,6 +45,8 @@ UNIT="$WEP_ROOT/etc/systemd/system/workspace-exec-policyd.service"
 DROPIN_DIR="$WEP_ROOT/etc/systemd/system/workspace-agent@.service.d"
 DROPIN="$DROPIN_DIR/10-exec-policy.conf"
 LSM_FILE="$WEP_ROOT/sys/kernel/security/lsm"
+LOCKDOWN_FILE="$WEP_ROOT/sys/kernel/security/lockdown"
+YAMA_FILE="$WEP_ROOT/proc/sys/kernel/yama/ptrace_scope"
 
 LOADER_SRC="${WEP_LOADER_SRC:-$REPO_ROOT/target/release/workspace-exec-policyd}"
 BPF_OBJ_SRC="${WEP_BPF_OBJ_SRC:-$REPO_ROOT/target/release/exec_policy.bpf.o}"
@@ -46,7 +54,9 @@ PROFILE_SRC="$REPO_ROOT/config/systemd/workspace-exec-policy.apparmor"
 POLICY_SRC="$REPO_ROOT/config/exec_allowlist.yaml"
 SYSTEMCTL="${WEP_SYSTEMCTL:-systemctl}"
 APPARMOR_PARSER="${WEP_APPARMOR_PARSER:-apparmor_parser}"
-AA_COMPLAIN="${WEP_AA_COMPLAIN:-aa-complain}"
+
+# One owner per lane. Every line must be verified before arming.
+OWNERS="exec=bpf fs=apparmor ptrace=yama kernel=lockdown caps=capability"
 
 have() { command -v "$1" >"$DEVNULL" 2>&1; }
 
@@ -60,11 +70,11 @@ require_root() {
     fi
 }
 
-mode() {
-    if [ -f "$MODE_FILE" ]; then
-        tr -d '[:space:]' < "$MODE_FILE"
+state() {
+    if [ -f "$STATE_FILE" ]; then
+        tr -d '[:space:]' < "$STATE_FILE"
     else
-        echo audit
+        echo unarmed
     fi
 }
 
@@ -91,6 +101,59 @@ missing_authority_artifacts() {
     [ -f "$LOADER_SRC" ] || return 0
     [ -f "$BPF_OBJ_SRC" ] || return 0
     return 1
+}
+
+# --- lane owners -----------------------------------------------------------
+
+owner_exec() {
+    bpf_active || return 1
+    [ -f "$BPF_READY" ] || return 1
+    return 0
+}
+
+owner_fs() {
+    apparmor_enforcing
+}
+
+owner_ptrace() {
+    local v
+    v="$(cat "$YAMA_FILE" 2>"$DEVNULL")"
+    [ -n "$v" ] || return 1
+    [ "$v" -ge 2 ] 2>"$DEVNULL"
+}
+
+owner_kernel() {
+    [ -r "$LOCKDOWN_FILE" ] || return 1
+    grep -q '\[integrity\]\|\[confidentiality\]' "$LOCKDOWN_FILE"
+}
+
+owner_caps() {
+    [ -f "$DROPIN" ] || return 1
+    grep -q 'CapabilityBoundingSet=' "$DROPIN" || return 1
+    grep -q 'NoNewPrivileges=no' "$DROPIN"
+}
+
+owners_ok() {
+    local missing=""
+    owner_exec   || missing="$missing exec=bpf"
+    owner_fs     || missing="$missing fs=apparmor"
+    owner_ptrace || missing="$missing ptrace=yama"
+    owner_kernel || missing="$missing kernel=lockdown"
+    owner_caps   || missing="$missing caps=capability"
+    if [ -n "$missing" ]; then
+        warn "owners not verified:$missing"
+        return 1
+    fi
+    return 0
+}
+
+write_manifest() {
+    mkdir -p "$(dirname "$READY")"
+    : > "$READY"
+    for owner in $OWNERS; do
+        printf '%s\n' "$owner" >> "$READY"
+    done
+    chmod 0644 "$READY"
 }
 
 seed_help() {
@@ -122,9 +185,9 @@ stage() {
     install_one "$REPO_ROOT/config/systemd/workspace-exec-policyd.service" "$UNIT" 0644
     install_one "$REPO_ROOT/config/systemd/workspace-exec-policy.conf" "$DROPIN" 0644
     mkdir -p "$ETC"
-    if [ ! -f "$MODE_FILE" ]; then
-        printf 'audit\n' > "$MODE_FILE"
-        chmod 0644 "$MODE_FILE"
+    if [ ! -f "$STATE_FILE" ]; then
+        printf 'unarmed\n' > "$STATE_FILE"
+        chmod 0644 "$STATE_FILE"
     fi
 
     if [ -f "$POLICY_SRC" ]; then
@@ -135,7 +198,7 @@ stage() {
     fi
 
     if missing_authority_artifacts; then
-        warn "authority artifacts not built (run: make build-exec-policy); interim layers staged only"
+        warn "authority artifacts not built (run: make build-exec-policy); posture stays unarmed"
     else
         install_one "$LOADER_SRC" "$LOADER" 0755
         install_one "$BPF_OBJ_SRC" "$BPF_OBJ" 0644
@@ -144,16 +207,17 @@ stage() {
 
     if have "$APPARMOR_PARSER" && [ -f "$APPARMOR" ]; then
         "$APPARMOR_PARSER" -r "$APPARMOR" >"$DEVNULL" 2>&1 \
-            || warn "AppArmor profile reload failed (profile staged in complain)"
+            || warn "AppArmor profile load failed"
     fi
     systemctl_do daemon-reload
-    note "staged (mode=$(mode)); enable with: sudo make enable-exec-policy CONFIRM=1"
+    note "staged (state=$(state)); the agent session stays closed until armed"
+    note "arm with: sudo make enable-exec-policy CONFIRM=1"
 }
 
 enable() {
     require_root enable-exec-policy
     if [ "${CONFIRM:-}" != "1" ]; then
-        echo "ERROR: refusing to enforce without CONFIRM=1" >&2
+        echo "ERROR: refusing to arm without CONFIRM=1" >&2
         echo "  review the policy, then: sudo make enable-exec-policy CONFIRM=1" >&2
         exit 2
     fi
@@ -161,21 +225,16 @@ enable() {
         echo "ERROR: not staged (run: sudo make install-exec-policy)" >&2
         exit 1
     fi
-    if ! bpf_active; then
-        echo "ERROR: bpf LSM not active; add bpf to the kernel lsm= list and restart the host once:" >&2
-        echo "  lsm=landlock,lockdown,yama,integrity,apparmor,bpf" >&2
-        exit 1
-    fi
-    if [ ! -f "$READY" ]; then
-        echo "ERROR: loader readiness token missing ($READY); authority is not attached" >&2
-        echo "  start workspace-exec-policyd and re-run" >&2
+    if ! owners_ok; then
+        echo "ERROR: refusing to arm; every layer owner must be verified" >&2
+        echo "  see SPEC-EXEC-POLICY section 3 for the owner of each lane" >&2
         exit 1
     fi
 
     if [ -n "${WEP_CANARY:-}" ]; then
         if ! "$WEP_CANARY" >"$DEVNULL" 2>&1; then
-            echo "ERROR: denial canary failed; keeping mode=audit" >&2
-            printf 'audit\n' > "$MODE_FILE"
+            echo "ERROR: denial canary failed; posture stays unarmed" >&2
+            printf 'unarmed\n' > "$STATE_FILE"
             exit 1
         fi
         note "denial canary passed"
@@ -183,33 +242,27 @@ enable() {
         warn "WEP_CANARY unset: skipping the denial canary (kernel phase only)"
     fi
 
-    printf 'enforce\n' > "$MODE_FILE"
-    if have "$AA_COMPLAIN" && [ -f "$APPARMOR" ]; then
-        "$AA_COMPLAIN" "$APPARMOR" >"$DEVNULL" 2>&1 \
-            || warn "could not set AppArmor to complain mode"
-    fi
+    write_manifest
+    printf 'armed\n' > "$STATE_FILE"
     systemctl_do restart workspace-exec-policyd.service
-    note "enforcing (eBPF authority + Landlock; AppArmor complain)"
+    note "armed (all layer owners verified)"
 }
 
 disable() {
     require_root disable-exec-policy
-    printf 'audit\n' > "$MODE_FILE"
-    if have "$AA_COMPLAIN" && [ -f "$APPARMOR" ]; then
-        "$AA_COMPLAIN" "$APPARMOR" >"$DEVNULL" 2>&1 \
-            || warn "could not set AppArmor to complain mode"
-    fi
-    note "mode=audit (interim layers remain staged)"
+    rm -f "$READY"
+    printf 'unarmed\n' > "$STATE_FILE"
+    note "unarmed: the agent session refuses to start until re-armed"
 }
 
 unstage() {
     require_root uninstall-exec-policy
     systemctl_do stop workspace-exec-policyd.service
     systemctl_do disable workspace-exec-policyd.service
-    rm -f "$LOADER" "$BPF_OBJ" "$GATE" "$APPARMOR" "$UNIT" "$DROPIN"
+    rm -f "$LOADER" "$BPF_OBJ" "$GATE" "$APPARMOR" "$UNIT" "$DROPIN" "$READY" "$BPF_READY"
     rmdir "$DROPIN_DIR" >"$DEVNULL" 2>&1
     systemctl_do daemon-reload
-    note "unstaged (policy and mode preserved)"
+    note "unstaged (policy and state preserved)"
 }
 
 check() {
@@ -218,32 +271,17 @@ check() {
         return 2
     fi
     if [ ! -f "$POLICY" ]; then
-        warn "allowlist policy missing ($POLICY); posture cannot be enabled"
+        warn "allowlist policy missing ($POLICY); posture cannot be armed"
     fi
-    local m
-    m="$(mode)"
-    if bpf_active; then
-        if [ "$m" = enforce ]; then
-            if apparmor_enforcing; then
-                note "DRIFTED (bpf active, mode=enforce, AppArmor still enforcing)"
-                return 1
-            fi
-            note "OK (enforcing)"
-            return 0
-        fi
-        note "AUDIT (bpf active, authority attached, not enforcing)"
+    if [ "$(state)" != "armed" ]; then
+        note "NOT ARMED"
         return 0
     fi
-    if [ "$m" = enforce ]; then
-        note "DRIFTED (mode=enforce but bpf LSM inactive)"
+    if [ ! -f "$READY" ] || ! owners_ok; then
+        note "DRIFTED (armed but a layer owner is not verified)"
         return 1
     fi
-    if apparmor_enforcing; then
-        warn "bpf LSM inactive; interim AppArmor authority is enforcing"
-        note "OK (interim)"
-        return 0
-    fi
-    note "NOT ACTIVE (bpf LSM off; layers staged in complain)"
+    note "OK (armed)"
     return 0
 }
 

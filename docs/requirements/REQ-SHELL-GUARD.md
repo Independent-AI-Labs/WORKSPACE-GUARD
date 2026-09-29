@@ -638,16 +638,16 @@ handled by `make install-shell-guard`.
 
 - **REQ-SHG-900**: Every rule id in `config/shell_guard_policy.yaml`
   shall have exactly one disposition in
-  [SPEC-EXEC-POLICY §6](../specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix):
-  `kernel-authoritative`, `hybrid`, `content-policy`, or `session-layer`.
-  A rule without a disposition fails the REQ-EXEC-151 gate.
+  [SPEC-EXEC-POLICY §7](../specifications/SPEC-EXEC-POLICY.md#7-rule-disposition-matrix):
+  `exec`, `fs`, `effect`, `kcode`, `caps`, `content`, `hybrid`, or
+  `session`. A rule without a disposition fails the REQ-EXEC-151 gate.
 
-- **REQ-SHG-901**: A rule dispositioned `kernel-authoritative` shall be
-  removed from the policy file only after the corresponding kernel hook
-  is proven to deny the effect for path, renamed-copy, and syscall forms,
-  and an audit record is produced (REQ-EXEC-152).
+- **REQ-SHG-901**: A rule owned by a kernel lane shall be removed from the
+  policy file only after the owning lane is proven to deny the effect for
+  path, renamed-copy, and syscall forms, and an audit record is produced
+  (REQ-EXEC-152).
 
-- **REQ-SHG-902**: Rules dispositioned `content-policy` (the output
+- **REQ-SHG-902**: Rules dispositioned `content` (the output
   suppression family (REQ-SHG-308/309/310), the inline-code contract
   (`inline-shell`, `uv-inline-interp`, `inline-code-channel`)) shall
   remain in the guard. They have no kernel-observable effect, or depend
@@ -656,13 +656,13 @@ handled by `make install-shell-guard`.
 
 - **REQ-SHG-903**: Environment sanitisation (§5), the `AT_SECURE`
   capability gate (§2), and untrusted-script memfd staging (§4.1) are
-  `session-layer`/content behavior; they remain in the guard and are not
-  the kernel authority.
+  `session` behavior; they remain in the guard and are not a kernel lane
+  owner.
 
-- **REQ-SHG-904**: While a `kernel-authoritative` rule is still present,
-  it remains enabled as defense-in-depth. The two layers shall not
-  conflict: the kernel deny is authoritative, and the textual block
-  provides the explanatory report.
+- **REQ-SHG-904**: While a kernel-owned rule is still present, it remains
+  enabled as defense in depth. The two layers shall not conflict: the
+  kernel lane deny is authoritative, and the textual block provides the
+  explanatory report.
 
 ---
 
@@ -677,8 +677,8 @@ handled by `make install-shell-guard`.
 - **REQ-SHG-NG-02**: The guard does NOT attempt to block destruction
   performed through interpreters (`python3 -c 'os.kill(...)'`,
   `perl -e ...`). That surface is closed by the exclusive execution
-  posture (`bprm_check` denies non-allowlisted interpreter hashes) and
-  the effect hooks of REQ-EXEC-130-136; until that authority is attached,
+  posture (the exec lane denies non-allowlisted interpreter hashes) and
+  the effects lane of REQ-EXEC-130-136; until that authority is attached,
   it remains bounded by the binary lock and auditd layers.
 
 - **REQ-SHG-NG-03**: The guard does NOT WRAP shells other than bash

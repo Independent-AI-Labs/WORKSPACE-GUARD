@@ -33,10 +33,10 @@ The threat model and CVE catalog that these requirements defend against are in
 document is `REQ-SBX-*`, launched explicitly. It is distinct from the
 **always-on, kernel-enforced exclusive execution posture** of
 [REQ-EXEC-POLICY](REQ-EXEC-POLICY.md): deny-by-default execution via eBPF LSM
-`security_bprm_check`, with AppArmor as the interim authority and Landlock as
-the session backstop. The sandbox profile's Landlock/seccomp rules
-(REQ-SBX-110-116) are complementary to, and shall not weaken, the posture of
-REQ-EXEC-120-123.
+`bprm_check_security`, with AppArmor owning the filesystem and effects lanes,
+YAMA the ptrace lane, and Lockdown the kernel-code lane. The sandbox profile's
+Landlock/seccomp rules (REQ-SBX-110-116) are complementary to, and shall not
+weaken, the posture of REQ-EXEC-120-124.
 
 ---
 

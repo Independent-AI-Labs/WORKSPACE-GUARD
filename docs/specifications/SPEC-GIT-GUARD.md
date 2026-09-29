@@ -177,8 +177,8 @@ global-option arity table:
 2. Modifier options without operands are consumed as modifiers.
 3. Value-taking options consume their attached or following operand before
    scanning continues. This includes repeated `-C <path>`, `-c name=value`,
-   `--git-dir`, `--work-tree`, `--namespace`, and `--config-env` in every form
-   accepted by Git.
+   `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, and the hidden
+   `--shallow-file <path>` in every form accepted by Git.
 4. `-C` changes directory. Only lowercase `-c` and `--config-env` carry config
    keys for dangerous-key validation.
 5. The first remaining positional token is the subcommand.

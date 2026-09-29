@@ -89,7 +89,7 @@ gaps that the textual scanner cannot close. They are re-assigned to the
 always-on exclusive execution posture: the kernel authority of
 [SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md) (`bprm_check`
 path+content-hash allowlist, plus `task_kill`/`file_open`/etc.). The
-per-rule mapping is [SPEC-EXEC-POLICY §6](specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix);
+per-rule mapping is [SPEC-EXEC-POLICY §7](specifications/SPEC-EXEC-POLICY.md#7-rule-disposition-matrix);
 the findings are [AUDIT-EXCLUSIVE-POSTURE-2026-09](AUDIT-EXCLUSIVE-POSTURE-2026-09.md).
 Until the authority is attached these remain OPEN/PARTIAL as tabled.
 

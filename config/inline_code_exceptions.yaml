@@ -1,0 +1,31 @@
+# Project inline-code exemptions (SPEC-INLINE-CODE).
+#
+# Each entry suppresses one exact (rule, path) finding. The checker resolves
+# exemptions by exact repository-relative path and rule identity, never by
+# glob or directory (ci/check_inline_code.py:230). Authored under
+# config-staging/; the operator moves it into config/ as a single command.
+#
+# Every entry is a reviewed false positive: the file must quote the pattern
+# as policy data, documentation, or a user-facing/error string, not execute it.
+exemptions:
+  # The shell-guard policy matrix documents each blocked pattern verbatim.
+  - rule: interp-shell-inline
+    path: config/shell_guard_policy_matrix.yaml
+  - rule: interp-python-inline
+    path: config/shell_guard_policy_matrix.yaml
+  - rule: interp-perl-inline
+    path: config/shell_guard_policy_matrix.yaml
+  - rule: interp-node-inline
+    path: config/shell_guard_policy_matrix.yaml
+
+  # Documentation example of an inline interpreter payload.
+  - rule: interp-python-inline
+    path: docs/specifications/SPEC-SHELL-GUARD.md
+
+  # Display string for the shell guard's block report, not executed.
+  - rule: interp-shell-inline
+    path: src/shell_guard/main.rs
+
+  # Error message text ("cannot insert into ...") matched as a SQL statement.
+  - rule: sql-insert-into
+    path: src/yaml_edit/splice.rs

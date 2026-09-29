@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 25-exec-dispositions.bats: REQ-EXEC-150/151 disposition gate. Every rule in
 # config/shell_guard_policy.yaml must have a row in the SPEC-EXEC-POLICY
-# section 6 matrix, so a rule cannot be added without a disposition.
+# section 7 matrix, so a rule cannot be added without a disposition.
 
 load lib/harness
 

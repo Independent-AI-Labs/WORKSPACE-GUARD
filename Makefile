@@ -193,19 +193,19 @@ build-exec-policy: ## Build the exec-policy loader + BPF object (REQ-EXEC-110 se
 	echo "build-exec-policy: not yet implemented (eBPF loader crate pending, REQ-EXEC-110 series)" >&2; \
 	exit 1
 
-install-exec-policy: ## Stage exec policy: loader, profile, gate, unit (ROOT)
+install-exec-policy: ## Stage exec policy: loader, profile, gate, unit; stays unarmed (ROOT)
 	"$(SCRIPT_BASH)" scripts/exec-policy stage
 
-enable-exec-policy: ## Enforce exec policy (ROOT; requires CONFIRM=1)
+enable-exec-policy: ## Arm exec policy after verifying every lane owner (ROOT; requires CONFIRM=1)
 	CONFIRM="$(CONFIRM)" "$(SCRIPT_BASH)" scripts/exec-policy enable
 
-disable-exec-policy: ## Return exec policy to audit mode (ROOT)
+disable-exec-policy: ## Return exec policy to unarmed; the agent session then refuses to start (ROOT)
 	"$(SCRIPT_BASH)" scripts/exec-policy disable
 
 check-exec-policy: ## Read-only state of the exclusive execution posture
 	"$(SCRIPT_BASH)" scripts/exec-policy check
 
-uninstall-exec-policy: ## Remove staged exec-policy layers; keep policy/mode (ROOT)
+uninstall-exec-policy: ## Remove staged exec-policy layers; keep policy/state (ROOT)
 	"$(SCRIPT_BASH)" scripts/exec-policy unstage
 
 .PHONY: lint

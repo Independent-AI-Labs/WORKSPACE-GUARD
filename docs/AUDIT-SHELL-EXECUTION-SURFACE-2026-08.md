@@ -376,7 +376,7 @@ authority is moved into the kernel: an eBPF LSM program on
 interim authority, and Landlock as the session backstop.
 
 - Design and the **rule-by-rule disposition matrix**:
-  [SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix).
+  [SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md#7-rule-disposition-matrix).
 - Requirements: [REQ-EXEC-POLICY](requirements/REQ-EXEC-POLICY.md).
 - New/continued findings (unguarded Make recipes; text-interpolation
   self-block; `/bin/sh` target; renamed shells; absent kernel authority;

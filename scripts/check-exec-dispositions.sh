@@ -2,8 +2,8 @@
 # REQ-EXEC-150/151 rule-disposition gate.
 #
 # Every rule in the shell-guard policy must have exactly one disposition in
-# the rule-disposition matrix (SPEC-EXEC-POLICY section 6), so a rule cannot
-# be added without a kernel/content/session classification. Fails closed when
+# the rule-disposition matrix (SPEC-EXEC-POLICY section 7), so a rule cannot
+# be added without a single-owner classification. Fails closed when
 # either input file is missing or a rule has no row.
 #
 # Usage: scripts/check-exec-dispositions.sh [repo-root]

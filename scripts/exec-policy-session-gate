@@ -1,23 +1,33 @@
 #!/usr/bin/env bash
-# exec-policy-session-gate: conditional fail-closed gate for the confined
-# agent session (REQ-EXEC-103, REQ-EXEC-116).
+# exec-policy-session-gate: fail-closed gate for the confined agent session
+# (REQ-EXEC-103, REQ-EXEC-116).
 #
-# Attached as an ExecCondition= drop-in on the agent session unit. It must
-# not block ordinary sessions while the posture is staged but not enforcing:
-#   mode != enforce        -> exit 0 (session may start)
-#   mode == enforce, ready -> exit 0 (authority attached, session may start)
-#   mode == enforce, no readiness token -> exit 1 (session refuses to start)
+# Attached as an ExecCondition= drop-in on the agent session unit. The
+# session starts only when the posture is armed and the readiness manifest
+# lists every layer owner as active. If any owner is missing the session
+# refuses to start; no layer substitutes for another.
+#
+#   state != armed                          -> exit 1
+#   state == armed, manifest complete        -> exit 0
+#   state == armed, manifest absent/partial  -> exit 1
 #
 # Test hook: WEP_ROOT prefixes absolute paths.
 
 set -u
 
 WEP_ROOT="${WEP_ROOT:-}"
-MODE_FILE="$WEP_ROOT/etc/workspace-guard/exec-policy-mode"
+STATE_FILE="$WEP_ROOT/etc/workspace-guard/exec-policy-state"
 READY="$WEP_ROOT/run/workspace-exec-policy/ready"
 
-[ -f "$MODE_FILE" ] || exit 0
-mode="$(tr -d '[:space:]' < "$MODE_FILE")"
-[ "$mode" = "enforce" ] || exit 0
+# One owner per lane (SPEC-EXEC-POLICY section 3). Every line must be
+# present in the readiness manifest for the session to start.
+OWNERS="exec=bpf fs=apparmor ptrace=yama kernel=lockdown caps=capability"
+
+[ -f "$STATE_FILE" ] || exit 1
+state="$(tr -d '[:space:]' < "$STATE_FILE")"
+[ "$state" = "armed" ] || exit 1
 [ -f "$READY" ] || exit 1
+for owner in $OWNERS; do
+    grep -qxF "$owner" "$READY" || exit 1
+done
 exit 0

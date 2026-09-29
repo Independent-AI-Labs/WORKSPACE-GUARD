@@ -118,6 +118,40 @@ fn value_taking_globals_do_not_swallow_the_subcommand() {
 }
 
 #[test]
+fn shallow_file_leading_global_identifies_index_pack() {
+    // Git's fetch-pack runs `git --shallow-file <file> index-pack ...` for a
+    // shallow fetch. `--shallow-file` takes the following token as its
+    // operand, so `index-pack` must still be discovered (no false
+    // "unknown leading option" rejection that breaks every shallow clone).
+    assert_eq!(
+        sub(&[
+            "git",
+            "--shallow-file",
+            "/tmp/s.lock",
+            "index-pack",
+            "--stdin",
+            "--fix-thin",
+        ])
+        .as_deref(),
+        Some("index-pack")
+    );
+    assert_eq!(
+        sub(&["git", "--shallow-file=/tmp/s.lock", "index-pack", "--stdin"]).as_deref(),
+        Some("index-pack")
+    );
+}
+
+#[test]
+fn shallow_file_operand_is_not_misread_as_subcommand() {
+    // The consumed operand must never itself become the subcommand, and an
+    // unknown option after it still fails closed.
+    assert!(matches!(
+        parse_args(&bytes(&["git", "--shallow-file", "reset", "--hard"])),
+        Err(GuardError::InvalidInvocation(_))
+    ));
+}
+
+#[test]
 fn repeated_and_attached_c_identify_the_subcommand() {
     assert_eq!(
         sub(&["git", "-C", "/a", "-C", "/b", "status"]).as_deref(),

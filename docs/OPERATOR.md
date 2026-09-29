@@ -114,31 +114,36 @@ The host is moving to a deny-by-default, kernel-enforced execution posture
 ([SPEC-EXEC-POLICY](specifications/SPEC-EXEC-POLICY.md),
 [REQ-EXEC-POLICY](requirements/REQ-EXEC-POLICY.md)). Operator steps:
 
-- Add `bpf` to the kernel LSM list and reboot once:
-  `lsm=landlock,lockdown,yama,integrity,apparmor,bpf`.
+Each concern has one owner and the session runs only when every owner is
+verified; there is no state in which it runs unenforced. Operator steps:
+
+- One boot change enables two lanes: append `bpf` to the kernel LSM list and
+  add `lockdown=integrity`, preserving the existing entries in order, then
+  reboot once.
+- Raise YAMA to the ptrace lane: `ptrace_scope=2`.
 - Seed the reviewed allowlist once through the secure editor into
   `config/exec_allowlist.yaml` (`yaml-bootstrap` for `version` and `deny`,
   then `yaml-add` per allowlisted binary; `install-exec-policy` prints the
   exact commands and the reviewed seed set).
 - `sudo make install-exec-policy` **stages** the loader, program, pinned map
-  seed, AppArmor profile, session gate, unit, and drop-in. It never enables
-  enforcement: the mode file is written as `audit`, and if the loader/BPF
-  object or the policy is absent it warns and stages the interim layers only.
+  seed, AppArmor profile, session gate, unit, and drop-in, and leaves state
+  `unarmed`. If the loader/BPF object or the policy is absent it warns and
+  leaves the posture unarmed.
 - `make check-exec-policy` is read-only: `NOT INSTALLED` (exit 2),
-  `NOT ACTIVE`/`AUDIT`/interim (exit 0 with a warning), `OK` (exit 0), or
-  `DRIFTED` (exit 1).
-- `sudo make enable-exec-policy CONFIRM=1` is the **only** enforcement flip.
-  It refuses without `CONFIRM=1`, requires the staged layers, the seeded
-  policy, an active LSM `bpf` hook, and the loader readiness token, runs a
-  denial canary, and reverts to `audit` on canary failure. It moves the
-  AppArmor layer to `complain`; `sudo make disable-exec-policy` returns to
-  `audit`.
-- `guard-up`/`guard-refresh` stage the posture (warn-only, never enable);
+  `NOT ARMED` (exit 0 with a warning), `OK` (exit 0), or `DRIFTED` (exit 1).
+- `sudo make enable-exec-policy CONFIRM=1` is the **only** arming step. It
+  refuses without `CONFIRM=1`, requires the staged layers, the seeded policy,
+  and every lane owner verified (exec `bpf`, fs `apparmor`, ptrace `yama`,
+  kernel `lockdown`, caps `capability`), runs a denial canary, and stays
+  unarmed on canary failure. Arming writes the readiness manifest; `sudo make
+  disable-exec-policy` removes it and returns to `unarmed`.
+- While unarmed the agent session refuses to start (fail-closed); it never
+  runs unenforced.
+- `guard-up`/`guard-refresh` stage the posture (warn-only, never arm);
   `guard-check` reports it; `guard-down` unstages it.
 - Root remains break-glass and unconfined. If an over-restrictive policy
   wedges a session, recover from an unconfined root shell: `sudo make
-  disable-exec-policy`, stop the loader, and set the AppArmor profile to
-  complain mode.
+  disable-exec-policy` and stop the loader.
 
 Use `yaml-bootstrap` once to create a missing top-level scalar key; it
 rejects keys that already exist. Use `yaml-set` for subsequent updates.

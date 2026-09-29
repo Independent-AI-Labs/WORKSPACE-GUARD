@@ -952,33 +952,36 @@ of agent-side config. This guard is not the execution authority.
 
 ## 18. Rule Disposition
 
-Every rule in `config/shell_guard_policy.yaml` has a disposition. The
-normative table with the per-rule kernel hook is
-[SPEC-EXEC-POLICY §6](SPEC-EXEC-POLICY.md#6-rule-disposition-matrix); the
-summary is below. Dispositions: **KA** kernel-authoritative (retire from this
-policy after the kernel proof), **HY** hybrid (kernel enforces the binary; the
-text rule covers the argv/exception case), **CP** content-policy (stays here),
-**SL** session-layer (environment/privilege, not a pattern).
+Every rule in `config/shell_guard_policy.yaml` has a disposition naming its
+single owner. The normative table is
+[SPEC-EXEC-POLICY §7](SPEC-EXEC-POLICY.md#7-rule-disposition-matrix); the
+summary is below. Dispositions: **EX** exec owner (the eBPF LSM allowlist
+denies the binary by content), **FS** filesystem owner (AppArmor), **EF**
+effects owner (AppArmor: mount, signal, socket family), **KC** kernel-code
+owner (Lockdown), **CA** capability owner (capability LSM + bounding set),
+**HY** hybrid (exec denies the binary; the text rule covers argv), **CP**
+content (no kernel-observable effect; stays here), **SL** session
+(environment/privilege, not a pattern).
 
-| Rule id | Disposition | Kernel hook / note |
+| Rule id | Disposition | Owner enforcement / note |
 | --- | --- | --- |
-| `power-verb` | KA | `bprm_check` + polkit |
-| `process-by-name` | KA | `bprm_check` |
-| `power-command` | KA | `bprm_check` |
-| `fs-destroy` | KA | `bprm_check` + `file_open` |
-| `alt-shell` | KA | `bprm_check` (hash defeats rename/copy) |
-| `busybox-shell` | HY | `bprm_check` denies `busybox`; `sh` arg is argv |
-| `kill-mass` | KA | `task_kill` |
-| `chattr-strip` | KA | no `CAP_LINUX_IMMUTABLE` + `inode_setxattr` |
-| `rm-rootfs` | HY | filesystem permission + `inode_permission` |
-| `dd-device` | KA | `file_open` on device inode |
-| `mount-protected` | KA | `sb_mount`/`sb_umount` |
-| `swap-teardown` | KA | `bprm_check` |
+| `power-verb` | EX | exec deny by hash + polkit |
+| `process-by-name` | EX | exec deny by hash |
+| `power-command` | EX | exec deny by hash; kexec also KC |
+| `fs-destroy` | EX | exec deny by hash |
+| `alt-shell` | EX | exec allowlist (hash defeats rename/copy) |
+| `busybox-shell` | HY | exec denies `busybox`; `sh` arg is argv |
+| `kill-mass` | EF | AppArmor denies signals outside the tree |
+| `chattr-strip` | FS | write deny on policy; no `CAP_LINUX_IMMUTABLE` |
+| `rm-rootfs` | CP | filesystem permission; behavioral contract |
+| `dd-device` | FS | AppArmor denies device writes |
+| `mount-protected` | EF | AppArmor denies mount |
+| `swap-teardown` | EX | exec deny by hash |
 | `suppress-pipe` | CP | none (text/UX contract) |
 | `suppress-null` | CP | none (text/UX contract) |
 | `suppress-swallow` | CP | none (text/UX contract) |
-| `alt-interp` | KA | `bprm_check` denies interpreter hashes |
-| `podman-command` | KA | `bprm_check` + namespaces/mounts |
+| `alt-interp` | EX | exec denies non-allowlisted interpreter hashes |
+| `podman-command` | EX | exec deny by hash |
 | `inline-shell` | CP | `-c` arg not readable at `bprm_check` |
 | `uv-inline-interp` | CP | argv-dependent |
 | `inline-code-channel` | CP | shell grammar, not a syscall |
@@ -986,5 +989,5 @@ text rule covers the argv/exception case), **CP** content-policy (stays here),
 | `AT_SECURE` gate (§3.2) | SL | privilege model |
 | untrusted-script memfd staging (§9.1) | SL | session/wrapper |
 
-A new rule added to the policy file without a disposition row here and in
-SPEC-EXEC-POLICY §6 fails the REQ-EXEC-151 gate.
+A new rule added to the policy file without a disposition row in
+SPEC-EXEC-POLICY §7 fails the REQ-EXEC-151 gate.

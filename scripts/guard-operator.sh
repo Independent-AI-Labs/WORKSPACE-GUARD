@@ -110,7 +110,7 @@ _exec_policy_available() {
 
 _exec_policy_stage() {
     _exec_policy_available || return 0
-    echo "==> guard-up: staging exec policy (audit mode; enforcement stays manual)"
+    echo "==> guard-up: staging exec policy (stays unarmed; arming stays manual)"
     local stage_status=0
     bash "$REPO_ROOT/scripts/exec-policy" stage || stage_status=$?
     if [[ "$stage_status" -ne 0 ]]; then

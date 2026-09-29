@@ -26,7 +26,7 @@ The proper solution is not more text rules. It is an **eBPF LSM** program on
 content hash**, with AppArmor as the no-reboot interim authority and Landlock as
 the session backstop. The rule-by-rule treatment of the existing shell-guard
 policy is normative in
-[SPEC-EXEC-POLICY §6](specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix);
+[SPEC-EXEC-POLICY §7](specifications/SPEC-EXEC-POLICY.md#7-rule-disposition-matrix);
 the requirements are [REQ-EXEC-POLICY](requirements/REQ-EXEC-POLICY.md).
 
 ## Host Enforcement Capability (evidence)
@@ -131,7 +131,7 @@ Impact: the ledger cannot show which rules are security boundaries and which
 are behavior policy, so retirement is unsafe and duplication persists.
 
 Required direction: the disposition matrix in
-[SPEC-EXEC-POLICY §6](specifications/SPEC-EXEC-POLICY.md#6-rule-disposition-matrix)
+[SPEC-EXEC-POLICY §7](specifications/SPEC-EXEC-POLICY.md#7-rule-disposition-matrix)
 assigns every rule a disposition; a gate fails on any undisposed rule
 ([REQ-EXEC-150-151](requirements/REQ-EXEC-POLICY.md)).
 

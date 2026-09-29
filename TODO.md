@@ -1689,13 +1689,17 @@ Requirements [REQ-EXEC-POLICY](docs/requirements/REQ-EXEC-POLICY.md); design
 kernel work before REQ-YE-900 lands (policy files are edited only through the
 secure editor).
 
+Design law: one concern, one owner; each layer decides only its own concern
+and permits every other. If any owner is absent the agent session does not
+start. There is no state in which the session runs unenforced.
+
 ### Policy and provenance
 
 - [ ] Add `config/exec_allowlist.yaml` (+ `.schema.yaml`) with `path`, `sha256`,
   `allow_uid`, `note`; validate the schema and hashes at build time
   (REQ-EXEC-140-142).
 - [x] Add the build-time rule-disposition gate: every rule id in
-  `config/shell_guard_policy.yaml` must appear in SPEC-EXEC-POLICY §6
+  `config/shell_guard_policy.yaml` must appear in SPEC-EXEC-POLICY §7
   (REQ-EXEC-150-151), with a negative test (REQ-EXEC-184).
   `scripts/check-exec-dispositions.sh`, wired into `make check` and covered by
   `tests/shell/25-exec-dispositions.bats`.
@@ -1703,10 +1707,9 @@ secure editor).
 ### Provisioning (staged, no reboot)
 
 - [x] Lifecycle state machine `scripts/exec-policy`
-  (`stage|enable|disable|check|unstage`): stage installs every layer in
-  `audit` mode and never enables; `enable` requires `CONFIRM=1`, the seeded
-  policy, an active LSM `bpf` hook, the readiness token, and a passing canary
-  (REQ-EXEC-170-172, REQ-EXEC-175).
+  (`stage|enable|disable|check|unstage`): stage installs every lane and leaves
+  state `unarmed`; `enable` requires `CONFIRM=1`, the seeded policy, every
+  owner verified, and a passing canary (REQ-EXEC-170-172, REQ-EXEC-175).
 - [x] Make targets `build`/`install`/`enable`/`disable`/`check`/`uninstall
   -exec-policy`; `build-exec-policy` is a clear stub until the crate lands
   (REQ-EXEC-170).
@@ -1716,57 +1719,60 @@ secure editor).
   `config/systemd/workspace-exec-policyd.service`, drop-in
   `config/systemd/workspace-exec-policy.conf` (REQ-EXEC-120, REQ-EXEC-177).
 - [x] `scripts/guard-operator.sh` stages on up/refresh (warn-only), reports on
-  check, unstages on down; enforcement stays the explicit target
+  check, unstages on down; arming stays the explicit target
   (REQ-EXEC-176).
 - [x] `tests/shell/26-exec-policy-provisioning.bats`: state machine + session
   gate against a `WEP_ROOT` fixture (REQ-EXEC-183).
 
-### Kernel authority (eBPF LSM)
+### Kernel authority (eBPF LSM, exec lane)
 
 - [ ] Add the `exec-policy` Rust crate: loader and BPF object (aya/libbpf) for
-  `bprm_check_security` with a pinned allowlist map (REQ-EXEC-110-118).
+  `bprm_check_security` with a pinned allowlist map (REQ-EXEC-110-119).
 - [ ] Hash-token maintenance (`inode_*` companion) and path+hash allow logic
   (REQ-EXEC-111); deny anonymous/`memfd` exec (REQ-EXEC-112).
 - [ ] Loader readiness token + session `ExecCondition` (fail closed)
   (REQ-EXEC-103, REQ-EXEC-116).
-- [ ] Effect hooks: `task_kill`, `sb_mount`/`sb_umount`, `file_open`/
-  `inode_permission`, `inode_setxattr`, `kernel_read_file`/
-  `kernel_module_request`, `socket_create`/`socket_connect`
-  (REQ-EXEC-130-136).
+- [ ] Decide only for the agent session (cgroup + ancestry), allow every other
+  task (REQ-EXEC-119).
 
-### Fallback layers
+### Single-owner lanes
 
-- [ ] AppArmor enforce profile bound to the agent session (REQ-EXEC-120):
-  scaffold staged in complain; needs operator review before enforce.
-- [ ] Session wrapper applying Landlock `EXECUTE` deny + `no_new_privs`
+- [ ] AppArmor enforce profile bound to the agent session (REQ-EXEC-120): owns
+  the filesystem and effects lanes, grants `/** ix`, `ptrace,`, `capability,`;
+  scaffold staged with an operator review before loading.
+- [ ] YAMA `ptrace_scope=2` (ptrace lane), Lockdown `integrity` (kernel-code
+  lane), capability LSM + agent unit bounding set (capability lane)
   (REQ-EXEC-121).
-- [ ] Install/reconcile wires all three layers; drift check covers them
-  (REQ-EXEC-122-123).
+- [ ] Install/reconcile wires every lane; one drift check covers them
+  (REQ-EXEC-122).
+- [ ] Record that Landlock, IMA and EVM hold no lane, with the rationale
+  (REQ-EXEC-123).
+- [ ] Readiness manifest lists every owner; session gate requires all of them
+  (REQ-EXEC-124).
 
 ### Deployment and recovery
 
 - [ ] `make build-exec-policy` (stub until the crate lands);
   `install-exec-policy` / `check-exec-policy` staged (REQ-EXEC-170-172).
-- [ ] Document the operator boot-param change
-  `lsm=landlock,lockdown,yama,integrity,apparmor,bpf` and reboot
+- [ ] Document the operator boot-param change (append `bpf` to the existing
+  `lsm=` list and add `lockdown=integrity`) and the reboot
   (REQ-EXEC-115, REQ-EXEC-174).
-- [ ] Recovery runbook: unconfined root stops the loader / complain mode
+- [ ] Recovery runbook: unconfined root stops the loader; the agent cannot
   (REQ-EXEC-173).
-- [ ] Audit: denial events + loader/map/hook transitions (REQ-EXEC-160-162).
+- [ ] Audit: denial events + loader/map/link transitions (REQ-EXEC-160-162).
 
 ### Verification
 
 - [ ] Kernel matrix in a real guest: allow/deny, renamed copy, `dash`/`zsh`,
-  interpreters, `memfd`, `task_kill`, device write, module load, `AF_ALG`
-  (REQ-EXEC-180).
+  interpreters, `memfd`, signal outside tree, mount, device write, module load,
+  kexec, ptrace, `AF_ALG` (REQ-EXEC-180).
 - [ ] Fail-closed session test and no-agent-writable-policy test
   (REQ-EXEC-181-182).
 - [ ] Rust + shell suites for policy parse, hash mismatch, readiness gate,
-  install/reconcile/check, fallbacks (REQ-EXEC-183).
+  install/reconcile/check (REQ-EXEC-183).
 
 ### Rule retirement
 
-- [ ] After each `kernel-authoritative` proof, remove the corresponding rule
-  from `config/shell_guard_policy.yaml` (secure editor) and its matrix cases,
-  then re-run the gates (REQ-EXEC-152, REQ-SHG-901). Keep all `content-policy`
-  rules.
+- [ ] After each owner proof, remove the corresponding rule from
+  `config/shell_guard_policy.yaml` (secure editor) and its matrix cases, then
+  re-run the gates (REQ-EXEC-152, REQ-SHG-901). Keep all `content` rules.

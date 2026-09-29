@@ -1,362 +1,333 @@
-# Specification: Exclusive Execution Policy (eBPF LSM Authority)
+# Specification: Exclusive Execution Policy (Single-Owner Kernel Posture)
 
-**Date:** 2026-09-28
+**Date:** 2026-09-29
 **Status:** DRAFT
 **Type:** Specification
 **Requirements:** [REQ-EXEC-POLICY](../requirements/REQ-EXEC-POLICY.md)
-**Related:** [SPEC-SHELL-GUARD](SPEC-SHELL-GUARD.md), [SPEC-SANDBOX](SPEC-SANDBOX.md), [SPEC-BINARY-LOCK](SPEC-BINARY-LOCK.md), [SPEC-AUDIT](SPEC-AUDIT.md), [SPEC-CAP-THROTTLE](SPEC-CAP-THROTTLE.md)
+**Related:** [SPEC-SHELL-GUARD](SPEC-SHELL-GUARD.md), [SPEC-SANDBOX](SPEC-SANDBOX.md), [SPEC-BINARY-LOCK](SPEC-BINARY-LOCK.md), [SPEC-AUDIT](SPEC-AUDIT.md)
 
 ---
 
 ## 1. Purpose and Posture
 
 The host adopts an **exclusive execution posture**: process execution is
-deny-by-default, and only an allowlisted set of executables may run in the
+deny-by-default, and only a reviewed allowlist of executables may run in the
 agent's confined session. The posture is **always on** (not a per-workload
-sandbox), it is **enforced in the kernel**, and it is **fail-closed**: if the
-policy cannot be enforced, the confined session does not run unconfined.
+sandbox), it is **enforced in the kernel**, and it is **fail-closed**.
 
-The posture has one enforcement authority and several supporting layers:
+### 1.1 The single-owner law
 
-| Layer | Role | Mechanism |
-| --- | --- | --- |
-| **A. Kernel authority** | Every `execve`/`execveat` is mediated | eBPF LSM `security_bprm_check` (`bpf_lsm_bprm_check_security`) |
-| **B. Interim authority** | Same decision before/without the eBPF loader | AppArmor enforce-mode profile |
-| **C. Session confinement** | Defense-in-depth, survives a missing loader | Landlock (`LANDLOCK_ACCESS_FS_EXECUTE`) + `no_new_privs` |
-| **D. Content policy** | Shell-text and behavior contract | [SPEC-SHELL-GUARD](SPEC-SHELL-GUARD.md) raw-text scanner |
-| **E. Effects** | Writes, signals, mounts, modules, sockets | eBPF LSM hooks (section 7) |
+> **One concern, one owner. Each layer decides only its own concern and
+> permits every other concern.** No concern is decided by two layers, and no
+> layer substitutes for another. There is no staged-but-enforced middle
+> state, no complain authority, and no layer that covers for a missing one.
 
-Layer D is **not** an execution authority. It was never one: any non-bash
-parent could always `execve` an arbitrary binary (see
-[AUDIT-RESIDUAL-COVERAGE](../AUDIT-RESIDUAL-COVERAGE-2026-09.md) D-04). Layer A
-is the authority; layer D is demoted to the content/behavior contract and to
-human-readable audit of attempts.
+LSMs compose conjunctively: a denial by any layer wins, and a layer that
+default-denies every operation implicitly decides every concern. Overlap is
+therefore avoided by giving each layer exactly one lane, and by having each
+layer either grant-broad (so it is not a decider) or deny exclusively its
+own lane.
 
-### Key Design Principle
+### 1.2 Layer set
 
-> **Allowlist in kernel, deny-list in text.** The kernel allows only the
-> executables the operator has reviewed; everything else is denied regardless
-> of shell grammar, quoting, aliasing, renaming, or path. The textual layer is
-> retained for the contracts that have no kernel-observable effect (inline
-> code, output suppression) and for fast, explanatory block reports.
+| Lane | Concern | Sole owner | Mechanism |
+| --- | --- | --- | --- |
+| **Exec** | Which images may be executed | eBPF LSM | `BPF_PROG_TYPE_LSM` on `bprm_check_security` |
+| **Filesystem** | Path read/write/create/remove; policy and audit write protection | AppArmor | enforce-mode profile |
+| **Effects** | Mount/umount, signals outside the tree, socket families | AppArmor | enforce-mode profile |
+| **ptrace** | Process inspection | YAMA | `ptrace_scope=2` |
+| **Kernel code** | Module load, kexec, `/dev/mem`, MSR, ioperm | Lockdown | `lockdown=integrity` |
+| **Capability** | Which capabilities the session may hold | capability LSM + systemd bounding set | `CapabilityBoundingSet=` |
+| **Content** | Shell text with no syscall (output suppression, inline channels) | shell guard | raw-text scanner (SPEC-SHELL-GUARD) |
+| **Gate** | Session admission | systemd | `ExecCondition=` readiness manifest |
+
+Landlock, IMA and EVM remain available system layers but hold **no lane in
+this posture**. Landlock would require `PR_SET_NO_NEW_PRIVS`, which voids
+file capabilities and therefore breaks the four-cap host-exec model
+(REQ-GGUARD-001); its only unique property, irrevocable descendant-wide
+enforcement, is already provided by AppArmor being root-loaded and inherited
+on `ix`. IMA appraisal would re-decide exec content that the eBPF LSM already
+owns, with coarser session scoping.
+
+### 1.3 Key design principle
+
+> **Allowlist in the kernel, deny-list in text.** The exec lane allows only
+> the executables the operator has reviewed; everything else is denied
+> regardless of shell grammar, quoting, aliasing, renaming, or path. The
+> textual layer is retained for the contracts that have no kernel-observable
+> effect and for explanatory block reports.
 
 ---
 
 ## 2. Host Enforcement Capability
 
-Observed on the reference host (2026-09-28, kernel `7.1.8`):
+Observed on the reference host (2026-09-29, kernel `7.1.8`):
 
 | Capability | State | Consequence |
 | --- | --- | --- |
+| Active LSMs | `lockdown,capability,landlock,yama,apparmor,ima,evm` | `bpf` is **not** active; the exec lane needs a boot cmdline change |
 | `CONFIG_BPF_LSM` | `=y` | BPF LSM programs can be built |
-| `CONFIG_LSM` / active LSMs | `landlock,lockdown,yama,integrity,apparmor` (+`capability`) | `bpf` is **not** active; a boot cmdline change is required |
-| `CONFIG_FANOTIFY_ACCESS_PERMISSIONS` | `=y` | Exec-permission events possible, but not used as authority |
-| AppArmor | active, `apparmor_parser` present | Layer B is available with no reboot |
-| Landlock | active | Layer C is available |
-| seccomp filter | active | Used by the shell guard's launcher path and later brokers |
-| IMA/EVM | active | Optional integrity appraisal (not required by this spec) |
-| `unprivileged_bpf_disabled` | `2` | Only root / `CAP_BPF` may load programs (intended) |
+| Lockdown | `[none]` | the kernel-code lane needs `lockdown=integrity` |
+| YAMA | `ptrace_scope=1` | raise to `2` for the ptrace lane |
+| AppArmor | enabled, `apparmor_parser` present | filesystem and effects lanes available now |
+| `unprivileged_bpf_disabled` | `2` | only root / `CAP_BPF` may load programs (intended) |
 
-Enabling layer A requires the operator to add `bpf` to the kernel command line
-LSM list and reboot once:
+One operator boot change enables the exec and kernel-code lanes:
 
 ```
-lsm=landlock,lockdown,yama,integrity,apparmor,bpf
+lsm=<existing list>,bpf
+lockdown=integrity
 ```
 
-The exact `lsm=` value must preserve the existing entries in order and append
-`bpf`. This is the **only** host change this specification requires, and it is
-an operator action, not an agent action.
+Preserve the existing LSM entries in their current order and append `bpf`.
+Both parameters are operator actions, not agent actions; the reboot is
+documented in the deployment runbook (REQ-EXEC-174).
 
 ---
 
-## 3. Enforcement Architecture
+## 3. Single-Owner Architecture
 
 ```
-              agent session start
-                      │
-        ┌─────────────┼───────────────────────────┐
-        ▼             ▼                           ▼
-  Landlock+nnp   AppArmor profile          eBPF LSM program
-  (layer C)      (layer B, interim)        (layer A, authority)
-        │             │                           │
-        └─────────────┴──────────────┬────────────┘
-                                     ▼
-                        any execve/execveat in session
-                                     │
-                     eBPF security_bprm_check consults
-                     pinned allowlist map (path, sha256, uid)
-                                     │
-                          ┌──────────┴──────────┐
-                        allow                 deny
-                          │                     │
-                    exec proceeds        -EPERM + audit event
+                       agent session start
+                                │
+                  systemd ExecCondition: readiness manifest
+                  lists every lane owner (fail closed if absent)
+                                │
+   ┌────────────┬───────────────┼───────────────┬───────────────┐
+   ▼            ▼               ▼               ▼               ▼
+ exec lane    fs lane        effects lane    ptrace lane    kernel-code lane
+ eBPF LSM     AppArmor       AppArmor        YAMA           Lockdown
+ bprm_check   (profile)      (profile)       scope=2        integrity
+   │                            │
+   └─ deny-by-default allowlist; apparmor grants everything outside its
+      two lanes (`/** ix`, `ptrace`, `capability`) so it never decides
+      exec, ptrace or capability; it denies only filesystem writes it
+      does not grant and the effect classes it owns.
 ```
 
-### 3.1 Loader and boot ordering
+### 3.1 Lane-keeping rules
 
-- A root-owned loader (`workspace-exec-policyd`) loads the compiled BPF object
-  and attaches it to the `bprm_check` hook at boot, before the agent login
-  service is started (`REQ-EXEC-103`).
-- If the loader fails, the agent session service must **not** start (fail
-  closed). Layer B and layer C remain as fallbacks but are not the authority.
-- The loader requires `CAP_BPF` and `CAP_SYS_ADMIN`; the agent has neither.
+- **Exec lane.** The BPF program is attached globally but decides only for
+  tasks in the agent session (by cgroup and task ancestry); every other task
+  receives `0` (allow). It never mediates mounts, signals, sockets or files.
+- **Filesystem and effects lanes.** The AppArmor profile is the sole
+  filesystem authorizer and the sole authorizer of mount, signal-outside-tree
+  and socket-family operations. It grants `/** ix`, `ptrace,` and
+  `capability,` so it is not a second decider for exec, ptrace or capability.
+- **ptrace, kernel code, capability lanes.** YAMA, Lockdown and the
+  capability LSM plus the agent unit bounding set are global and single;
+  no other layer writes a rule for their concerns.
 
-### 3.2 Allowlist map
+### 3.2 Fail-closed admission
 
-The loader populates a pinned BPF hash map from
-`config/exec_allowlist.yaml`. Each entry keys on the executable identity:
+1. The loader (`workspace-exec-policyd`) attaches the program at boot and
+   writes the loader token `/run/workspace-exec-policy/bpf-ready` only after
+   `BPF_LINK_CREATE` succeeds.
+2. `enable-exec-policy CONFIRM=1` verifies every lane owner and, only then,
+   writes the readiness manifest `/run/workspace-exec-policy/ready` with one
+   line per owner, and sets state `armed`.
+3. The agent unit's `ExecCondition=` gate requires state `armed` and every
+   owner line. If any owner is absent, the session refuses to start. No
+   layer substitutes for another.
 
-| Field | Meaning |
-| --- | --- |
-| `path` | Absolute canonical path |
-| `sha256` | Content hash; mismatches are denied |
-| `allow_uid` | UIDs permitted to exec this binary (default the agent uid) |
-| `note` | Human rationale (not used by the kernel) |
-
-Anonymous and `memfd`/`execveat(AT_EMPTY_PATH)` executions present no path;
-they are denied by default (`REQ-EXEC-104`).
-
-### 3.3 Fail-closed policy-load gate
-
-A kernel program cannot be relied on when it is absent. Therefore:
-
-1. The loader writes a readiness token (`/run/workspace-exec-policy/ready`)
-   only after `BPF_LINK_CREATE` succeeds.
-2. The agent session unit gets an `ExecCondition`
-   (`workspace-exec-policy-session-gate`, installed as a drop-in) that
-   requires the readiness token **only while the posture is enforcing**. The
-   gate reads `/etc/workspace-guard/exec-policy-mode`: in `audit` it always
-   allows the session to start, so a staged-but-not-enabled host is
-   unaffected; in `enforce` it fails closed when the token is absent.
-3. Layer B (AppArmor) and layer C (Landlock) are applied by the same session
-   wrapper, so a loader failure denies, never allows.
-
-Enforcement is never implicit. `install-exec-policy` stages every layer in
-`audit` mode; only `enable-exec-policy` writes `mode=enforce`, and only after
-the LSM `bpf` hook is confirmed active and the readiness token exists
-(`REQ-EXEC-172`).
+There is no `audit` state in which the agent runs unenforced. Staging
+installs the layers and leaves state `unarmed`; while unarmed the agent
+session does not start. Building the allowlist happens out of band, under
+root, never by running the real agent session.
 
 ---
 
-## 4. eBPF Design
-
-### 4.1 Program
+## 4. Exec Lane: eBPF LSM
 
 - Type `BPF_PROG_TYPE_LSM`; attach to `bprm_check_security`.
-- Reads `bprm->file` → `dentry`/`inode`/`i_ino`, the calling task's
-  `bpf_get_current_uid_gid()`, and `bpf_get_current_pid_tgid()` for ancestry.
-- Computes/holds the executable hash: the loader pre-hashes allowlisted paths;
-  the program compares the inode's device+ino+size+mtime+hash token maintained
-  by an LSM `inode_*` companion, or the loader's pinned map keyed by
-  `(dev, ino)`. Hash verification is required for allow decisions; a path-only
-  positive is insufficient.
+- Reads `bprm->file` and the calling task's cgroup and ancestry; decides only
+  for the agent session and returns `0` for every other task.
+- Allows only executables whose identity matches an allowlist entry; a
+  decision requires a content-hash match, not a path match alone.
+- Denies anonymous and `memfd` (`execveat(AT_EMPTY_PATH)`) execution by
+  default, because they present no path.
+- The loader pre-hashes allowlisted paths and maintains `(dev, ino, size,
+  mtime, sha256)` tokens; a path-only positive is insufficient.
 - Returns `0` to allow, `-EPERM` to deny.
 
-### 4.2 Hooks beyond exec
+---
 
-| Hook (`bpf_lsm_*`) | Effect denied |
-| --- | --- |
-| `task_kill` | Signals to processes outside the session's descendant tree |
-| `sb_mount`, `sb_umount` | Mount/umount of guard and system paths |
-| `file_open`, `inode_permission` | Opens of block devices and guard-owned files for write |
-| `inode_setxattr`, file-ioctl path | Immutability / capability / xattr tampering |
-| `kernel_read_file`, `kernel_module_request` | Module load, kexec image read |
-| `socket_create`, `socket_connect` | `AF_ALG` and unapproved families/endpoints |
+## 5. Filesystem and Effects Lane: AppArmor
 
-These hooks carry the effect-class shell-guard rules (section 6).
+The installed profile `workspace-exec-policy` is loaded in enforcing mode
+(there is no complain state). It owns two lanes.
 
-### 4.3 Audit
+- **Filesystem.** Grants broad read/map/lock/write access and denies writes
+  to guard-owned policy and audit state (`/etc/workspace-guard/**`,
+  `/var/log/workspace-guard/**`, `/etc/apparmor.d/**`,
+  `/etc/systemd/system/**`). A deployment review may tighten the grants to a
+  path allow-list.
+- **Effects.** Denies mount and unmount of every path; permits signals only
+  to processes in the same profile (the session's own descendant tree); and
+  denies `AF_ALG`, raw and packet sockets.
 
-Denials emit a ring-buffer event and, when `auditd` is present, a matching
-audit record: timestamp, uid, pid/ppid, path (or `<anon>`), hash, and the
-denying policy class. Denial delivery failure never downgrades a denial.
+The profile grants `/** ix`, `ptrace,` and `capability,` so it defers exec,
+ptrace and capability to their owners.
 
 ---
 
-## 5. Policy Schema (`config/exec_allowlist.yaml`)
+## 6. ptrace, Kernel-Code and Capability Lanes
 
-The reviewed source of truth is `config/exec_allowlist.yaml`: root-owned,
-`chattr +i`, edited only through the sudo-gated secure YAML editor
-(SPEC-YAML-EDIT). `make install-exec-policy` installs it to
-`/etc/workspace-guard/exec_allowlist.yaml`, which is the path the loader reads;
-the two are byte-identical after staging. Sketch:
-
-```yaml
-version: 1
-allow:
-  - {path: /usr/bin/workspace-shell-guard, sha256: "<hex>", allow_uid: 1000, note: guarded bash}
-  - {path: /bin/bash,                    sha256: "<hex>", allow_uid: 1000, note: guard entry point}
-  - {path: /usr/bin/git,                 sha256: "<hex>", allow_uid: 1000, note: git guard}
-  - {path: /usr/local/bin/cargo,         sha256: "<hex>", allow_uid: 1000, note: build toolchain}
-deny:
-  default: true
-  patterns:
-    - {note: "shells other than the guarded pair", paths: ["/usr/bin/dash", "/usr/bin/zsh", "/bin/sh"]}
-    - {note: "interpreters",                        paths: ["/usr/bin/perl", "/usr/bin/awk", "/usr/bin/lua"]}
-```
-
-The exact approved set is operator policy. A build-time validator (mirroring
-the git/shell policy matrices) checks the schema, that every hash is 64 hex
-chars, and that no entry is agent-writable.
+- **ptrace:** YAMA `ptrace_scope=2` is the sole decider. The AppArmor profile
+  grants `ptrace,` so it is not a second gate.
+- **Kernel code:** Lockdown `integrity` is the sole decider for module load,
+  kexec, `/dev/mem`, MSR access and ioperm/iopl.
+- **Capability:** the capability LSM plus the agent unit bounding set
+  (`CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER`, matching
+  REQ-GGUARD-001) own which capabilities the session may hold.
+  `NoNewPrivileges=no` is required so the file-capped host-exec path can
+  raise the reviewed set at exec time.
 
 ---
 
-## 6. Rule Disposition Matrix
+## 7. Rule Disposition Matrix
 
-Every shell-guard rule in `config/shell_guard_policy.yaml` is assigned a
-disposition. Dispositions:
+Every shell-guard rule in `config/shell_guard_policy.yaml` is assigned one
+disposition. Dispositions name the single owner:
 
-- **kernel-authoritative** (layer A and/or B/C enforce the effect): the textual
-  rule becomes advisory and is **retired after eBPF proof**.
-- **hybrid** (the kernel enforces the binary/effect): the textual rule is kept
-  for the argv/exception cases the kernel cannot see.
-- **content-policy** (no kernel-observable effect): stays in
-  [SPEC-SHELL-GUARD](SPEC-SHELL-GUARD.md) permanently.
-- **session-layer** (environment/session control): not the scanner.
+- **exec**: the eBPF LSM exec allowlist denies the binary by content.
+- **fs**: AppArmor, as the filesystem owner, denies the operation.
+- **effect**: AppArmor denies the effect (mount, signal, socket family).
+- **kcode**: Lockdown denies the kernel-code operation.
+- **caps**: the capability LSM and bounding set deny the capability.
+- **content**: no kernel-observable effect; the shell guard keeps it.
+- **hybrid**: the binary is denied by the exec owner and the argv case stays
+  in content.
+- **session**: delivered by session configuration, not the scanner.
 
-| Rule id | Prevents | Kernel enforcement | Disposition | Retire / keep criterion |
-| --- | --- | --- | --- | --- |
-| `power-verb` | `systemctl`/`loginctl` power verbs | `bprm_check` deny by hash; polkit/D-Bus rule | kernel-authoritative | Retire after binary-deny + polkit rule are proven |
-| `process-by-name` | `pkill`/`killall`/`skill`/`snice` | `bprm_check` deny by hash | kernel-authoritative | Retire after binary-deny proof |
-| `power-command` | `shutdown`/`reboot`/`poweroff`/`kexec` | `bprm_check` deny by hash | kernel-authoritative | Retire after binary-deny proof |
-| `fs-destroy` | `wipefs`/`fdisk`/`parted`/`mkfs*` | `bprm_check` + `file_open` on block devices | kernel-authoritative | Retire after both proofs |
-| `alt-shell` | unguarded shells (`zsh`,`dash`,…) | `bprm_check` allowlist deny (hash defeats rename/copy) | kernel-authoritative | Retire after rename/copy evasion test |
-| `busybox-shell` | `busybox sh`/`ash` | `bprm_check` denies `busybox`; the `sh` argument is argv | hybrid | Keep textual rule for the argv case |
-| `kill-mass` | `kill -1`, `%`, `kill -NN` | `task_kill` denies signals outside the descendant tree | kernel-authoritative | Retire after `task_kill` proof |
-| `chattr-strip` | clearing `+i` | missing `CAP_LINUX_IMMUTABLE` + `inode_setxattr` | kernel-authoritative | Retire after setxattr/ioctl proof |
-| `rm-rootfs` | `rm --no-preserve-root` | filesystem permission + `inode_permission` | hybrid | Keep as advisory behavioral guard |
-| `dd-device` | writes to block devices | `file_open`/`inode_permission` on device inode | kernel-authoritative | Retire after `file_open` proof |
-| `mount-protected` | mount/umount of guard paths | `sb_mount`/`sb_umount` (+ no `CAP_SYS_ADMIN`) | kernel-authoritative | Retire after mount-hook proof |
-| `swap-teardown` | `swapoff -a` | `bprm_check` deny by hash | kernel-authoritative | Retire after binary-deny proof |
-| `suppress-pipe` | `\| tail`/`head` truncation | none (text/UX contract) | content-policy | Keep permanently |
-| `suppress-null` | `>/dev/null` discard | none (text/UX contract) | content-policy | Keep permanently |
-| `suppress-swallow` | `\|\| true`, `\|:` masking | none (text/UX contract) | content-policy | Keep permanently |
-| `alt-interp` | interpreters as command channel | `bprm_check` denies non-allowlisted interpreter hashes | kernel-authoritative | Retire after interpreter-deny proof |
-| `podman-command` | container execution channel | `bprm_check` deny; namespaces/mounts | kernel-authoritative | Retire after binary-deny proof |
-| `inline-shell` | nested `bash -c`/`sh -c` | `bprm_check` cannot read the `-c` argument | content-policy | Keep; argv enforcement is a later tracepoint phase |
-| `uv-inline-interp` | `uv run <interpreter> -c` | argv-dependent | content-policy | Keep; later argv phase |
-| `inline-code-channel` | heredoc/`eval`/`source <()` | shell grammar, not a syscall | content-policy | Keep permanently |
+| Rule id | Prevents | Owner enforcement | Disposition |
+| --- | --- | --- | --- |
+| `power-verb` | `systemctl`/`loginctl` power verbs | exec deny by hash; D-Bus/polkit rule | exec |
+| `process-by-name` | `pkill`/`killall`/`skill`/`snice` | exec deny by hash | exec |
+| `power-command` | `shutdown`/`reboot`/`poweroff`/`kexec` | exec deny by hash; kexec also kcode | exec |
+| `fs-destroy` | `wipefs`/`fdisk`/`parted`/`mkfs*` | exec deny by hash | exec |
+| `alt-shell` | unguarded shells (`zsh`,`dash`,...) | exec allowlist deny defeats rename/copy | exec |
+| `busybox-shell` | `busybox sh`/`ash` | exec denies `busybox`; the `sh` argument is argv | hybrid |
+| `kill-mass` | `kill -1`, `%`, `kill -NN` | effect: AppArmor denies signals outside the tree | effect |
+| `chattr-strip` | clearing `+i` | fs write deny on policy; caps lack `CAP_LINUX_IMMUTABLE` | fs |
+| `rm-rootfs` | `rm --no-preserve-root` | filesystem permission; behavioral contract | content |
+| `dd-device` | writes to block devices | fs: AppArmor denies device writes | fs |
+| `mount-protected` | mount/umount of guard paths | effect: AppArmor denies mount | effect |
+| `swap-teardown` | `swapoff -a` | exec deny by hash | exec |
+| `suppress-pipe` | `\| tail`/`head` truncation | none (text/UX contract) | content |
+| `suppress-null` | `>/dev/null` discard | none (text/UX contract) | content |
+| `suppress-swallow` | `\|\| true`, `\|:` masking | none (text/UX contract) | content |
+| `alt-interp` | interpreters as command channel | exec denies non-allowlisted interpreter hashes | exec |
+| `podman-command` | container execution channel | exec deny by hash | exec |
+| `inline-shell` | nested `bash -c`/`sh -c` | exec cannot read the `-c` argument | content |
+| `uv-inline-interp` | `uv run <interpreter> -c` | argv-dependent | content |
+| `inline-code-channel` | heredoc/`eval`/`source <()` | shell grammar, not a syscall | content |
 
-### 6.1 Session-layer items (not rules)
+### 7.1 Session-layer items
 
-The following shell-guard behaviors are classified **session-layer** and are
-delivered by layer B/C and the session wrapper, not by the scanner:
-environment sanitisation (§8 of SPEC-SHELL-GUARD), the `AT_SECURE`/capability
-gate, and untrusted-script memfd staging. They remain in the guard in this
-phase but are explicitly not the kernel authority.
+Environment sanitisation (SPEC-SHELL-GUARD section 8), the capability gate
+and untrusted-script memfd staging are **session** items, delivered by the
+session configuration, not by the scanner.
 
-### 6.2 Retirement rule
+### 7.2 Retirement rule
 
-A rule may move to `retired` only when: (a) the corresponding layer-A hook is
-attached on the running host, (b) a matrix case proves the effect is denied for
-path, renamed-copy, and syscall forms, and (c) the audit record is produced.
-Until then the textual rule stays enabled as defense-in-depth.
-
----
-
-## 7. Effect Coverage Beyond Exec
-
-The exclusive posture is not only "which binaries". The same program set
-enforces the effect classes previously approximated by text: signals
-(`task_kill`), mounts (`sb_*`), device and guard-file writes
-(`file_open`/`inode_permission`), attribute/capability tampering
-(`inode_setxattr`), module/kexec (`kernel_read_file`), and sockets
-(`socket_*`). These are the rows marked `kernel-authoritative` in section 6.
+A rule may move to `retired` only when the owning lane is verified active on
+the running host, a matrix case proves the effect is denied for path,
+renamed-copy and syscall forms, and an audit record is produced. Until then
+the textual rule stays enabled as defense in depth.
 
 ---
 
 ## 8. Shell-Guard Coexistence
 
-- SPEC-SHELL-GUARD's §1 "Key Design Principle: deny-list on raw text" is
-  restated: the **kernel** allows by identity; the **scanner** enforces the
-  content/behavior contract and produces explanatory blocks.
-- The shell guard continues to cover `bash`/`sh`; `/bin/sh` must resolve to the
-  guarded shell or its real target (dash) must be covered, closing D-04.
-- The shell guard's rules classified `kernel-authoritative` are retained as
-  advisory until their section 6.2 proof, then deleted from the policy file
-  (a YAML edit, not a code change).
+- The kernel allows by identity; the scanner enforces the content contract
+  and produces explanatory blocks.
+- The shell guard continues to cover `bash`/`sh`; `/bin/sh` must resolve to
+  the guarded shell or its real target (`dash`) must be covered, closing
+  D-04.
+- Rules owned by the kernel lanes are retained as advisory until their
+  section 7.2 proof, then deleted from the policy file (a YAML edit, not a
+  code change).
 
 ---
 
-## 9. Install, Reconcile, Recovery
+## 9. Install, Arm, Recovery
 
 The lifecycle is a state machine in `scripts/exec-policy`, exposed as Make
-targets. It separates **staging** (safe, idempotent) from **enabling** (an
-explicit operator decision), so a host can carry the layers without any
-behavior change.
+targets. It keeps **staging** (safe, idempotent) separate from **arming**
+(the explicit operator decision), and the agent session runs only when
+armed.
 
 - `make build-exec-policy`: build the loader and BPF object (kernel phase).
 - `make install-exec-policy` (root; `stage`): install the loader, BPF object,
-  AppArmor profile, session gate, unit, and drop-in; install the pinned map
-  seed from `config/exec_allowlist.yaml` to
-  `/etc/workspace-guard/exec_allowlist.yaml`; create `exec-policy-mode` as
-  `audit`; enable the boot-time service. Idempotent and reconciling. If the
-  authority artifacts are not built or the allowlist is unseeded, stage warns
-  and installs the interim layers only; it never enables enforcement.
-- `make enable-exec-policy CONFIRM=1` (root; `enable`): refuse without
-  `CONFIRM=1`; require the staged layers, the policy, an active LSM `bpf`
-  hook, and the loader readiness token; run the denial canary (`WEP_CANARY`)
-  and revert to `audit` if it fails; write `mode=enforce`; return the
-  AppArmor layer to complain.
-- `make disable-exec-policy` (root): write `mode=audit` and return AppArmor
-  to complain; the layers stay staged.
+  AppArmor profile, session gate, unit, drop-in and the pinned map seed from
+  `config/exec_allowlist.yaml` to `/etc/workspace-guard/exec_allowlist.yaml`;
+  create `exec-policy-state` as `unarmed`; enable the boot-time service.
+  Idempotent and reconciling. If the authority artifacts are not built or the
+  allowlist is unseeded, stage warns and leaves the posture unarmed.
+- `make enable-exec-policy CONFIRM=1` (root; `arm`): refuse without
+  `CONFIRM=1`; require the staged layers, the seeded policy, and every lane
+  owner verified (exec `bpf`, fs `apparmor`, ptrace `yama`, kernel `lockdown`,
+  caps `capability`); run the denial canary and stay `unarmed` if it fails;
+  write the readiness manifest and set state `armed`.
+- `make disable-exec-policy` (root): remove the readiness manifest and set
+  state `unarmed`. The agent session then refuses to start (fail closed).
 - `make check-exec-policy` (any): read-only report; exit 2 `NOT INSTALLED`,
-  exit 0 with a warning for `AUDIT` / `NOT ACTIVE` / interim, exit 0 `OK`,
-  exit 1 `DRIFTED` (mode and attached authority disagree).
-- `make uninstall-exec-policy` (root): remove the staged layers; the policy
-  and mode file are preserved.
+  exit 0 `NOT ARMED`, exit 0 `OK` when armed and every owner verified, exit 1
+  `DRIFTED` when armed but an owner is not verified.
+- `make uninstall-exec-policy` (root): remove the staged artifacts and the
+  readiness manifest; the policy and state are preserved.
 
 `scripts/guard-operator.sh` integrates the posture: `guard-up` and
-`guard-refresh` stage it (warn-only, so a host without the policy still comes
-up green); `guard-check` reports it; `guard-down` unstages it. None of these
-enable enforcement - that is `enable-exec-policy` alone.
+`guard-refresh` stage it (warn-only); `guard-check` reports it; `guard-down`
+unstages it. None of these arm it - that is `enable-exec-policy` alone.
 
-- **Break-glass**: root remains unconfined (selected answer). Recovery uses
-  `/bin/bash.real` and `aa-complain`/loader stop from an unconfined root shell.
-  The agent has no path to modify policy or stop the loader (`CAP_BPF` absent).
+- **Break-glass**: root remains unconfined. Recovery uses `/bin/bash.real` and
+  a loader stop from an unconfined root shell. The agent has no path to
+  modify policy or stop the loader (`CAP_BPF` absent).
 
 ---
 
 ## 10. Audit
 
 Denials and enforcement-state transitions are logged: loader readiness, map
-reload, hook attach/detach, and every denial with uid/path/hash/ppid. The
-destination and mode follow [SPEC-AUDIT](SPEC-AUDIT.md).
+reload, link attach/detach, and every denial with uid, path (or `<anon>`),
+hash and ppid. The destination and mode follow
+[SPEC-AUDIT](SPEC-AUDIT.md). Audit delivery failure never downgrades a
+denial.
 
 ---
 
 ## 11. Testing
 
-- **Rust/loader unit tests**: policy parse/validate, map seed, hash mismatch
-  denial, fail-closed readiness gate.
-- **Kernel matrix (root, real host/guest)**: allowlisted exec passes;
-  non-listed path denied; renamed copy denied by hash; `dash`/`zsh` denied;
-  interpreter denied; `memfd`/`execveat(AT_EMPTY_PATH)` denied; `task_kill`
-  outside tree denied; device write denied; module load denied; `AF_ALG`
-  denied; loader-absent session refuses to start.
+- **Loader unit tests**: policy parse/validate, map seed, hash-mismatch
+  denial, fail-closed readiness.
+- **Kernel matrix (root, real host or guest)**: allowlisted exec passes;
+  non-listed path denied; renamed copy denied by hash; `dash`/`zsh` and
+  interpreters denied; `memfd`/`execveat(AT_EMPTY_PATH)` denied; mount denied;
+  signal outside the tree denied; `AF_ALG` denied; device write denied;
+  module load and kexec denied; ptrace outside the tree denied; the session
+  refuses to start when any owner is missing.
 - **Shell suite**: `tests/shell/26-exec-policy-provisioning.bats` covers the
-  staging state machine against a `WEP_ROOT` fixture (no root, no kernel):
-  `NOT INSTALLED` / `NOT ACTIVE` / interim / `AUDIT` / `OK` / `DRIFTED`, the
-  session gate in each mode, and the unseeded-policy warning. The
-  AppArmor/Landlock secondary layers are covered by the same suite's
-  fixtures and by the kernel matrix.
-- **MATRIX-DISPOSITION gate**: `scripts/check-exec-dispositions.sh` fails when
-  any rule id in `config/shell_guard_policy.yaml` is absent from the section 6
-  matrix, so a new rule cannot be added without a disposition. Run from
-  `make check`; `tests/shell/25-exec-dispositions.bats` covers it, including
-  the fail-closed missing-spec case (REQ-EXEC-151, REQ-EXEC-184).
+  staging and arming state machine against a `WEP_ROOT` fixture (no root, no
+  kernel): `NOT INSTALLED`, `NOT ARMED`, `OK`, `DRIFTED`, the session gate
+  with a complete and a partial readiness manifest, and the unseeded-policy
+  warning.
+- **Disjointness gate**: for the disposition matrix, `scripts/check-exec-dispositions.sh`
+  fails when any rule id in `config/shell_guard_policy.yaml` is absent from
+  section 7. Run from `make check`; `tests/shell/25-exec-dispositions.bats`
+  covers it, including the fail-closed missing-spec case.
 
 ---
 
 ## 12. Residual Risks
 
-- **Pre-loader window**: between boot and loader success, only layer B/C
-  protect; the session gate prevents agent processes entirely.
-- **Kernel/verifier limits**: complex hashing in-kernel is bounded; the loader
-  maintains hash tokens out of band.
-- **argv-dependent rules**: `inline-shell`, `uv-inline-interp` remain text-based
-  until a tracepoint+map argv phase lands.
+- **Pre-arm window**: while unarmed the agent session does not start; there
+  is no window in which it runs unenforced.
+- **Kernel/verifier limits**: complex in-kernel hashing is bounded; the
+  loader maintains hash tokens out of band.
+- **argv-dependent rules**: `inline-shell` and `uv-inline-interp` remain
+  text-based until an argv-enforcement phase lands.
 - **D-Bus/polkit**: power actions are not fully mediated by LSM; the binary
   deny plus a polkit rule are required.
 - **Root adversary**: out of scope by trust model (root is break-glass).
@@ -365,9 +336,8 @@ destination and mode follow [SPEC-AUDIT](SPEC-AUDIT.md).
 
 ## 13. Non-Goals
 
-- No per-workload sandbox requirement (this posture is always on; see
-  [SPEC-SANDBOX](SPEC-SANDBOX.md) for workload sandboxes).
-- No network egress policy beyond the sockets listed in section 7.
+- No per-workload sandbox requirement (see [SPEC-SANDBOX](SPEC-SANDBOX.md)).
+- No network egress policy beyond the socket families in section 5.
 - No replacement of the shell guard's content contract by text-free means in
   this phase.
 - No confinement of root.

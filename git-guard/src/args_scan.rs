@@ -151,13 +151,21 @@ pub(super) fn classify_leading_global(arg: &[u8], arg_str: &str) -> Leading {
         | "--icase-pathspecs"
         | "--no-optional-locks"
         | "--no-advice" => return Leading::Modifier,
-        "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" => return Leading::Operand,
+        // `--shallow-file <path>` is a hidden Git global option that
+        // fetch-pack passes to the index-pack helper it spawns
+        // (`git --shallow-file <file> index-pack ...`). It takes the
+        // following token as its operand, so the same arity rule as the
+        // other value-taking location options applies.
+        "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--shallow-file" => {
+            return Leading::Operand
+        }
         s if s.starts_with("--git-dir=")
             || s.starts_with("--work-tree=")
             || s.starts_with("--namespace=")
             || s.starts_with("--super-prefix=")
             || s.starts_with("--attr-source=")
-            || s.starts_with("--list-cmds=") =>
+            || s.starts_with("--list-cmds=")
+            || s.starts_with("--shallow-file=") =>
         {
             return Leading::Modifier
         }

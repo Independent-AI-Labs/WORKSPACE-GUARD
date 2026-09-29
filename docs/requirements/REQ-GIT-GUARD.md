@@ -75,7 +75,9 @@ This document specifies the requirements for the Rust binary. The installation/d
   no subcommand, modifier options with no operand, and value-taking options
   whose separate or attached operand must be consumed. At minimum, operand
   handling shall cover `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`,
-  and `--config-env`; repeated `-C` options shall be supported. `-C` is a
+  `--config-env`, and the hidden `--shallow-file <path>` global that
+  fetch-pack passes to the index-pack helper it spawns; repeated `-C` options
+  shall be supported. `-C` is a
   directory-changing option and shall never be interpreted as a config key.
   The parsed location options (`-C`, `--git-dir`, `--work-tree`, separate and
   attached forms) shall be shared with repository resolution, ownership

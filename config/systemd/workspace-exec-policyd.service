@@ -1,15 +1,16 @@
 # config/systemd/workspace-exec-policyd.service
 #
-# Boot-time loader for the exclusive execution policy (REQ-EXEC-113,
-# REQ-EXEC-116). Attaches the BPF LSM program to bprm_check_security and
-# the non-exec effect hooks, seeds the pinned allowlist map from
-# /etc/workspace-guard/exec_allowlist.yaml, and writes the readiness
-# token only after BPF_LINK_CREATE succeeds.
+# Boot-time loader for the exec lane of the exclusive execution posture
+# (REQ-EXEC-113, REQ-EXEC-116). It attaches the BPF LSM program to
+# bprm_check_security, seeds the pinned allowlist map from
+# /etc/workspace-guard/exec_allowlist.yaml, and writes the loader token
+# only after BPF_LINK_CREATE succeeds. The loader owns the exec lane and
+# nothing else: mount, signal, socket, ptrace, capability and kernel-code
+# decisions belong to their single owners (REQ-EXEC-121 series).
 #
-# The default mode is "audit": the program observes and logs but allows,
-# until `make enable-exec-policy CONFIRM=1` writes mode=enforce. The
-# agent session unit's ExecCondition gate then requires the readiness
-# token (fail closed).
+# The session gate requires the full readiness manifest, which
+# `make enable-exec-policy CONFIRM=1` writes only after every owner is
+# verified. Before that the agent session does not start (fail closed).
 #
 # Installed by: sudo make install-exec-policy
 # See docs/specifications/SPEC-EXEC-POLICY.md section 9.
@@ -27,11 +28,10 @@ Type=notify
 ExecStart=/usr/local/bin/workspace-exec-policyd \
     --object /usr/local/lib/workspace-guard/exec_policy.bpf.o \
     --policy /etc/workspace-guard/exec_allowlist.yaml \
-    --mode-file /etc/workspace-guard/exec-policy-mode \
-    --ready /run/workspace-exec-policy/ready
+    --bpf-ready /run/workspace-exec-policy/bpf-ready
 Restart=on-failure
 RestartSec=2s
-CapabilityBoundingSet=CAP_BPF CAP_SYS_ADMIN CAP_PERFMON CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_BPF CAP_SYS_ADMIN CAP_PERFMON
 AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=true
