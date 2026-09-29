@@ -195,6 +195,21 @@ GIT_SSH=/usr/lib/workspace-guard/git-ssh-wrapper
 - Run `ssh-keygen` (binary lock `deny-non-root`)
 - Create `~/.ssh/id_*` (`.ssh` directory root-owned `0755`, not user-writable)
 
+### 5.4 Nested guard invocations
+
+Git exports `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_AUTHOR_DATE`, and
+`GIT_EDITOR` into the environment of its hooks. Every `git` call a hook then
+makes re-enters the guard, which sees those names, removes them, and would
+repeat the removal diagnostic for each. The guard therefore injects the
+canonical `WORKSPACE_GUARD_SESSION` marker into every `git.original` child
+(caller copies are discarded, one canonical value injected). A guard
+invocation that inherits the marker writes byte-exact evidence for each removed
+name to the audit sink but does not echo it to stderr or the controlling
+terminal, so one commit cannot flood the caller through every nested `git`
+call. Stripping and enforcement are unchanged, and a genuine session-root
+override such as `GIT_AUTHOR_NAME=... git commit` still warns on both stderr
+and `/dev/tty` (REQ-GGUARD-070, REQ-GGUARD-074).
+
 ---
 
 ## 6. Home-lock integration

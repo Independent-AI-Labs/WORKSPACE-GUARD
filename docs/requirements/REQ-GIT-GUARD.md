@@ -450,7 +450,16 @@ This document specifies the requirements for the Rust binary. The installation/d
   remain complete evidence whenever reported. One sanitizer shall serve policy helpers, the contract
   runner, and final real Git, with narrowly specified helper additions layered
   afterward. Every removed, replaced, or rejected inherited name shall produce
-  a byte-exact evidence diagnostic; filtering shall never be silent. The build shall
+  a byte-exact evidence diagnostic; filtering shall never be silent. Caller
+  copies of the guard-owned `WORKSPACE_GUARD_SESSION` marker shall always be
+  discarded and the one canonical value injected into every child, so a guard
+  invocation nested inside a guard-managed operation (for example a `git` call
+  made by Git's own hooks, which Git gives the resolved identity and editor
+  names) is distinguishable from a session-root caller. A nested invocation
+  shall still remove those inherited names and still write byte-exact evidence
+  for each to the audit sink, but shall not echo it to stderr or the controlling
+  terminal; the session-root invocation owns the user-facing echo, so one commit
+  cannot flood the caller through every nested `git` call. The build shall
   reject overlapping categories,
   duplicate names, unsafe prefixes, and attempts to allow known Git, loader,
   shell, pager, editor, credential, object-store, repository, or config-injection
@@ -497,7 +506,12 @@ This document specifies the requirements for the Rust binary. The installation/d
   repository classification, or security policy. `WORKSPACE_GUARD_TRACE` shall
   be a cataloged guard-diagnostic input: a non-empty value requests phase timing
   on stderr, the variable is not forwarded to children, and tracing shall report
-  its configured phase evidence. Every policy helper's stderr and failure status
+  its configured phase evidence. `WORKSPACE_GUARD_SESSION` shall likewise be a
+  cataloged guard-diagnostic marker: caller values are discarded, exactly one
+  canonical value is injected into children, and no enforcement, capability,
+  path, identity, or integrity decision may read it; it selects only the
+  evidence sink for removed identity and editor names. Every policy helper's
+  stderr and failure status
   shall be surfaced with reversible byte escaping rather than discarded,
   modified, or collapsed into an unreported substitute.
 

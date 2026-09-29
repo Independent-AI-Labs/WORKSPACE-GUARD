@@ -146,10 +146,23 @@ fn collect_sudo_gated_env_warnings(privileged: bool) -> Vec<String> {
 /// removes the variable, otherwise `GIT_AUTHOR_*`/`GIT_COMMITTER_*` override
 /// the guard-injected identity and forge commit authorship.
 fn should_drop_child_env(key: &str, privileged: bool) -> bool {
-    crate::BLOCKED_BYPASS_VARS.contains(&key)
+    // Caller-supplied guard-owned names are discarded before the one
+    // canonical guard value is injected (REQ-GGUARD-070).
+    key == crate::SESSION_ENV
+        || crate::BLOCKED_BYPASS_VARS.contains(&key)
         || (!privileged
             && (crate::SUDO_GATED_IDENTITY_ENV_VARS.contains(&key)
                 || crate::SUDO_GATED_EDITOR_ENV_VARS.contains(&key)))
+}
+
+/// True when this guard invocation is nested inside a guard-managed git
+/// operation. Git exports `GIT_AUTHOR_*`/`GIT_EDITOR` into its own hooks, so a
+/// nested call sees the guard's canonical identity, not a caller override.
+/// Its evidence is written to the audit sink without echoing to stderr and
+/// `/dev/tty`, which keeps one commit from flooding the caller on every
+/// nested `git` invocation. Stripping and the evidence record are unchanged.
+pub(crate) fn is_nested_session() -> bool {
+    std::env::var_os(crate::SESSION_ENV).is_some_and(|v| v == "1")
 }
 
 /// Convert caller arguments into NUL-terminated C strings, preserving every
@@ -189,11 +202,16 @@ pub fn execve_real_git(
     // every agent git invocation. Gating the drop on AT_SECURE would keep
     // GIT_AUTHOR_*/GIT_COMMITTER_* and forge authorship (REQ-GGUARD-073).
     let privileged = crate::is_config_privileged();
+    let nested = is_nested_session();
 
     verify_git_original()?;
 
     for msg in collect_sudo_gated_env_warnings(privileged) {
-        crate::log::warn(&msg);
+        if nested {
+            crate::log::warn_audit_only(&msg);
+        } else {
+            crate::log::warn(&msg);
+        }
     }
 
     let git_path = CStr::from_bytes_with_nul(GIT_ORIGINAL.as_bytes())
@@ -227,6 +245,10 @@ pub fn execve_real_git(
             }
         }
     }
+
+    // One canonical guard-owned session value, after the caller's copy (if
+    // any) was dropped above, so nested guard calls are distinguishable.
+    env_map.insert(OsString::from(crate::SESSION_ENV), OsString::from("1"));
 
     let envp: Vec<CString> = env_map
         .into_iter()

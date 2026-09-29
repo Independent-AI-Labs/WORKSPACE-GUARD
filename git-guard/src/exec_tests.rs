@@ -260,6 +260,23 @@ fn child_env_filter_drops_gated_vars_for_non_root_only() {
 }
 
 #[test]
+fn session_marker_is_guard_owned_and_exact() {
+    // Caller-supplied guard-owned names are dropped for every caller; the
+    // guard injects the single canonical value itself (REQ-GGUARD-070).
+    assert!(should_drop_child_env(crate::SESSION_ENV, false));
+    assert!(should_drop_child_env(crate::SESSION_ENV, true));
+
+    std::env::remove_var(crate::SESSION_ENV);
+    assert!(!is_nested_session());
+    std::env::set_var(crate::SESSION_ENV, "1");
+    assert!(is_nested_session());
+    std::env::set_var(crate::SESSION_ENV, "0");
+    assert!(!is_nested_session());
+    std::env::remove_var(crate::SESSION_ENV);
+    assert!(!is_nested_session());
+}
+
+#[test]
 fn recorded_root_matches_descendants() {
     use crate::wsroot::{classify_against, WorkspaceRoot};
     let root = "/srv/wsroot";

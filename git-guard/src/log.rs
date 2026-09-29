@@ -74,9 +74,7 @@ pub fn block(reason: &str, hint: &str, cmd: &str) -> ! {
 
 pub fn warn(message: &str) {
     let ts = timestamp();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "?".to_string());
+    let cwd = current_dir_lossy();
     let uid = getuid().as_raw();
 
     eprintln!("{}", message);
@@ -85,18 +83,41 @@ pub fn warn(message: &str) {
         let _ = writeln!(&tty, "{}", message);
     }
 
-    let home = get_user_home(uid);
-    if let Some(ref home_dir) = home {
-        let log_path = Path::new(home_dir).join(LOG_FILE);
-        if let Ok(mut f) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&log_path)
-        {
-            let _ = writeln!(f, "{}|{}|WARN|{}|uid={}", ts, cwd, message, uid);
-        }
+    let _ = append_warn_audit(&ts, &cwd, uid, message);
+}
+
+/// Audit-sink-only variant of [`warn`] for a nested guard invocation (git
+/// exports identity and editor names into its own hooks, so the guard
+/// re-strips and would re-report its own canonical identity on every nested
+/// call). The byte-exact evidence line is still written to the home sink, so
+/// REQ-GGUARD-070 filtering always leaves evidence; only the stderr and
+/// `/dev/tty` echoes are skipped. If the sink write fails the message falls
+/// back to [`warn`], so a removal always leaves a record.
+pub fn warn_audit_only(message: &str) {
+    let ts = timestamp();
+    let cwd = current_dir_lossy();
+    let uid = getuid().as_raw();
+    if append_warn_audit(&ts, &cwd, uid, message).is_err() {
+        warn(message);
     }
+}
+
+fn current_dir_lossy() -> String {
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "?".to_string())
+}
+
+fn append_warn_audit(ts: &str, cwd: &str, uid: u32, message: &str) -> std::io::Result<()> {
+    let home = get_user_home(uid)
+        .ok_or_else(|| std::io::Error::other("no home directory for audit sink"))?;
+    let log_path = Path::new(&home).join(LOG_FILE);
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&log_path)?;
+    writeln!(f, "{}|{}|WARN|{}|uid={}", ts, cwd, message, uid)
 }
 
 /// RFC3339 UTC with a `Z` suffix (REQ-GGUARD-045 report/audit grammar).

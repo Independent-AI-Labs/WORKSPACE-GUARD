@@ -96,6 +96,15 @@ pub fn is_config_privileged() -> bool {
 pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
 pub const GIT_ORIGINAL_PATH: &str = "/usr/bin/git.original";
 
+/// Guard-owned session marker injected into every `git.original` child
+/// (REQ-GGUARD-070 canonical guard value). A guard invocation that inherits
+/// this marker is nested inside a guard-managed git operation, e.g. a `git`
+/// call made by one of git's own hooks. Git exports identity and editor names
+/// into its hooks, so a nested guard call re-strips and would re-report the
+/// guard's own canonical identity; the marker routes that evidence to the
+/// audit sink instead of the caller's stderr and `/dev/tty`.
+pub const SESSION_ENV: &str = "WORKSPACE_GUARD_SESSION";
+
 pub fn apply_safe_directory(cmd: &mut std::process::Command) {
     agent_identity::apply_agent_hardened_git_env(cmd, false);
 }
