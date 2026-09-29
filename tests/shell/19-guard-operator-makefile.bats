@@ -82,6 +82,7 @@ teardown() { guard_teardown; }
         _user_mgmt_enabled() { return 1; }
         _guard_needs_install() { return 0; }
         _shell_guard_up() { echo "SHELL_GUARD_UP_CALLED"; }
+        _exec_policy_stage() { echo "EXEC_POLICY_STAGE_CALLED"; }
         make() { echo "MAKE $*"; }
         source <(sed -n "/^guard_up()/,/^}/p" "'"$GUARD_ROOT"'/scripts/guard-operator.sh")
         guard_up
@@ -89,6 +90,7 @@ teardown() { guard_teardown; }
     assert_success
     assert_output --partial "MAKE -C $GUARD_ROOT install-guard-host-exec"
     assert_output --partial "SHELL_GUARD_UP_CALLED"
+    assert_output --partial "EXEC_POLICY_STAGE_CALLED"
 }
 
 @test "guard-up runs shell guard step after full host provision" {
@@ -99,6 +101,7 @@ teardown() { guard_teardown; }
         _user_mgmt_enabled() { return 0; }
         _guard_needs_install() { return 1; }
         _shell_guard_up() { echo "SHELL_GUARD_UP_CALLED"; }
+        _exec_policy_stage() { echo "EXEC_POLICY_STAGE_CALLED"; }
         make() { echo "MAKE $*"; }
         source <(sed -n "/^guard_up()/,/^}/p" "'"$GUARD_ROOT"'/scripts/guard-operator.sh")
         guard_up
@@ -106,6 +109,7 @@ teardown() { guard_teardown; }
     assert_success
     assert_output --partial "MAKE -C $GUARD_ROOT provision-host"
     assert_output --partial "SHELL_GUARD_UP_CALLED"
+    assert_output --partial "EXEC_POLICY_STAGE_CALLED"
 }
 
 @test "guard Makefile declares shell guard install/uninstall/check targets" {
