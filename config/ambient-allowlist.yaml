@@ -12,9 +12,6 @@ workload_caps:
   - cap_chown
   - cap_dac_override
   - cap_fowner
-  - cap_fsetid
-
-# Non-root login users that run git through the guard.
 grant_to:
   uid_min: 1000
   uid_max: 65533

@@ -53,16 +53,10 @@ cases:
   - {id: rm-nopreserve,     input: "rm -rf --no-preserve-root /", expect: blocked, rule: rm-rootfs}
   - {id: rm-normal-ok,      input: "rm -rf /tmp/build",        expect: allowed}
   - {id: swapoff-a,         input: "swapoff -a",               expect: blocked, rule: swap-teardown}
-  - {id: swapoff-file-ok,   input: "swapoff /swapfile",        expect: allowed}
-
-  # --- dd / mounts ---
   - {id: dd-device,         input: "dd if=/dev/zero of=/dev/sda", expect: blocked, rule: dd-device}
   - {id: dd-nvme,           input: "dd if=x of=/dev/nvme0n1",  expect: blocked, rule: dd-device}
   - {id: dd-file-ok,        input: "dd if=/dev/zero of=file.img bs=1M count=1", expect: allowed}
   - {id: umount-guard,      input: "umount /usr/lib/workspace-guard", expect: blocked, rule: mount-protected}
-  - {id: mount-other-ok,    input: "mount /dev/sdb1 /mnt",     expect: allowed}
-
-  # --- suppression: pipe sinks (REQ-SHG-308) ---
   - {id: pipe-tail,         input: "make check 2>&1 | tail -15", expect: blocked, rule: suppress-pipe}
   - {id: pipe-tail-bare,    input: "dmesg | tail",             expect: blocked, rule: suppress-pipe}
   - {id: pipe-head,         input: "ls 2>&1 | head",           expect: blocked, rule: suppress-pipe}
@@ -199,3 +193,74 @@ cases:
     input: bash -c echo-nested
     expect: blocked
     rule: inline-shell
+  - id: swapoff-file-blocked
+    input: swapoff /swapfile
+    expect: blocked
+    rule: system-admin-command
+  - id: mount-other-blocked
+    input: mount /dev/sdb1 /mnt
+    expect: blocked
+    rule: system-admin-command
+  - id: systemctl-stop-blocked
+    input: systemctl stop foo
+    expect: blocked
+    rule: system-manager-command
+  - id: systemctl-user-stop-blocked
+    input: systemctl --user stop gateway-compose.service
+    expect: blocked
+    rule: system-manager-command
+  - id: systemctl-daemon-reload-blocked
+    input: systemctl daemon-reload
+    expect: blocked
+    rule: system-manager-command
+  - id: loginctl-terminate-blocked
+    input: loginctl terminate-session 3
+    expect: blocked
+    rule: system-manager-command
+  - id: systemd-run-blocked
+    input: systemd-run --quiet foo
+    expect: blocked
+    rule: system-manager-command
+  - id: service-restart-blocked
+    input: service nginx restart
+    expect: blocked
+    rule: system-manager-command
+  - id: env-systemctl-blocked
+    input: env systemctl stop foo
+    expect: blocked
+    rule: system-manager-command
+  - id: sudo-systemctl-ok
+    input: sudo systemctl stop foo
+    expect: allowed
+  - id: useradd-blocked
+    input: useradd bob
+    expect: blocked
+    rule: system-admin-command
+  - id: modprobe-blocked
+    input: modprobe foo
+    expect: blocked
+    rule: system-admin-command
+  - id: iptables-blocked
+    input: iptables -L
+    expect: blocked
+    rule: system-admin-command
+  - id: ip-mutate-blocked
+    input: ip link set dev eth0 up
+    expect: blocked
+    rule: system-admin-command
+  - id: sysctl-write-blocked
+    input: sysctl -w net.ipv4.ip_forward
+    expect: blocked
+    rule: system-admin-command
+  - id: ip-show-ok
+    input: ip addr show
+    expect: allowed
+  - id: sysctl-read-ok
+    input: sysctl -a
+    expect: allowed
+  - id: sudo-useradd-ok
+    input: sudo useradd bob
+    expect: allowed
+  - id: echo-useradd-ok
+    input: echo useradd bob
+    expect: allowed

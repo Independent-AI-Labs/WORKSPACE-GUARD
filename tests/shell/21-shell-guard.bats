@@ -272,6 +272,68 @@ SHG_DD='--'
     [[ "$output" == *"busybox-shell"* ]]
 }
 
+# ---------- direct system administration (REQ-SHG-317/318) ----------
+
+@test "shell-guard: blocks direct systemctl stop (system-manager-command)" {
+    require_root_guard
+    run shg -c 'systemctl stop foo'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"system-manager-command"* ]]
+}
+
+@test "shell-guard: blocks systemctl --user stop (system-manager-command)" {
+    require_root_guard
+    run shg -c 'systemctl --user stop gateway-compose.service'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"system-manager-command"* ]]
+}
+
+@test "shell-guard: blocks service restart (system-manager-command)" {
+    require_root_guard
+    run shg -c 'service nginx restart'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"system-manager-command"* ]]
+}
+
+@test "shell-guard: does not block sudo systemctl (operator path)" {
+    require_root_guard
+    run shg -c 'sudo systemctl stop foo'
+    [[ "$output" != *"system-manager-command"* ]]
+}
+
+@test "shell-guard: does not block read-only systemctl status" {
+    require_root_guard
+    run shg -c 'systemctl status foo'
+    [[ "$output" != *"system-manager-command"* ]]
+}
+
+@test "shell-guard: blocks modprobe (system-admin-command)" {
+    require_root_guard
+    run shg -c 'modprobe foo'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"system-admin-command"* ]]
+}
+
+@test "shell-guard: blocks iptables (system-admin-command)" {
+    require_root_guard
+    run shg -c 'iptables -L'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"system-admin-command"* ]]
+}
+
+@test "shell-guard: blocks mutating ip (system-admin-command)" {
+    require_root_guard
+    run shg -c 'ip link set dev eth0 up'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"system-admin-command"* ]]
+}
+
+@test "shell-guard: does not block read-only ip addr show" {
+    require_root_guard
+    run shg -c 'ip addr show'
+    [[ "$output" != *"system-admin-command"* ]]
+}
+
 @test "shell-guard: blocks podman command boundary" {
     require_root_guard
     run shg -c 'podman run --rm image bash -c echo-inline'

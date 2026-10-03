@@ -64,6 +64,9 @@ fn base_hardened_entries_includes_identity_when_present() {
 
 #[test]
 fn hardened_git_env_pairs_non_privileged_nulls_global_and_injects_identity() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("identity");
     std::fs::write(&path, "user.email=e@test.local\nuser.name=E Test\n").expect("write");
@@ -107,6 +110,9 @@ fn hardened_git_env_pairs_privileged_only_safe_directory() {
 
 #[test]
 fn push_agent_hardened_git_env_non_privileged_builds_cstrings() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("identity");
     std::fs::write(&path, "user.email=x@y.z\n").expect("write");

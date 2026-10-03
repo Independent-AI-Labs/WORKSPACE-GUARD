@@ -399,9 +399,50 @@ handled by `make install-shell-guard`.
    classification. Avoidable helpers such as external date formatting shall
    be implemented in Rust instead of invoking a bare system command.
 
- - **REQ-SHG-316**: Tool-mediated writes and direct process launches that do
-   not enter guarded Bash are outside the shell scanner and shall be governed
-   by a separate execution-broker/file-write policy.
+  - **REQ-SHG-316**: Tool-mediated writes and direct process launches that do
+    not enter guarded Bash are outside the shell scanner and shall be governed
+    by a separate execution-broker/file-write policy.
+
+  - **REQ-SHG-317**: Mutating service- and unit-manager operations shall be
+    blocked at command position (exit 1) for ALL users including root, in
+    `-c` command text (`scope: command`). Script bodies remain a permitted
+    channel, consistent with `alt-interp` and `podman-command`; the exec
+    lane owns the binary-hash deny for the script path. The set is
+    `systemctl` and `loginctl` with a mutating verb (`start`, `stop`,
+    `restart`, `reload`, `reload-or-restart`, `try-restart`,
+    `try-reload-or-restart`, `isolate`, `kill`, `clean`, `freeze`, `thaw`,
+    `daemon-reload`, `daemon-reexec`, `mask`, `unmask`, `link`, `revert`,
+    `enable`, `disable`, `preset`, `preset-all`, `edit`, `reset-failed`,
+    `switch-root`, `set-property`, `set-environment`, `unset-environment`,
+    `import-environment`, and the `loginctl` session/seat mutators), a bare
+    `systemd-run`, and `service <name> <action>` with a mutating action.
+    Read-only subcommands (`status`, `show`, `list-*`, `is-*`, `cat`,
+    `get-*`, `--version`, `help`, `--status-all`) remain allowed. The match
+    shall be command-position only and shall omit the `sudo`/`doas` launcher
+    words so an operator's `sudo systemctl ...` remains permitted, while
+    `env`/`exec`/`nice`/`nohup`/`setsid`/`stdbuf`/`timeout`/`xargs`
+    wrappers still match. Rule id `system-manager-command`.
+
+  - **REQ-SHG-318**: Direct invocation of a system-administration binary
+    shall be blocked at command position (exit 1) for ALL users including
+    root, in `-c` command text (`scope: command`). Script bodies remain a
+    permitted channel, consistent with `alt-interp` and `podman-command`;
+    the exec lane owns the binary-hash deny for the script path. The set is:
+    `useradd`, `adduser`, `usermod`, `userdel`, `deluser`,
+    `groupadd`, `addgroup`, `groupmod`, `groupdel`, `delgroup`, `passwd`,
+    `chpasswd`, `gpasswd`, `chsh`, `chfn`, `visudo`, `modprobe`, `insmod`,
+    `rmmod`, `depmod`, `cryptsetup`, `dmsetup`, `mdadm`, `losetup`,
+    `swapon`, `swapoff`, `umount`, `mount`, `auditctl`, `apparmor_parser`,
+    `semanage`, `setenforce`, `crontab`, `at`, `batch`, `systemd-tmpfiles`,
+    `udevadm`,
+    `setfacl`, `setfattr`, `iptables`, `ip6tables`, `nft`, `ufw`,
+    `firewall-cmd`, `ifconfig`, `route`, `nmcli`, `busctl`, `dbus-send`,
+    `hostnamectl`, `timedatectl`, `localectl`; plus `ip` with a mutating
+    object-verb and `sysctl` in its write form (`-w` or `name=value`).
+    Read-only forms (`ip addr show`, `sysctl -a`) remain allowed. The match
+    shall be command-position only and shall omit the `sudo`/`doas` launcher
+    words so an operator's `sudo <tool>` remains permitted. Rule id
+    `system-admin-command`.
 
 ---
 
