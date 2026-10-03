@@ -92,3 +92,7 @@ patterns:
     regex: (^|([\n\x3b|&\x60]|&&|\|\||\x24\()[[:space:]]*|\b(env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b([[:space:]]+(-[^|&[:space:]]*|[A-Za-z_][A-Za-z0-9_]*=\S*))*[[:space:]]+)(/[^[:space:]|&\x60]+/)?((systemctl[[:space:]]+(-[^|&[:space:]]*[[:space:]]+)*(start|stop|restart|reload|reload-or-restart|try-restart|try-reload-or-restart|isolate|kill|clean|freeze|thaw|daemon-reload|daemon-reexec|mask|unmask|link|revert|enable|disable|preset|preset-all|edit|reset-failed|switch-root|set-property|set-environment|unset-environment|import-environment))|(loginctl[[:space:]]+(-[^|&[:space:]]*[[:space:]]+)*(terminate-session|kill-session|terminate-user|kill-user|(un)?lock-sessions?|flush-devices|attach|terminate-seat|set-user-linger|enable-linger|disable-linger))|(systemd-run)|(service[[:space:]]+(-[^|&[:space:]]*[[:space:]]+)*[^|&[:space:]]+[[:space:]]+(-[^|&[:space:]]*[[:space:]]+)*(start|stop|restart|reload|force-reload|try-restart|reload-or-restart)))\b
     hint: service and unit state changes are an operator operation - use sudo or a trusted maintenance script
     scope: command
+  - id: port-kill
+    regex: (^|([\n\x3b|&\x60]|&&|\|\||\x24\()[[:space:]]*|\b(env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b([[:space:]]+(-[^|&[:space:]]*|[A-Za-z_][A-Za-z0-9_]*=\S*))*[[:space:]]+)(/[^[:space:]|&\x60]+/)?((fuser\b[^\x3b|&]*\s-[^\x3b|&\s]*k)|((lsof|ss|netstat)\b([^\x3b|&]*[|])+[^\x3b|&]*\bkill\b))
+    hint: use kill <pid> on the specific process - port and file-use kills are an operator operation
+    scope: command

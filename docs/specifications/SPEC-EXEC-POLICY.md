@@ -221,6 +221,7 @@ disposition. Dispositions name the single owner:
 | `podman-command` | container execution channel | exec deny by hash | exec |
 | `system-manager-command` | mutating `systemctl`/`loginctl`/`service`/`systemd-run` operations | exec deny by hash; D-Bus/polkit; shell guard blocks the direct command until the exec lane is armed | exec |
 | `system-admin-command` | direct system-administration binaries (`useradd`, `modprobe`, `iptables`, `mount`, ...) | exec deny by hash; shell guard blocks the direct command until the exec lane is armed | exec |
+| `port-kill` | `fuser -k` and `lsof`/`ss`/`netstat` piped to `kill` | exec deny by hash; shell guard blocks the direct command until the exec lane is armed | exec |
 | `inline-shell` | nested `bash -c`/`sh -c` | exec cannot read the `-c` argument | content |
 | `uv-inline-interp` | `uv run <interpreter> -c` | argv-dependent | content |
 | `inline-code-channel` | heredoc/`eval`/`source <()` | shell grammar, not a syscall | content |

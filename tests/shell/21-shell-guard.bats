@@ -334,6 +334,32 @@ SHG_DD='--'
     [[ "$output" != *"system-admin-command"* ]]
 }
 
+@test "shell-guard: blocks fuser -k (port-kill)" {
+    require_root_guard
+    run shg -c 'fuser -k 8080/tcp'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"port-kill"* ]]
+}
+
+@test "shell-guard: blocks port listing piped to kill (port-kill)" {
+    require_root_guard
+    run shg -c 'lsof -ti:8080 | xargs kill'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"port-kill"* ]]
+}
+
+@test "shell-guard: does not block fuser without -k" {
+    require_root_guard
+    run shg -c 'fuser 8080/tcp'
+    [[ "$output" != *"port-kill"* ]]
+}
+
+@test "shell-guard: does not block a read-only port listing" {
+    require_root_guard
+    run shg -c 'lsof -i:8080'
+    [[ "$output" != *"port-kill"* ]]
+}
+
 @test "shell-guard: blocks podman command boundary" {
     require_root_guard
     run shg -c 'podman run --rm image bash -c echo-inline'

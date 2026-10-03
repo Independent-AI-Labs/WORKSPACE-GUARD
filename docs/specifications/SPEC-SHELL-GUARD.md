@@ -984,6 +984,7 @@ content (no kernel-observable effect; stays here), **SL** session
 | `podman-command` | EX | exec deny by hash |
 | `system-manager-command` | EX | exec deny by hash; shell guard blocks the direct mutating command |
 | `system-admin-command` | EX | exec deny by hash; shell guard blocks the direct admin command |
+| `port-kill` | EX | exec deny by hash; shell guard blocks the direct port-kill command |
 | `inline-shell` | CP | `-c` arg not readable at `bprm_check` |
 | `uv-inline-interp` | CP | argv-dependent |
 | `inline-code-channel` | CP | shell grammar, not a syscall |

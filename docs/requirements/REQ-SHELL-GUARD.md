@@ -444,6 +444,20 @@ handled by `make install-shell-guard`.
     words so an operator's `sudo <tool>` remains permitted. Rule id
     `system-admin-command`.
 
+  - **REQ-SHG-319**: Port- and file-use kills shall be blocked at command
+    position (exit 1) for ALL users including root, in `-c` command text
+    (`scope: command`). Script bodies remain a permitted channel, consistent
+    with `alt-interp` and `podman-command`; the exec lane owns the binary-hash
+    deny for the script path. The set is `fuser` invoked with a `-k`-bearing
+    option (including bundled forms such as `-km` and a path-qualified
+    binary), and a `lsof`, `ss`, or `netstat` listing piped, directly or
+    through `xargs`, into `kill`. Read-only queries (`fuser <file>`,
+    `lsof -i:<port>`) remain allowed. The match shall be command-position
+    only and shall omit the `sudo`/`doas` launcher words so an operator's
+    `sudo fuser ...` remains permitted, while the `env`/`exec`/`nice`/
+    `nohup`/`setsid`/`stdbuf`/`timeout`/`xargs` wrappers still match. Rule id
+    `port-kill`.
+
 ---
 
 ## 5. Environment Sanitisation (REQ-SHG-400 series)

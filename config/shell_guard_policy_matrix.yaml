@@ -264,3 +264,32 @@ cases:
   - id: echo-useradd-ok
     input: echo useradd bob
     expect: allowed
+  - id: port-kill-fuser-blocked
+    input: fuser -k 8080/tcp
+    expect: blocked
+    rule: port-kill
+  - id: port-kill-fuser-bundled-blocked
+    input: fuser -km /mnt
+    expect: blocked
+    rule: port-kill
+  - id: port-kill-lsof-blocked
+    input: lsof -ti:8080 | xargs kill
+    expect: blocked
+    rule: port-kill
+  - id: port-kill-ss-blocked
+    input: ss -ltnp | xargs kill
+    expect: blocked
+    rule: port-kill
+  - id: port-kill-netstat-blocked
+    input: netstat -tulpn | grep 8080 | xargs kill
+    expect: blocked
+    rule: port-kill
+  - id: fuser-query-ok
+    input: fuser 8080/tcp
+    expect: allowed
+  - id: lsof-query-ok
+    input: lsof -i:8080
+    expect: allowed
+  - id: sudo-fuser-ok
+    input: sudo fuser -k 8080/tcp
+    expect: allowed
