@@ -281,8 +281,8 @@ fn parse_args_exec_equals_blocked() {
 
 #[test]
 fn parse_args_stash_has_no_operation_state() {
-    // REQ-GGUARD-050: stash is blocked wholesale, so the parser must not
-    // grow per-operation state for any verb after the subcommand.
+    // REQ-GGUARD-050: stash is sudo-gated wholesale, so the parser must
+    // not grow per-operation state for any verb after the subcommand.
     let args = bytes(&["git", "stash", "drop", "clear", "--", "pop"]);
     let state = parse_args(&args).unwrap();
     assert_eq!(state.subcommand.as_deref(), Some("stash"));

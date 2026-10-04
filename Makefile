@@ -560,7 +560,7 @@ unmount-ws-backup: ## Unmount WS-BACKUP (ROOT)
 # ';' so values may contain spaces; list fields use brackets (paths=[a,b]).
 
 YAML_EDIT := /usr/bin/workspace-yaml-edit
-export FILE KEY FIELDS VALUE EXPECT_SHA256
+export FILE KEY NEW_KEY FIELDS VALUE EXPECT_SHA256
 
 .PHONY: build-yaml-edit install-yaml-edit
 build-yaml-edit: ## Build workspace-yaml-edit release binary (ROOT)
@@ -581,13 +581,20 @@ install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (R
 # YAML recipes use the same guarded interpreter as all other automation.
 YAML_SH := $(SCRIPT_BASH)
 
-.PHONY: yaml-add yaml-remove yaml-set yaml-bootstrap yaml-unset yaml-remove-comment yaml-delete yaml-get yaml-list yaml-validate yaml-check yaml-format
+.PHONY: yaml-add yaml-map-add yaml-remove yaml-set yaml-bootstrap yaml-unset yaml-remove-comment yaml-delete yaml-get yaml-list yaml-validate yaml-check yaml-format
 yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
 	fi'
 	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$$FIELDS"; \
 	"$(YAML_EDIT)" add "$$FILE" "$$KEY" "$${_ye_fields[@]}" $(YAML_FLAGS)'
+
+yaml-map-add: ## Insert a map entry: make yaml-map-add FILE=.. KEY=.. NEW_KEY=.. FIELDS="class=..;owner=.." (ROOT)
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-map-add needs root: sudo make yaml-map-add" >&2; exit 1; \
+	fi'
+	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$$FIELDS"; \
+	"$(YAML_EDIT)" map-add "$$FILE" "$$KEY" "$$NEW_KEY" "$${_ye_fields[@]}" $(YAML_FLAGS)'
 
 yaml-remove: ## Remove matching entries: make yaml-remove FILE=.. KEY=.. FIELDS="hook=x" (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \

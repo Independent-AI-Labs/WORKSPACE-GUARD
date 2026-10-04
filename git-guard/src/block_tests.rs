@@ -117,6 +117,17 @@ fn blocked_still_blocked_for_root() {
 }
 
 #[test]
+fn audit_allowed_only_for_privileged_sudo_gated() {
+    for sub in ["restore", "checkout", "switch", "submodule", "stash"] {
+        assert!(should_audit_allowed(sub, true), "{sub} privileged");
+        assert!(!should_audit_allowed(sub, false), "{sub} non-root");
+    }
+    for sub in ["status", "log", "reset", "clean", "commit", "push"] {
+        assert!(!should_audit_allowed(sub, true), "{sub} not sudo-gated");
+    }
+}
+
+#[test]
 fn push_force_blocked() {
     let mut state = empty_state("push");
     state.has_force_flag = true;
@@ -193,9 +204,21 @@ fn rebase_continue_allowed() {
 }
 
 #[test]
-fn stash_is_blocked_unconditionally_without_operation_parsing() {
-    // REQ-GGUARD-050: the whole subcommand is blocked, so every verb --
-    // including the harmless-looking ones -- is denied identically.
+fn stash_is_sudo_gated_not_blocked() {
+    // REQ-GGUARD-050: stash moved from the unconditional block to the
+    // sudo-gated category, matching checkout/restore/switch.
+    assert!(!BLOCKED_SUBCOMMANDS.contains(&"stash"));
+    assert!(SUDO_GATED_SUBCOMMANDS.contains(&"stash"));
+}
+
+#[test]
+fn stash_denied_for_non_root_allowed_for_root() {
+    // REQ-GGUARD-050: non-root agents are denied every verb before any
+    // operation parsing; root (operator) may run the whole subcommand.
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let cases: &[&[&str]] = &[
         &["git", "stash"],
         &["git", "stash", "push"],
@@ -209,35 +232,27 @@ fn stash_is_blocked_unconditionally_without_operation_parsing() {
         &["git", "stash", "future-op"],
         &["git", "stash", "--", "drop"],
     ];
+    let root = crate::is_config_privileged();
     for case in cases {
         let state = empty_state("stash");
         let argv_os = argv(case);
         let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
-        assert!(
-            matches!(result, Err(GuardError::Blocked { .. })),
-            "{case:?} must be blocked (REQ-GGUARD-050): {result:?}"
-        );
-    }
-}
-
-#[test]
-fn stash_hint_names_snapshot_alternatives_only() {
-    let state = empty_state("stash");
-    let argv_os = argv(&["git", "stash", "drop"]);
-    match check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None) {
-        Err(GuardError::Blocked { hint, .. }) => {
+        if root {
             assert!(
-                hint.contains("git diff") && hint.contains("worktree"),
-                "hint must name sanctioned snapshot alternatives: {hint}"
+                result.is_ok(),
+                "{case:?} must be allowed for root: {result:?}"
             );
-            for taboo in ["git stash", "stash pop", "stash list", "stash apply"] {
-                assert!(
-                    !hint.contains(taboo),
-                    "hint must not recommend another stash operation: {hint}"
-                );
+        } else {
+            match result {
+                Err(GuardError::Blocked { hint, .. }) => {
+                    assert!(
+                        hint.contains("sudo"),
+                        "non-root hint must name sudo: {hint}"
+                    );
+                }
+                other => panic!("{case:?} must be blocked for non-root: {other:?}"),
             }
         }
-        other => panic!("stash must be blocked: {other:?}"),
     }
 }
 

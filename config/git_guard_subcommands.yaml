@@ -37,13 +37,12 @@ blocked:
   - update-index
   - merge-file
   - merge-index
-  - stash
-
 sudo_gated:
   - submodule
   - checkout
   - switch
   - restore
+  - stash
 
 partial:
   - rm

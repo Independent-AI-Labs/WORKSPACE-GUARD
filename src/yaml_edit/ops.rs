@@ -18,6 +18,7 @@ const LOCK_PATH: &str = "/var/lib/workspace-guard/yaml-edit.lock";
 #[derive(Debug, PartialEq)]
 pub enum Intent {
     Add,
+    MapAdd,
     Remove,
     Set,
     Bootstrap,
@@ -35,6 +36,7 @@ pub struct Cli {
     pub intent: Intent,
     pub file: PathBuf,
     pub key: Option<String>,
+    pub new_key: Option<String>,
     pub specs: Vec<String>,
     pub value: Option<String>,
     pub dry_run: bool,
@@ -52,6 +54,7 @@ pub fn fail(code: i32, msg: &str) -> ! {
 pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
     let intent = match args.first().map(String::as_str) {
         Some("add") => Intent::Add,
+        Some("map-add") => Intent::MapAdd,
         Some("remove") => Intent::Remove,
         Some("set") => Intent::Set,
         Some("bootstrap") => Intent::Bootstrap,
@@ -91,6 +94,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
     }
     let need = match intent {
         Intent::Add | Intent::Remove => 3,
+        Intent::MapAdd => 4,
         Intent::Set | Intent::Bootstrap => 3,
         Intent::Unset | Intent::RemoveComment => 2,
         Intent::Delete => 1,
@@ -105,6 +109,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
     }
     let valid_len = match intent {
         Intent::Add | Intent::Remove => positional.len() >= 3,
+        Intent::MapAdd => positional.len() >= 4,
         Intent::List => positional.len() <= 2,
         Intent::Set | Intent::Bootstrap => positional.len() == 3,
         Intent::Unset | Intent::RemoveComment | Intent::Get => positional.len() == 2,
@@ -133,6 +138,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         Intent::Add | Intent::Remove => {
             (Some(positional[1].clone()), positional[2..].to_vec(), None)
         }
+        Intent::MapAdd => (Some(positional[1].clone()), positional[3..].to_vec(), None),
         Intent::Set | Intent::Bootstrap => (
             Some(positional[1].clone()),
             Vec::new(),
@@ -146,10 +152,16 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         Intent::Validate => (None, Vec::new(), None),
         Intent::Check | Intent::Format => (None, Vec::new(), None),
     };
+    let new_key = if intent == Intent::MapAdd {
+        positional.get(2).cloned()
+    } else {
+        None
+    };
     Ok(Cli {
         intent,
         file,
         key,
+        new_key,
         specs,
         value,
         dry_run,
@@ -469,6 +481,7 @@ pub(crate) fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
     }
     let intent = match cli.intent {
         Intent::Add => "add",
+        Intent::MapAdd => "map-add",
         Intent::Remove => "remove",
         Intent::Set => "set",
         Intent::Bootstrap => "bootstrap",

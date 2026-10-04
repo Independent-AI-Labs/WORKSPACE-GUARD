@@ -40,8 +40,9 @@ isolation is not yet built.
 Enforcement rests on three ideas:
 
 1. **Forward-only history.** Agents cannot rewrite, revert, restore, clean,
-   stash, force-push, or bypass hooks (`--no-verify`). `git commit
---amend` is available only to operators via sudo.
+   stash, force-push, or bypass hooks (`--no-verify`); `stash` and `git
+   commit --amend` are available only to operators via sudo, and destructive
+   checkout/switch forms stay blocked even for root.
 2. **Scoped root-locking.** Program I root-locks `.git/` inside workspace
    repos and provisioned-host clones; Program III root-locks user-global
    identity files and declared config globs. Locks are not applied to
@@ -180,10 +181,12 @@ before delegating to `git.original`.
 
 **Policy scope:**
 
-- Subcommand blocks: `reset`, `clean`, `restore`, `rebase`, `gc`, and related
-  destructive operations; sudo-gated `checkout` / `submodule`; flag gates on
-  `--hard`, `--no-verify`, force push, protected-branch pull/merge; `--amend`
-  sudo-gated.
+- Subcommand blocks: `reset`, `clean`, `rebase`, `gc`, and related destructive
+  operations; sudo-gated `checkout` / `switch` / `restore` / `submodule` /
+  `stash`; flag gates on `--hard`, `--no-verify`, force push, protected-branch
+  pull/merge; `--amend` sudo-gated. Every allowed root `sudo_gated` operation
+  is recorded as an `event=allow` audit record before real Git runs
+  (REQ-GGUARD-021a).
 - Config-key glob deny list on `-c` / `--config` / `--config-env`.
 - Closed child environment; capability flow keeps policy sub-calls
   least-privilege (no ambient caps) while the final exec path raises only

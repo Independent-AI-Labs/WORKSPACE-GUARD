@@ -51,6 +51,9 @@ splitting). The replacement:
 - **REQ-YE-002**: The tool shall support these intents:
   - `add <file> <list-key> <field-spec>...`: append one map entry to
     a list-of-maps key, or one item to a scalar-list key.
+  - `map-add <file> <map-key> <new-key> <field-spec>...`: insert one
+    previously absent entry into a mapping key, with the entry value
+    built from the field specs (a nested mapping).
   - `remove <file> <list-key> <field-spec>...`: delete every list
     entry matching ALL given field specs.
   - `set <file> <dotted.key> <value>`: set a scalar key, top-level or
@@ -210,6 +213,17 @@ splitting). The replacement:
   style, or not a mapping, the mutation shall fail closed. Creating
   top-level keys remains the job of `bootstrap`.
 
+- **REQ-YE-206**: `map-add` shall insert a previously absent key whose
+  value is a mapping built from the field specs, under a parent path
+  that resolves to an existing block mapping (list, flow-style, or
+  non-mapping parents fail closed with exit 1; a duplicate key fails
+  with exit 4). The new key is taken literally, never split on dots, so
+  path-shaped keys (e.g. a classification manifest entry) can be named
+  directly. The reused `set`/`get` literal-first dotted resolution
+  (REQ-YE-204) addresses the parent. This exposes the map-value insert
+  primitive already used by `set --create`; it does not introduce a
+  general query language.
+
 ---
 
 ## 4. Schema Registry and Validation (REQ-YE-300 series)
@@ -248,13 +262,14 @@ splitting). The replacement:
 
 ## 5. Sudo Gating (REQ-YE-400 series)
 
-- **REQ-YE-400**: `add`, `remove`, `set`, `bootstrap`, `unset`,
-  `remove-comment`, and `delete` shall refuse to mutate as non-root
-  (exit 2). `list`, `get`, `validate`, and supported `--dry-run`
-  transforms shall run as any user.
+- **REQ-YE-400**: `add`, `map-add`, `remove`, `set`, `bootstrap`,
+  `unset`, `remove-comment`, and `delete` shall refuse to mutate as
+  non-root (exit 2). `list`, `get`, `validate`, and supported
+  `--dry-run` transforms shall run as any user.
 
 - **REQ-YE-401**: Make targets shall be provided:
   `yaml-add FILE=.. KEY=.. FIELDS="a=b;c=[x,y]"`,
+  `yaml-map-add FILE=.. KEY=.. NEW_KEY=.. FIELDS="class=..;owner=.."`,
   `yaml-remove`, `yaml-set`, `yaml-unset`, `yaml-remove-comment`,
   `yaml-delete`, `yaml-get`, `yaml-list`, `yaml-validate`. `FIELDS`
   shall be split on `;` (never on spaces)
@@ -263,7 +278,8 @@ splitting). The replacement:
   exit 1.
 
 - **REQ-YE-403** *(payload isolation, REQ-YE-900)*: The mutating recipes
-  shall read `FILE`, `KEY`, `VALUE`, `FIELDS`, and `EXPECT_SHA256` from
+  shall read `FILE`, `KEY`, `NEW_KEY`, `VALUE`, `FIELDS`, and
+  `EXPECT_SHA256` from
   the exported environment at runtime and shall not interpolate their
   values into the scanned shell command text. A field or value that
   contains an interpreter alternation or an inline-shell spelling shall

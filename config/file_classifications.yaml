@@ -107,3 +107,12 @@ files:
   res/LOGO.png:
     class: binary
     owner: workspace-ci
+  config/shell_guard_policy_matrix.yaml:
+    class: policy-definition
+    owner: workspace-guard
+  src/shell_guard/tests.rs:
+    class: policy-definition
+    owner: workspace-guard
+  tests/shell/21-shell-guard.bats:
+    class: policy-definition
+    owner: workspace-guard

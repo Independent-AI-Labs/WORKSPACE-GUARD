@@ -465,14 +465,6 @@ cases:
       - list
     expect: blocked
     reason_contains: stash
-  - id: stash-clear-root-blocked
-    argv:
-      - git
-      - stash
-      - clear
-    expect: blocked
-    reason_contains: stash
-    sudo_only: true
   - id: ro-sanitize-log
     argv:
       - git
@@ -624,3 +616,16 @@ cases:
       - core.hooksPath
       - push
     expect: blocked
+  - id: stash-root-allowed
+    argv:
+      - git
+      - stash
+    expect: allowed
+    sudo_only: true
+  - id: stash-push-non-root-blocked
+    argv:
+      - git
+      - stash
+      - push
+    expect: blocked
+    reason_contains: stash

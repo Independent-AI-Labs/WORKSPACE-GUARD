@@ -417,13 +417,18 @@ persistence failure before Git is typed `GuardUnavailable` exit 3, so the
 guard never executes an argv rewrite it could not report or persist, and
 never reports a rewrite it did not perform.
 
-`stash` is an unconditional category-1 block. The decision occurs before stash
-operation parsing, so bare `stash`, all named operations, unknown future
-operations, and operands after `--` have the same result for root and non-root.
-Although `list` and `show` are read-only, they remain blocked to avoid a second
-stash grammar and gaps as Git evolves. The hint names the sanctioned temporary
-worktree and `git diff` snapshot alternatives; it must not recommend another
-stash operation.
+`stash` is a sudo-gated subcommand (REQ-GGUARD-050). The decision occurs before
+stash operation parsing, so bare `stash`, all named operations, unknown future
+operations, and operands after `--` have the same result: non-root users are
+denied, and an effective UID 0 operator invocation is allowed. Root is trusted
+(SPEC-GIT-GUARD-IMPL section 9) and already holds the same worktree authority
+through the other sudo-gated porcelains, so gating rather than an unconditional
+block avoids a second stash grammar and the operation-classification gaps it
+would introduce. A root run is also classified mutating (REQ-GGUARD-175) so the
+per-invocation ownership lock and post-run reconcile cover the
+unlink/recreate. The non-root hint directs the operator to `sudo git stash`;
+agent alternatives remain the temporary worktree and `git diff` snapshot in
+`AGENTS.md`.
 
 `branch` policy derives operations from branch's own option grammar. Any actual
 force option blocks, whether standalone or combined with delete, move, or copy.
@@ -1006,6 +1011,13 @@ exact removed tokens):
 v=1|ts=2026-09-19T05:32:53Z|event=sanitize|exit=0|uid=1000|cwd=%2Fhome%2Fagent%2FWORKSPACE-VM|argc=4|arg0=git|arg1=-c|arg2=core.hooksPath%3D%2Fdev%2Fnull|arg3=log|subcommand=log|drops=2|drop0=-c|drop1=core.hooksPath%3D%2Fdev%2Fnull|reason=read-only%20config%20sanitization
 ```
 
+`allow` example (allowed root-privileged sudo-gated operation, REQ-GGUARD-021a;
+written before real Git runs, so its persistence failure aborts with exit 3):
+
+```
+v=1|ts=2026-10-03T17:45:00Z|event=allow|exit=0|uid=0|cwd=%2Fworkspace|argc=6|arg0=git|arg1=restore|arg2=--source%3DHEAD|arg3=--staged|arg4=--worktree|arg5=%3A%2F|subcommand=restore|reason=root%20sudo-gated%20operation
+```
+
 Fields are fixed-order ASCII `name=value` pairs separated by raw `|`, followed
 by exactly one newline. Values preserve only the approved unreserved ASCII set;
 `%`, delimiters, spaces, CR/LF, controls, and bytes `>=0x7f` use canonical
@@ -1015,7 +1027,10 @@ is never audited. Event classes are `block`, `contract-reject`,
 `contract-unavailable`, `sanitize` (allowed invocation, argv rewritten under
 §3.3: `exit=0`, with `subcommand`, `drops`, and indexed `dropK` fields
 carrying the exact removed tokens between the argv fields and the final
-`reason`), and, only when a separate authoritative sink
+`reason`), `allow` (allowed root-privileged `sudo_gated` operation,
+REQ-GGUARD-021a: `exit=0`, with the `subcommand` field between the argv fields
+and the final `reason`; written before real Git runs and fail-closed), and,
+only when a separate authoritative sink
 successfully stores it, `audit-failure`. Version, names/order,
 decimal forms, and event vocabulary are parser-enforced. Unsupported versions,
 bad escapes, duplicate/missing/reordered fields, count mismatch, unknown classes,
@@ -1218,7 +1233,8 @@ flag), keep `+i` on `.git/hooks/*` + registries. Delivered as a
 
 ### 8.10 Interactions
 
-- **stash**: blocked (REQ-GGUARD-050); reconcile does not special-case it.
+- **stash**: sudo-gated (REQ-GGUARD-050); a root run is a mutating subcommand
+  (REQ-GGUARD-175), so reconcile runs after it.
 - **pre-push cap scrub** (`setpriv --inh-caps=-all`): unaffected; the
   scrub targets the hook's children, reconcile runs in the guard
   before the hook is ever spawned.

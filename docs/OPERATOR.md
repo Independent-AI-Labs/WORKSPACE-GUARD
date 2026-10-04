@@ -15,6 +15,19 @@ root-only because they change system state.
 
 Policy and implementation detail: `docs/specifications/`.
 
+## Git tracked-change wipe (root)
+
+Discard tracked index and worktree changes without moving the HEAD pointer:
+
+```bash
+sudo git restore --source=HEAD --staged --worktree :/
+```
+
+Untracked files remain; `git clean` and `git reset` stay unconditionally
+blocked. Every allowed root `sudo_gated` operation, including this wipe, is
+recorded to the audit sink as an `event=allow` record before real Git runs
+(REQ-GGUARD-021a).
+
 ## Shell guard (`/bin/bash` replacement)
 
 The shell guard installs `workspace-shell-guard` at the resolved bash

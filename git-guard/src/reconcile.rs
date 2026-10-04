@@ -49,8 +49,10 @@ use nix::unistd::{chown, Gid, Uid};
 
 /// Porcelains that mutate worktree files (REQ-GGUARD-175). Resolved
 /// canonical names only: args.rs expands abbreviations before this is
-/// consulted. `stash` is absent: it is blocked outright
-/// (REQ-GGUARD-050). `commit` is absent: it writes only under `.git/`
+/// consulted. `stash` is present because it is sudo-gated
+/// (REQ-GGUARD-050) and unlinks/recreates worktree files, so root runs
+/// must take the same ownership lock and reconcile as the other
+/// mutating porcelains. `commit` is absent: it writes only under `.git/`
 /// (reclaimed by gitdir::lock), never the worktree policy set.
 pub const MUTATING_SUBCOMMANDS: &[&str] = &[
     "am",
@@ -64,6 +66,7 @@ pub const MUTATING_SUBCOMMANDS: &[&str] = &[
     "reset",
     "restore",
     "revert",
+    "stash",
     "submodule",
     "switch",
 ];

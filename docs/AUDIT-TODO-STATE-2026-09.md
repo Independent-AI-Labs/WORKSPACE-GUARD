@@ -71,7 +71,7 @@ Item counts are from `TODO.md`. Verdicts are this audit's assessment.
 | 040 Dangerous Config-Key Catalog | 9 | PARTIAL | Glob catalogs exist (`config/git_guard_config_keys.yaml`); no per-entry threat class or structured schema fields. |
 | 041 Config-Key Payload Parsing | 9 | PARTIAL | Splits on first `=`, but through `from_utf8` with `unwrap_or("")` (`args.rs:186-197`). |
 | 042 Allowed Config Passthrough | 4 | UNVERIFIED | Passthrough behavior not isolated in this pass. |
-| 050 Unconditional Stash Block | 7 | PARTIAL | `config/git_guard_subcommands.yaml` lists `stash` under `blocked`, but `block.rs:104-115` retains the drop/clear conditional path. |
+| 050 Stash Sudo-Gate | 7 | DONE | Reclassified 2026-10-03 from the unconditional `blocked` category to `sudo_gated`: non-root denied before operation parsing, root allowed; `stash` added to `MUTATING_SUBCOMMANDS` so a root run takes the ownership lock and reconcile. |
 | 051 Branch Force Semantics | 9 | PARTIAL | Blocks `-D`/`-M` (`block.rs:117-129`); full cluster/grammar handling absent. |
 | 052 Push Force Semantics | 11 | PARTIAL | Blocks `-f`/`--force-with-lease` (`block.rs:145-152`) but the hint still recommends `--force-with-lease`, which the task says to remove. |
 | 053 Foreground Push Detection | 7 | PARTIAL | `block.rs:161-179` reads `/proc/self/stat`; `unwrap_or(0)` on parse failure does not fail closed. |

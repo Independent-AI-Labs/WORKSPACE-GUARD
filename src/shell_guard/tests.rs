@@ -81,9 +81,9 @@ fn policy_matrix_agrees() {
         );
         let hit = report::find_hit(case.input.as_bytes(), &rules, &case.ctx);
         match case.expect.as_str() {
-            "blocked" => {
+            "blocked" | "reported" => {
                 let rule =
-                    hit.unwrap_or_else(|| panic!("case {}: expected block, got allow", case.id));
+                    hit.unwrap_or_else(|| panic!("case {}: expected a hit, got allow", case.id));
                 if let Some(want) = &case.rule {
                     assert_eq!(&rule.rule.id, want, "case {}: wrong rule matched", case.id);
                 }
@@ -110,15 +110,22 @@ fn every_pattern_has_a_blocked_case() {
     ))
     .expect("matrix yaml readable");
     let matrix: Matrix = serde_yaml::from_str(&text).expect("matrix yaml parses");
-    for (id, _, _, scope) in shell_config::SHELL_PATTERNS {
+    for (id, _, _, scope, mode) in shell_config::SHELL_PATTERNS {
+        let want = if *mode == "report" {
+            "reported"
+        } else {
+            "blocked"
+        };
         assert!(
             matrix.cases.iter().any(|c| {
-                c.expect == "blocked"
+                c.expect == want
                     && c.rule.as_deref() == Some(*id)
                     && (*scope == "both" || *scope == c.ctx)
             }),
-            "pattern {} has no blocked matrix case in a context its scope {:?} applies to",
+            "pattern {} (mode {:?}) has no {:?} matrix case in a context its scope {:?} applies to",
             id,
+            mode,
+            want,
             scope
         );
     }
@@ -127,14 +134,14 @@ fn every_pattern_has_a_blocked_case() {
 #[test]
 fn ids_are_unique() {
     let mut seen = std::collections::HashSet::new();
-    for (id, _, _, _) in shell_config::SHELL_PATTERNS {
+    for (id, _, _, _, _) in shell_config::SHELL_PATTERNS {
         assert!(seen.insert(id), "duplicate pattern id {}", id);
     }
 }
 
 #[test]
 fn scopes_are_valid() {
-    for (id, _, _, scope) in shell_config::SHELL_PATTERNS {
+    for (id, _, _, scope, mode) in shell_config::SHELL_PATTERNS {
         assert!(
             *scope == "command"
                 || *scope == "script"
@@ -144,7 +151,26 @@ fn scopes_are_valid() {
             id,
             scope
         );
+        assert!(
+            *mode == "block" || *mode == "report",
+            "pattern {} has invalid mode {:?}",
+            id,
+            mode
+        );
     }
+}
+
+#[test]
+fn should_block_only_for_block_mode() {
+    let make = |mode: &'static str| Rule {
+        id: "t-mode",
+        re: Regex::new(r"\bzz-probe\b").unwrap(),
+        hint: "h",
+        scope: "both",
+        mode,
+    };
+    assert!(report::should_block(&make("block")));
+    assert!(!report::should_block(&make("report")));
 }
 
 #[test]
@@ -154,6 +180,7 @@ fn command_scoped_rule_is_invisible_in_script_context() {
         re: Regex::new(r"\bzz-probe\b").unwrap(),
         hint: "h",
         scope: "command",
+        mode: "block",
     };
     let rules = vec![rule];
     assert!(report::find_hit(b"zz-probe x", &rules, "command").is_some());
@@ -167,6 +194,7 @@ fn script_scoped_rule_is_invisible_in_command_context() {
         re: Regex::new(r"\bzz-probe\b").unwrap(),
         hint: "h",
         scope: "script",
+        mode: "block",
     };
     let rules = vec![rule];
     assert!(report::find_hit(b"zz-probe x", &rules, "script").is_some());
@@ -180,6 +208,7 @@ fn both_scoped_rule_matches_everywhere() {
         re: Regex::new(r"\bzz-probe\b").unwrap(),
         hint: "h",
         scope: "both",
+        mode: "block",
     };
     let rules = vec![rule];
     assert!(report::find_hit(b"zz-probe x", &rules, "command").is_some());

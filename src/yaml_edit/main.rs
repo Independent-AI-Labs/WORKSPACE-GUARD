@@ -32,6 +32,7 @@ fn usage() -> ! {
     eprintln!(
         "usage:\n  \
          workspace-yaml-edit add      <file> <list-key> <field-spec>... [--dry-run]\n  \
+         workspace-yaml-edit map-add  <file> <map-key> <new-key> <field-spec>... [--dry-run]\n  \
          workspace-yaml-edit remove   <file> <list-key> <field-spec>... [--dry-run] [--allow-no-match]\n  \
          workspace-yaml-edit set      <file> <dotted.key> <value> [--string] [--create] [--dry-run]\n  \
          workspace-yaml-edit bootstrap <file> <top-level-key> <value> [--string] [--dry-run]\n  \
@@ -53,6 +54,7 @@ fn main() {
     let cli = ops::parse_cli(&args).unwrap_or_else(|_| usage());
     match cli.intent {
         ops::Intent::Add => ops::run_add(&cli),
+        ops::Intent::MapAdd => admin::run_map_add(&cli),
         ops::Intent::Remove => ops::run_remove(&cli),
         ops::Intent::Set => ops::run_set(&cli),
         ops::Intent::Bootstrap => admin::run_bootstrap(&cli),

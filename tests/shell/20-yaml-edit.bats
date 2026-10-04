@@ -344,6 +344,27 @@ EOF
     assert_output --partial "+      - src/a.py"
 }
 
+@test "map-add inserts a nested map entry in dry-run" {
+    local f="$TEST_TMPDIR/classify.yaml"
+    printf 'files:\n  existing.yaml:\n    class: lock\n' > "$f"
+    run "$(_ye)" map-add "$f" files "a/b.yaml" class=policy-definition owner=wg --dry-run
+    assert_success
+    assert_output --partial "+  a/b.yaml:"
+    assert_output --partial "+    class: policy-definition"
+    assert_output --partial "+    owner: wg"
+}
+
+@test "map-add rejects a duplicate entry and a missing map key" {
+    local f="$TEST_TMPDIR/classify.yaml"
+    printf 'files:\n  existing.yaml:\n    class: lock\n' > "$f"
+    run "$(_ye)" map-add "$f" files existing.yaml class=lock --dry-run
+    assert_equal "$status" 4
+    assert_output --partial "key already exists"
+    run "$(_ye)" map-add "$f" missing x class=lock --dry-run
+    assert_failure
+    assert_output --partial "key not found"
+}
+
 @test "dry-run unset removes every wildcard field" {
     local f="$TEST_TMPDIR/hooks.yaml"
     printf 'hooks:\n  - id: one\n    safety: true\n  - id: two\n    safety: false\n' > "$f"

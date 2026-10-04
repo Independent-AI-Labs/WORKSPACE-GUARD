@@ -257,10 +257,11 @@ Every pattern in the policy table is tried against the raw text; the
 first match wins. Patterns carry a `scope` (REQ-SHG-312): `command`
 rules only apply to `-c` text, `script` rules only to script bodies,
 `untrusted-script` rules only to untrusted script bodies, and `both` (the
-default) to every scanned context. Trusted-tier script
-bodies (§4.1) are scanned with the same rules and are blocked on a
-match; the tier only certifies provenance, not an execution
-exemption.
+default) to every scanned context. Trusted-tier direct regular
+files (§4.1) are executed by path without raw-text body scanning;
+trust certifies provenance, and the root-owned or immutable-anchored
+path is what keeps the agent from authoring or modifying the file.
+Command strings and untrusted script bodies remain policy-scanned.
 
 The pattern groups (exact regexes live in
 `config/shell_guard_policy.yaml`, §7):
@@ -994,3 +995,32 @@ content (no kernel-observable effect; stays here), **SL** session
 
 A new rule added to the policy file without a disposition row in
 SPEC-EXEC-POLICY §7 fails the REQ-EXEC-151 gate.
+
+---
+
+## 19. Report-Only Rule Mode
+
+Each pattern in `config/shell_guard_policy.yaml` carries an optional `mode`
+(`block`, the default, or `report`), consumed by REQ-SHG-320. `block` keeps
+the original behaviour: the first matching rule terminates the command with
+exit 1. `report` is the observation half of the two-layer prevention model
+for the service-killing class. On a hit it renders a `REPORTED:` notice to
+stderr and the controlling tty, appends `report rule: <id>` to the audit sink,
+and then continues to `exec_real` unchanged; report hits never alter the exit
+status.
+
+Codegen (`build_shell_guard.rs`) threads `mode` into the generated
+`SHELL_PATTERNS` tuple (`id`, `regex`, `hint`, `scope`, `mode`) and validates
+at build time that each pattern has a policy-matrix case whose `expect`
+matches its mode (`blocked` for `block`, `reported` for `report`), so a report
+rule cannot be added without an answer. The runtime decision is
+`should_block(rule) = rule.mode != "report"`; the renderer is
+`report::report_notice`.
+
+The report rules (`report-port-kill`, `report-orphan-remove`,
+`report-network-remove`, `report-mass-container-rm`,
+`report-cross-unit-control`, `report-compose-run`) are `scope: both`, so they
+also observe untrusted script bodies, and are ordered after the block rules so
+a command already covered by a block rule reports the block rule first. They
+are report-only first: promotion to `block` follows once the false-positive
+rate is known.

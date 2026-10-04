@@ -57,7 +57,9 @@ The core insight: if the _real_ binary is mode 0700 root:root and the _guard_ bi
   option for non-root users; the verified root operator path may amend.
 - **REQ-GGUARD-039**: The guard shall block `git push --force` and `git push -f`.
 - **REQ-GGUARD-040**: The guard shall block `git branch -D` (force delete).
-- **REQ-GGUARD-041**: The guard shall block `git stash drop` and `git stash clear`.
+- **REQ-GGUARD-041**: The guard shall sudo-gate the whole `git stash`
+  subcommand: non-root users are denied every operation including `drop` and
+  `clear`, while an effective UID 0 operator invocation is allowed.
 - **REQ-GGUARD-042**: The guard shall allow `git revert`; revert is a
   forward-only operation and remains subject to hooks and ownership
   reconciliation.

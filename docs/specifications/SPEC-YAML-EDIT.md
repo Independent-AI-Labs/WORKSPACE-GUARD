@@ -90,6 +90,7 @@ authoritative change record.
 
 ```
 workspace-yaml-edit add      <file> <list-key> <field-spec>...   (ROOT)
+workspace-yaml-edit map-add  <file> <map-key> <new-key> <field-spec>... (ROOT)
 workspace-yaml-edit remove   <file> <list-key> <field-spec>...   (ROOT)
 workspace-yaml-edit set      <file> <dotted.key> <value>         (ROOT)
 workspace-yaml-edit bootstrap <file> <top-level-key> <value>      (ROOT)
@@ -167,6 +168,14 @@ block mapping, and the new leaf key is appended at the end of the
 parent's block region at child indent. Missing parents, flow-style
 parents, non-mapping parents, and top-level keys (use `bootstrap`)
 all fail closed (REQ-YE-205).
+
+`map-add <file> <map-key> <new-key> <field-spec>...` is the map-value
+counterpart (REQ-YE-206): the parent `<map-key>` resolves like a dotted
+`set` key, but `<new-key>` is taken literally (never split on dots), so
+a path-shaped entry key can be named directly. The entry value is the
+mapping built from the field specs by the same grammar as `add`; a
+duplicate key exits 4, and a missing, flow-style, or non-mapping parent
+exits 1.
 
 ### 3.4 Unset paths
 
@@ -284,6 +293,8 @@ After writing the temp file, re-parse it with serde_yaml and assert
 exactly one semantic delta against the pre-edit parse:
 
 - add: sequence length +1 and the new item deep-equals the spec entry
+- map-add: the parent mapping gained exactly the new key and its value
+  deep-equals the spec entry mapping
 - remove: no item matches the spec and length decreased by the number
   of matched entries
 - set: the resolved key deep-equals the new typed value
@@ -322,6 +333,18 @@ only terminal blank or whitespace-only lines, then appends exactly one `\n`.
 Changed and emitted lines contain no trailing spaces. Interior unrelated bytes
 are copied unchanged. This fixes the final-list-entry regression where
 terminal line reconstruction produced a new blank line at EOF.
+
+### 4.9 map-add
+
+1. Parse; resolve `<map-key>` with literal-first dotted resolution; the
+   resolved node must be a block mapping (exit 1 otherwise).
+2. Build the entry as a `serde_yaml::Value` mapping from the field specs
+   (same grammar as `add`, section 3.1).
+3. Duplicate check: if `<new-key>` already exists in the mapping, exit 4
+   with the file untouched.
+4. Insert the key at the end of the parent's block region at child
+   indent via `splice_insert_map_key`; the value renders as a nested
+   block mapping. Verify, schema-validate, install (sections 4.4-4.5).
 
 ---
 
@@ -440,6 +463,7 @@ digest.) Audit write failure aborts before install or unlink (REQ-YE-601).
 
 ```makefile
 yaml-add:      ## (ROOT) FIELDS="hook=x;reason=...;paths=[a,b];added_by=.."
+yaml-map-add:  ## (ROOT) KEY=files NEW_KEY=path FIELDS="class=..;owner=.."
 yaml-remove:   ## (ROOT) FIELDS="hook=x;paths=[a]"
 yaml-set:      ## (ROOT) FILE=.. KEY=unit.threshold VALUE=80
 yaml-bootstrap: ## (ROOT) FILE=.. KEY=top_level VALUE=123
@@ -526,7 +550,8 @@ root-owned CI repo.
   regression test per section-9 finding.
 - bats `tests/shell/20-yaml-edit.bats`: usage/exit codes, non-root
   refusal, preflight diagnostics, `list`/`get`/`validate`, and
-  `--dry-run` transforms as a non-root user. Root mutation paths
+  `--dry-run` transforms as a non-root user, including `map-add`
+  nested-map insertion, duplicate-key exit 4, and missing-parent exit. Root mutation paths
   (install, chattr, flock, audit) run in the privileged Podman tier
   following the suite 16/17 pattern; PATH interception cannot fake
   `geteuid()` for a compiled binary and `unshare -Ur` is blocked in

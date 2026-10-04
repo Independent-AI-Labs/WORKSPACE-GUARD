@@ -14,6 +14,7 @@ fn mutating_subcommands_are_classified() {
         "reset",
         "restore",
         "revert",
+        "stash",
         "submodule",
         "switch",
     ] {
@@ -24,7 +25,7 @@ fn mutating_subcommands_are_classified() {
 #[test]
 fn non_mutating_subcommands_are_classified() {
     for sub in [
-        "commit", "status", "log", "diff", "fetch", "push", "show", "stash", "branch", "tag",
+        "commit", "status", "log", "diff", "fetch", "push", "show", "branch", "tag",
     ] {
         assert!(!is_mutating(sub), "{sub} must not be classified mutating");
     }

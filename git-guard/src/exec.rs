@@ -206,6 +206,17 @@ pub fn execve_real_git(
 
     verify_git_original()?;
 
+    // REQ-GGUARD-021a: record every allowed root-privileged sudo-gated
+    // operation before real git runs. Fail closed: a privileged destructive
+    // operation must not proceed without its evidence.
+    if let Some(sub) = state.and_then(|s| s.subcommand.as_deref()) {
+        if crate::block::should_audit_allowed(sub, privileged) {
+            let fields = crate::log::audit_argv_fields(sub, argv_os);
+            crate::log::audit_allowed(&fields)
+                .map_err(|e| GuardError::GuardUnavailable(format!("allow audit: {}", e)))?;
+        }
+    }
+
     for msg in collect_sudo_gated_env_warnings(privileged) {
         if nested {
             crate::log::warn_audit_only(&msg);

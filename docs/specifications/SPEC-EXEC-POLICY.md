@@ -222,6 +222,12 @@ disposition. Dispositions name the single owner:
 | `system-manager-command` | mutating `systemctl`/`loginctl`/`service`/`systemd-run` operations | exec deny by hash; D-Bus/polkit; shell guard blocks the direct command until the exec lane is armed | exec |
 | `system-admin-command` | direct system-administration binaries (`useradd`, `modprobe`, `iptables`, `mount`, ...) | exec deny by hash; shell guard blocks the direct command until the exec lane is armed | exec |
 | `port-kill` | `fuser -k` and `lsof`/`ss`/`netstat` piped to `kill` | exec deny by hash; shell guard blocks the direct command until the exec lane is armed | exec |
+| `report-port-kill` | port/file-use kill intent (report-only) | report-only; observational, no enforcement | content |
+| `report-orphan-remove` | compose orphan removal (report-only) | report-only; observational, no enforcement | content |
+| `report-network-remove` | shared-network removal (report-only) | report-only; observational, no enforcement | content |
+| `report-mass-container-rm` | host-wide container sweep (report-only) | report-only; observational, no enforcement | content |
+| `report-cross-unit-control` | cross-unit service control (report-only) | report-only; observational, no enforcement | content |
+| `report-compose-run` | compose run dependency reconcile (report-only) | report-only; observational, no enforcement | content |
 | `inline-shell` | nested `bash -c`/`sh -c` | exec cannot read the `-c` argument | content |
 | `uv-inline-interp` | `uv run <interpreter> -c` | argv-dependent | content |
 | `inline-code-channel` | heredoc/`eval`/`source <()` | shell grammar, not a syscall | content |

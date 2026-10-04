@@ -179,6 +179,52 @@ pub fn audit_sanitize(report_fields: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Build the `argc`/`argN`/`subcommand` field set for the allowed-operation
+/// audit record (REQ-GGUARD-021a). Every argument is percent-encoded with the
+/// same byte-exact discipline as the block and sanitize records.
+pub(crate) fn audit_argv_fields(subcommand: &str, argv_os: &[std::ffi::OsString]) -> String {
+    let mut fields = format!("argc={}", argv_os.len());
+    for (i, arg) in argv_os.iter().enumerate() {
+        fields.push_str(&format!("|arg{}={}", i, pct_encode(arg.as_bytes())));
+    }
+    fields.push_str(&format!(
+        "|subcommand={}",
+        pct_encode(subcommand.as_bytes())
+    ));
+    fields
+}
+
+/// Append the allowed-operation audit record to the home log sink (same
+/// sink and O_NOFOLLOW discipline as block/warn). Written for every
+/// root-privileged (`euid 0`) invocation of a sudo-gated subcommand before
+/// real git runs (REQ-GGUARD-021a). Unlike the sanitize record this is
+/// fail-closed: the caller turns a persistence failure into
+/// `GuardUnavailable`, so a privileged destructive operation is never
+/// performed without its evidence.
+pub fn audit_allowed(record_fields: &str) -> std::io::Result<()> {
+    let uid = getuid().as_raw();
+    let cwd = std::env::current_dir()
+        .map(|p| pct_encode(p.as_os_str().as_bytes()))
+        .unwrap_or_else(|_| "?".to_string());
+    let home = get_user_home(uid)
+        .ok_or_else(|| std::io::Error::other("no home directory for audit sink"))?;
+    let log_path = Path::new(&home).join(LOG_FILE);
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&log_path)?;
+    writeln!(
+        f,
+        "v=1|ts={}|event=allow|exit=0|uid={}|cwd={}|{}|reason=root%20sudo-gated%20operation",
+        timestamp_utc_z(),
+        uid,
+        cwd,
+        record_fields
+    )?;
+    Ok(())
+}
+
 fn get_user_home(uid: u32) -> Option<String> {
     User::from_uid(Uid::from_raw(uid))
         .ok()

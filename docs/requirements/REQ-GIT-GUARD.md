@@ -131,8 +131,8 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-020a**: Every exact subcommand in the compiled `sudo_gated`
   category shall be denied to non-root users and allowed only for an effective
   UID 0 operator invocation, subject to any unconditional destructive-form
-  checks. The category currently covers `submodule`, `checkout`, `switch`, and
-  `restore`; the policy file remains authoritative.
+  checks. The category currently covers `submodule`, `checkout`, `switch`,
+  `restore`, and `stash`; the policy file remains authoritative.
 - **REQ-GGUARD-020b**: Every exact subcommand in the compiled `partial`
   category shall run its command-specific policy before execution. In
   particular, `git rm --cached` may pass because it preserves worktree files
@@ -155,6 +155,16 @@ This document specifies the requirements for the Rust binary. The installation/d
   report. If stderr is a terminal but its terminal identity cannot be established,
   the guard shall retain the already-attempted stderr report and skip the tty
   copy rather than risk duplicate terminal output.
+- **REQ-GGUARD-021a**: Every allowed invocation of a `sudo_gated` subcommand by
+  an effective-UID-0 operator shall append exactly one `event=allow` audit
+  record before real Git runs. The record shall follow the audit grammar of
+  SPEC-GIT-GUARD section 7.1 with `exit=0`, the caller's real UID, the
+  percent-encoded working directory, `argc` plus contiguous indexed `argN`
+  arguments, the `subcommand`, and a stable reason. A failure to persist the
+  record shall abort the invocation as guard-unavailable (exit 3), so a
+  privileged operation never runs without its evidence. Non-root invocations
+  and non-`sudo_gated` subcommands produce no such record, and the record never
+  changes the invocation's outcome.
 
 ### 4. Destructive Command Options
 
@@ -310,16 +320,19 @@ This document specifies the requirements for the Rust binary. The installation/d
 ### 6. Subcommand-Specific Blocks
 
 - **REQ-GGUARD-050**: The exact top-level `stash` subcommand shall be in the
-  compiled unconditional `blocked` category and shall exit 1 for every user,
-  including root, before stash-operation parsing. This includes bare `stash` and
-  every operation, including `push`, legacy `save`, `pop`, `apply`, `list`,
-  `show`, `drop`, and `clear`; operands and `--` shall not weaken the top-level
-  block. Mutating stash forms can unlink/recreate worktree or index state and can
-  fail partway on root-owned immutable policy files. Read-only forms are also
-  denied so enforcement remains one exact, auditable subcommand rule without
-  operation-classification gaps. The block report shall recommend the sanctioned
-  alternatives from `AGENTS.md`: a temporary worktree for baseline comparisons
-  or `git diff` output for snapshots.
+  compiled `sudo_gated` category and shall exit 1 for every non-root user before
+  stash-operation parsing. This covers bare `stash` and every operation,
+  including `push`, legacy `save`, `pop`, `apply`, `list`, `show`, `drop`, and
+  `clear`; non-root operands and `--` shall not weaken the top-level denial. An
+  effective UID 0 operator invocation shall be allowed for the whole
+  subcommand. Because a mutating stash unlinks and recreates worktree files and
+  can otherwise run against root-owned immutable policy files, a root
+  invocation shall also be classified as a mutating/reconciliation subcommand
+  (REQ-GGUARD-175) so it takes the per-invocation ownership lock and the
+  post-run policy reconcile. The non-root block report shall direct the
+  operator to `sudo git stash`; agents shall keep using the sanctioned
+  `AGENTS.md` alternatives (a temporary worktree for baseline comparisons, or
+  `git diff` output for snapshots).
 - **REQ-GGUARD-051**: The `branch` command shall block branch-force semantics,
   not only the literal `-D` spelling. Block forced deletion (`-D` and every
   delete-plus-force combination), forced create/reset (`-f` or `--force`),
@@ -1079,7 +1092,7 @@ guard, not in operator discipline.
 - **REQ-GGUARD-175**: Git invoked through the guard wrapper shall be
   able to write root-owned worktree paths (pull, merge, checkout,
   switch, restore, rebase, cherry-pick, revert, apply, am, submodule
-  update) via the existing capability loan, with NO unseal/reseal
+  update, stash) via the existing capability loan, with NO unseal/reseal
   step and no operator action.
 - **REQ-GGUARD-176**: After any mutating porcelain exits, the guard
   shall reconcile the policy manifest (union of WORKSPACE-CI

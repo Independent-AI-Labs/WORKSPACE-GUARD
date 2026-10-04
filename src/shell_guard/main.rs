@@ -54,18 +54,20 @@ struct Rule {
     re: Regex,
     hint: &'static str,
     scope: &'static str,
+    mode: &'static str,
 }
 
 fn compile_rules() -> Vec<Rule> {
     shell_config::SHELL_PATTERNS
         .iter()
-        .map(|(id, pat, hint, scope)| Rule {
+        .map(|(id, pat, hint, scope, mode)| Rule {
             id,
             re: Regex::new(pat).unwrap_or_else(|e| {
                 panic!("shell guard: pattern {:?} does not compile: {}", id, e)
             }),
             hint,
             scope,
+            mode,
         })
         .collect()
 }
@@ -462,7 +464,10 @@ fn main() {
             if let Some(hit) = report::find_hit(&text, &rules, "command") {
                 let display = format!("bash -c '{}'", report::sanitize_cmd(&text));
                 let excerpt = report::excerpt(&text, hit.start, hit.end, false);
-                block(hit.rule, &display, &excerpt);
+                if report::should_block(hit.rule) {
+                    block(hit.rule, &display, &excerpt);
+                }
+                report::report_notice(hit.rule, &display, &excerpt, &timestamp());
             }
             exec_real(&args, None);
         }
@@ -487,7 +492,10 @@ fn main() {
                 if let Some(hit) = report::find_hit(&content, &rules, "untrusted-script") {
                     let display = format!("bash {} (script body)", path.to_string_lossy());
                     let excerpt = report::excerpt(&content, hit.start, hit.end, true);
-                    block(hit.rule, &display, &excerpt);
+                    if report::should_block(hit.rule) {
+                        block(hit.rule, &display, &excerpt);
+                    }
+                    report::report_notice(hit.rule, &display, &excerpt, &timestamp());
                 }
                 let fdpath = fd::memfd_exec_path(&content);
                 let orig =

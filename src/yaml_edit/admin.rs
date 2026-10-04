@@ -34,6 +34,42 @@ pub fn run_bootstrap(cli: &Cli) {
     });
 }
 
+/// Insert a previously absent key into an existing block mapping, with
+/// the entry value built from `<field-spec>...` (a nested mapping). This
+/// is the map-value counterpart to `add` (list entries) and to
+/// `set --create` (scalar leaves); it shares `splice_insert_map_key`.
+pub fn run_map_add(cli: &Cli) {
+    let key = cli.key.as_deref().unwrap_or_default();
+    let new_key = cli.new_key.as_deref().unwrap_or_default();
+    if new_key.is_empty() {
+        fail(2, "map-add requires a non-empty entry key");
+    }
+    let specs = engine::parse_specs(&cli.specs).unwrap_or_else(|e| fail(2, &e));
+    let entry = engine::entry_from_specs(&specs).unwrap_or_else(|e| fail(2, &e));
+    mutate(cli, &mut |doc, original| {
+        let segs =
+            engine::resolve_segments(doc, key).ok_or_else(|| format!("key not found: {key}"))?;
+        let parent = engine::scalar_at(doc, &segs).map_err(|_| format!("key not found: {key}"))?;
+        if parent.as_mapping().is_none() {
+            return Err(format!("key is not a mapping: {key}"));
+        }
+        let mut expected = doc.clone();
+        let mut node = &mut expected;
+        for seg in &segs {
+            node = node
+                .as_mapping_mut()
+                .and_then(|m| m.get_mut(seg.as_str()))
+                .ok_or_else(|| format!("key not found: {key}"))?;
+        }
+        let map = node.as_mapping_mut().expect("parent checked");
+        if map.contains_key(new_key) {
+            fail(4, &format!("key already exists in {key}: {new_key}"));
+        }
+        map.insert(Value::String(new_key.to_string()), entry.clone());
+        splice::splice_insert_map_key(original, &segs, new_key, &entry).map(|out| (out, expected))
+    });
+}
+
 pub fn run_unset(cli: &Cli) {
     let path = cli.key.as_deref().unwrap_or_default();
     let mut removed = 0;

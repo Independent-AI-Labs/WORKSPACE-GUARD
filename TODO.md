@@ -368,27 +368,23 @@ requirement decisions.
 - [ ] Test that allowed config argv remains byte-identical while independently
   blocked inherited environment variables are still removed.
 
-## REQ-GGUARD-050: Unconditional Stash Block
+## REQ-GGUARD-050: Stash Sudo-Gate
 
-- [ ] Remove unreachable drop/clear-only handling from `git-guard/src/block.rs`, including
-  its unsafe recommendation to use `git stash pop`.
-- [ ] Remove `has_stash_drop` and `has_stash_clear` plus their operation scan
-  from `ArgState`, parser initialization, and parser/block tests; the compiled
-  top-level block makes this state unnecessary.
-- [ ] Update the subcommand schema description through the sudo-gated YAML
-  editor so it no longer presents stash as a partial-policy example.
-- [ ] Give the generic unconditional stash block a specific hint naming the
-  sanctioned temporary-worktree and `git diff` snapshot alternatives without
-  adding stash-operation parsing.
+- [x] Move `stash` from the unconditional `blocked` category to `sudo_gated`:
+  non-root is denied before operation parsing; an effective UID 0 operator may
+  run the whole subcommand.
+- [x] Remove the stash-specific branch and snapshot hint from
+  `git-guard/src/block.rs`; the generic sudo-gated hint applies.
+- [x] Add `stash` to `MUTATING_SUBCOMMANDS` (`git-guard/src/reconcile.rs`) so a
+  root run takes the per-invocation ownership lock and post-run reconcile.
 - [ ] Add matrix cases for bare `stash`, `push`, legacy `save`, `pop`, `apply`,
   `list`, `show`, `drop`, `clear`, an unknown future operation, and an operand
-  after `--`.
-- [ ] Run every stash matrix case as non-root and root and assert exit 1, no
-  execution of real Git, and a report that never recommends another stash
-  operation.
-- [ ] Add consistency coverage proving `stash` occurs only in the unconditional
-  `blocked` category and never in `sudo_gated`, `partial`, capability-loan, or
-  reconciliation categories.
+  after `--`, asserted as non-root blocked and root allowed.
+- [ ] Update the subcommand schema description through the sudo-gated YAML
+  editor so the `partial` example no longer references `stash drop`.
+- [ ] Add consistency coverage proving `stash` occurs only in the `sudo_gated`
+  category and in the mutating/reconciliation list, and never in `blocked` or
+  `partial`.
 
 ## REQ-GGUARD-051: Branch Force Semantics
 

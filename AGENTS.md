@@ -18,14 +18,17 @@ runs the gates. There is NO other flow:
 
 ## Never run `git stash`
 
-`git stash` is **blocked unconditionally** by the git guard
-(`config/git_guard_subcommands.yaml`, REQ-GGUARD-050). Do not attempt
-it, do not work around it.
+Agents must not run `git stash`: it is **sudo-gated** by the git guard
+(`config/git_guard_subcommands.yaml`, REQ-GGUARD-050), so a non-root
+invocation exits 1. Do not attempt it, do not work around it. The
+operator may run `sudo git stash` deliberately; that path takes the
+mutating-subcommand ownership lock and reconcile (REQ-GGUARD-175).
 
-Why: stash is unlink+recreate on the worktree - byte-identical to
-exemption-file tampering at the syscall level - and it deadlocks
-mid-merge on root-owned `chattr +i` policy files, leaving the tree
-half-applied (incident 2026-07-28).
+Why agents are denied: stash is unlink+recreate on the worktree -
+byte-identical to exemption-file tampering at the syscall level - and it
+deadlocks mid-merge on root-owned `chattr +i` policy files, leaving the
+tree half-applied (incident 2026-07-28). Root owns the recovery, so root
+is trusted with it; agents are not.
 
 Sanctioned alternatives:
 
@@ -35,6 +38,12 @@ Sanctioned alternatives:
 | Snapshot uncommitted changes | `git diff > /tmp/change.patch` (restore: `git apply /tmp/change.patch`) |
 | Staged + unstaged snapshot | `git diff HEAD > /tmp/change.patch` |
 
+Operator-only tracked-wipe (root): `sudo git restore --source=HEAD --staged
+--worktree :/` resets the index and worktree to HEAD without moving the HEAD
+pointer; untracked files remain. Every allowed root `sudo_gated` operation,
+including this one, is recorded to the audit sink as `event=allow` before real
+Git runs (REQ-GGUARD-021a); a sink failure aborts the invocation with exit 3.
+
 ## Never hand-edit policy YAMLs
 
 Root-owned policy files (`config/*.yaml`, exemption manifests) are
@@ -42,6 +51,7 @@ mutated ONLY through the sudo-gated secure editor:
 
 ```bash
 sudo make yaml-add    FILE=config/<file>.yaml KEY=<key> FIELDS="<spec>"
+sudo make yaml-map-add FILE=config/<file>.yaml KEY=<map-key> NEW_KEY=<entry-key> FIELDS="<spec>"
 sudo make yaml-remove FILE=config/<file>.yaml KEY=<key> FIELDS="<spec>"
 sudo make yaml-set    FILE=config/<file>.yaml KEY=<key> VALUE=<value>
 sudo make yaml-unset  FILE=config/<file>.yaml KEY='hooks[].field'

@@ -53,17 +53,6 @@ pub fn check_categories(
             });
         }
     } else if BLOCKED_SUBCOMMANDS.contains(&subcommand) {
-        // Stash is blocked unconditionally (REQ-GGUARD-050): the whole
-        // operation loses work, so no stash verb is parsed or suggested.
-        if subcommand == "stash" {
-            return Err(GuardError::Blocked {
-                reason: "destructive subcommand: git stash".into(),
-                hint: "Snapshot with 'git diff > /tmp/change.patch' or use \
-                       'git worktree add /tmp/wt' for temporary work; restore \
-                       explicitly instead of stashing"
-                    .into(),
-            });
-        }
         return Err(GuardError::Blocked {
             reason: format!("destructive subcommand: git {}", subcommand),
             hint: format!(
@@ -73,6 +62,16 @@ pub fn check_categories(
         });
     }
     Ok(())
+}
+
+/// True when an allowed invocation must be recorded to the audit sink:
+/// an effective-UID-0 operator running a sudo-gated subcommand
+/// (REQ-GGUARD-021a). Covers the root tracked-wipe (`git restore`) and any
+/// nested sudo-gated child a root-managed git spawns. Read-only, partial,
+/// and blocked categories are never recorded here, and non-root
+/// invocations are excluded.
+pub(crate) fn should_audit_allowed(subcommand: &str, privileged: bool) -> bool {
+    privileged && SUDO_GATED_SUBCOMMANDS.contains(&subcommand)
 }
 
 /// Engine steps 4-6: subcommand-specific rules, protected-branch checks,

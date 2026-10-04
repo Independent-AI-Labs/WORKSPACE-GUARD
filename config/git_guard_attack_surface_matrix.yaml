@@ -487,3 +487,9 @@ cases:
     argv: [git, checkout, src]
     expect: blocked
     reason_contains: pathspec discard
+  - id: atk-stash-root
+    argv:
+      - git
+      - stash
+    expect: allowed
+    sudo_only: true

@@ -458,6 +458,21 @@ handled by `make install-shell-guard`.
     `nohup`/`setsid`/`stdbuf`/`timeout`/`xargs` wrappers still match. Rule id
     `port-kill`.
 
+  - **REQ-SHG-320**: Every policy pattern shall carry an optional `mode` field
+    with values `block` (default) and `report`; any other value shall be
+    rejected at build time. A `report` hit shall render a non-fatal notice to
+    stderr and the controlling tty, append `report rule: <id>` to the audit
+    sink, and continue to the real shell without changing the exit status.
+    Every pattern shall have a policy-matrix case whose `expect` matches its
+    mode (`blocked` for `block`, `reported` for `report`). The report rules
+    for the service-killing class (`report-port-kill`,
+    `report-orphan-remove`, `report-network-remove`,
+    `report-mass-container-rm`, `report-cross-unit-control`,
+    `report-compose-run`) shall be `scope: both` so they also observe
+    untrusted script bodies, and shall be ordered after the block rules so a
+    command already covered by a block rule reports the block rule first.
+    Promotion of a report rule to `block` is a follow-up decision.
+
 ---
 
 ## 5. Environment Sanitisation (REQ-SHG-400 series)

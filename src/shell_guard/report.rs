@@ -5,6 +5,7 @@
 //! which text fired which rule and who invoked it.
 
 use std::fs;
+use std::io::Write;
 use std::process;
 
 use crate::Rule;
@@ -175,6 +176,36 @@ pub fn block_report(rule: &Rule, display: &str, excerpt: &str, ts: &str) -> Stri
         excerpt,
         origin()
     )
+}
+
+/// A `report` rule logs and notifies but never terminates the command;
+/// every other mode (only `block` is valid) blocks.
+pub fn should_block(rule: &Rule) -> bool {
+    rule.mode != "report"
+}
+
+/// Report-only counterpart to `block_report`: a `mode: report` hit is
+/// printed to stderr and the controlling tty and written to the audit
+/// sink (`report rule: <id>`), but execution continues unchanged. It is
+/// non-fatal by construction: it never returns an error and never exits.
+pub fn report_notice(rule: &Rule, display: &str, excerpt: &str, ts: &str) {
+    let msg = format!(
+        "REPORTED: {} ({}) ({})\n  -> Hint: {}\n  -> Offending excerpt:\n{}\n  -> Origin: {}",
+        display,
+        rule.id,
+        ts,
+        rule.hint,
+        excerpt,
+        origin()
+    );
+    eprintln!("{}", msg);
+    if let Ok(tty) = fs::OpenOptions::new().write(true).open("/dev/tty") {
+        let _ = writeln!(&tty, "{}", msg);
+    }
+    crate::audit(
+        &format!("report rule: {}", rule.id),
+        &format!("{} excerpt={}", display, flatten(excerpt)),
+    );
 }
 
 /// fd/pipe-delivered script sources carry real content that never
