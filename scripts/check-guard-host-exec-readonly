@@ -106,6 +106,22 @@ if lsattr_path="$(command -v lsattr)" && [[ -e /usr/bin/git ]]; then
     fi
 fi
 
+registry="/etc/workspace-guard/exempt-projects.yaml"
+if [[ -e "$registry" ]]; then
+    reg_stat="$(stat -c '%a %U:%G' "$registry")"
+    reg_mode="${reg_stat%% *}"
+    reg_owner="${reg_stat#* }"
+    reg_flags="$(lsattr -d -- "$registry")"
+    reg_flags="${reg_flags%% *}"
+    if [[ "$reg_owner" == "root:root" && "$reg_mode" == "644" && "$reg_flags" == *i* ]]; then
+        ok "exempt registry $registry is 0644 root:root immutable"
+    else
+        bad "exempt registry $registry expected 0644 root:root immutable, got $reg_mode $reg_owner flags=$reg_flags"
+    fi
+else
+    note "exempt registry $registry absent (no CI-contract exemptions provisioned)"
+fi
+
 if [[ "$FAIL" -ne 0 ]]; then
     exit 1
 fi

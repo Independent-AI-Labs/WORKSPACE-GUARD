@@ -75,6 +75,27 @@ One-off root operations (renames, relocks) are prepared as scripts in
 `/tmp/` and run by the operator with sudo. They are NEVER committed to
 the repo and NEVER added as Makefile targets.
 
+## Exempt projects are operator-only
+
+The CI-contract exemption registry lives at
+`/etc/workspace-guard/exempt-projects.yaml` (`root:root` 0644, `chattr +i`,
+root-owned parent chain). Adding, removing, or editing an entry is an operator
+action:
+
+```bash
+sudo make yaml-add FILE=/etc/workspace-guard/exempt-projects.yaml KEY=exemptions \
+  FIELDS="path=/abs/repo;reason=<20+ chars>;added_by=<operator>"
+```
+
+Agents must not create, delete, replace, chmod, unlink, or otherwise tamper
+with the registry, and must not treat a missing exemption as a reason to work
+around the hook gate (the fix for a non-exempt project is the operator's
+`sudo make install-hooks`, or an operator registry entry). Inside the workspace
+the guard honors only a root-owned, immutable, parent-chain-verified registry;
+an agent-owned or forged copy grants nothing. Repositories outside the recorded
+workspace root are already outside CI-contract scope, but the H4 rule still
+blocks an out-of-tree clone whose remote points at a provisioned host.
+
 ## Verify before declaring done
 
 - `make test-shell` - bats suite (gated in `check-push`; must be green)

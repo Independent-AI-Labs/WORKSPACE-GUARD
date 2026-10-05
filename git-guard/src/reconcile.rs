@@ -273,20 +273,25 @@ fn warn_hooks_drift(git_dir: &Path) {
     }
 }
 
-/// Warn when a tier registry (workspace level) is not root-owned or
-/// lacks the immutable flag (REQ-GGUARD-178). Absent registries are
-/// skipped: not every checkout carries both trees.
+/// Warn when a tier registry (workspace level) or the host
+/// exempt-project registry is not root-owned or lacks the immutable
+/// flag (REQ-GGUARD-178). Absent registries are skipped: not every
+/// checkout carries both trees.
 fn warn_registry_drift(toplevel: &Path) {
     let s = toplevel.to_string_lossy();
-    let ws = match crate::wsroot::classify_workspace_root(&s) {
-        crate::wsroot::WorkspaceRoot::Full(w) => w,
-        crate::wsroot::WorkspaceRoot::None => return,
-    };
-    for rel in TIER_REGISTRIES {
-        let path = PathBuf::from(&ws).join(rel);
-        if path.exists() {
-            warn_if_unlocked(&path);
+    if let crate::wsroot::WorkspaceRoot::Full(ws) = crate::wsroot::classify_workspace_root(&s) {
+        for rel in TIER_REGISTRIES {
+            let path = PathBuf::from(&ws).join(rel);
+            if path.exists() {
+                warn_if_unlocked(&path);
+            }
         }
+    }
+    // REQ-GGUARD-179: the exempt-project registry is host-global, not
+    // workspace-relative.
+    let exempt = Path::new(crate::exempt::EXEMPT_REGISTRY);
+    if exempt.exists() {
+        warn_if_unlocked(exempt);
     }
 }
 

@@ -243,7 +243,9 @@ splitting). The replacement:
 
 - **REQ-YE-301**: A schema registry shall validate known files by
   basename. The registry shall consist of a compiled-in table for the
-  fleet's known policy files plus an optional root-locked override
+  fleet's known policy files (including the host exempt-project
+  registry `exempt-projects.yaml`, REQ-GGUARD-179) plus an optional
+  root-locked override
   file (`config/yaml_edit_schemas.yaml`) so consumers can declare new
   files without recompiling. Each schema declares, per list key, the
   required fields, which fields are lists, and constraints (e.g.

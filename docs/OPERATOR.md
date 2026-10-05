@@ -121,6 +121,37 @@ interpreter alternation (`...|awk...`) or an inline-shell spelling is therefore
 not blocked by the shell guard, which is required to edit the shell-guard
 policy and matrix themselves.
 
+## Exempt projects (CI contract)
+
+A repository inside the workspace root normally must carry the three
+AUTO-GENERATED WORKSPACE-CI hooks or `commit`/`push` fails closed with exit 4
+("hooks unusable"). To authorise an exception (scratch/POC trees, third-party
+mirrors) without weakening the guard, register the project in the root-owned
+exempt registry. The guard skips only the CI quality-contract and hook layer for
+that path (REQ-GGUARD-180); destructive-command, config-key, environment,
+`.git`-lock, and protected-destination rules stay in force, and every honored
+exemption is audited as `event=exempt` (REQ-GGUARD-181).
+
+```bash
+# one-time host provisioning (also done by make install-guard-host-exec)
+sudo make install-exempt-registry
+
+# enrol a project (canonical absolute path)
+sudo make yaml-add FILE=/etc/workspace-guard/exempt-projects.yaml KEY=exemptions \
+  FIELDS="path=<workspace-root>/projects/<name>;reason=<20+ chars>;added_by=<operator>"
+
+# remove
+sudo make yaml-remove FILE=/etc/workspace-guard/exempt-projects.yaml KEY=exemptions \
+  FIELDS="path=<workspace-root>/projects/<name>"
+```
+
+The registry lives at `/etc/workspace-guard/exempt-projects.yaml` (`root:root`
+`0644`, `chattr +i`, root-owned parent chain); the guard ignores any
+non-root-owned or drifted copy. It is **not** the WORKSPACE-CI tier registry
+(`workspace/config/project_enforcement.yaml`): `tier: poc` still installs the
+safety-subset hooks, and `tier: vendored` remains blocked by the guard's
+anti-bypass rule unless the path is also registered exempt here.
+
 ## Exclusive execution posture
 
 The host is moving to a deny-by-default, kernel-enforced execution posture

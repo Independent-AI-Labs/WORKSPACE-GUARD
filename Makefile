@@ -351,7 +351,16 @@ install-guard: ## REMOVED - use install-guard-host-exec
 _INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
 install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
 	$(SUDO) WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
+	$(SUDO) $(SCRIPT_BASH) scripts/install-exempt-registry
 	$(SCRIPT_BASH) scripts/check-guard-host-exec-readonly
+
+.PHONY: install-exempt-registry
+install-exempt-registry: ## Provision/re-verify the host CI-contract exemption registry (ROOT)
+	if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: install-exempt-registry needs root: sudo make install-exempt-registry" >&2; \
+		exit 1; \
+	fi
+	$(SCRIPT_BASH) scripts/install-exempt-registry
 
 uninstall-guard: ## Uninstall git-guard, restore stock git; preserve provision state (requires root)
 	$(SUDO) WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall

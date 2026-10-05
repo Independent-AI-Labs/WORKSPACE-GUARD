@@ -988,6 +988,46 @@ skip, and the guard performs no source-checkout substitute, alternate selection,
 repair, installation, or network retrieval. Invocations outside contract scope
 do not inspect the runner.
 
+### 6.5 Exempt-Project Registry
+
+The operator may exempt an in-scope repository from the CI quality contract.
+The only authority for this is the root-owned registry
+`/etc/workspace-guard/exempt-projects.yaml` (REQ-GGUARD-179). It is accepted
+only as a no-follow regular file `root:root` exact mode `0644` with the
+filesystem immutable flag, under a root-owned, not group/other-writable parent
+chain ending at `/`. It carries an `exemptions` list whose entries each hold a
+canonical absolute `path`, a non-empty `reason`, and an `added_by`. The guard
+reads only the `path` scalars with a bounded, byte-oriented line scan and adds
+no runtime YAML parser to the privileged closure (REQ-GGUARD-122).
+
+Absent, unreadable, malformed, replaceable, symlinked, writable, non-root-owned,
+or immutable-flag-drifted registry state grants nothing: the guard fails closed
+to the normal contract path and surfaces the drift as a REQ-GGUARD-112 runtime
+warning without swallowing it. A registry entry matches when the canonical
+effective repository root (REQ-GGUARD-063) equals, or descends by path
+components from, the entry `path`; lexical prefixes such as `/w/a` versus
+`/w/agent` do not match, and matching uses the same byte-oriented canonical
+identity used for membership and locking.
+
+On a match the guard skips the consumer-hook integrity check (§6.2
+`check_consumer_hooks`), the deployed-artifact integrity check, and the contract
+runner, then proceeds to requested Git. Only the CI quality-contract and hook
+layer is lifted. Destructive and sudo-gated command policy, dangerous
+config-key blocks, environment sanitisation, forward-only history, the `.git`
+ownership lock, and the outside-workspace protected-destination rule (§6.1) are
+unchanged, and root receives no additional bypass. The exemption is evaluated
+before the `vendored`-tier anti-bypass check: an exempt path proceeds, while a
+path marked only `vendored` continues to block.
+
+Every honored exemption appends one authoritative audit record with
+`event=exempt` (REQ-GGUARD-181) carrying the canonical repository root and the
+matched registry path. The append is mandatory and is written before requested
+Git runs; a failure fails closed with the guard-unavailable class (exit 3) and
+executes no requested Git. The registry is mutated only through
+`workspace-yaml-edit` (REQ-YE-301 schema, REQ-YE-800 immutable-flag
+preservation), and every mutation is recorded by the REQ-YE-600 audit; no
+unseal, ownership flip, timer, or state file is introduced.
+
 ---
 
 ## 7. Audit Logging
@@ -1029,7 +1069,10 @@ is never audited. Event classes are `block`, `contract-reject`,
 carrying the exact removed tokens between the argv fields and the final
 `reason`), `allow` (allowed root-privileged `sudo_gated` operation,
 REQ-GGUARD-021a: `exit=0`, with the `subcommand` field between the argv fields
-and the final `reason`; written before real Git runs and fail-closed), and,
+and the final `reason`; written before real Git runs and fail-closed), `exempt`
+(allowed invocation matched by the §6.5 exempt-project registry: `exit=0`, with
+the matched registry path and canonical repository root in the evidence fields,
+written before real Git runs and fail-closed), and,
 only when a separate authoritative sink
 successfully stores it, `audit-failure`. Version, names/order,
 decimal forms, and event vocabulary are parser-enforced. Unsupported versions,
@@ -1131,7 +1174,8 @@ Union of, in order:
    filename patterns, which every CI exemption file matches;
 2. `<repo>/config/*.yaml` (policy configs; tracked or not, since untracked
    policy files have no git audit trail and need reconcile most);
-3. `.git/hooks/*` and the two tier registries: ownership + immutable
+3. `.git/hooks/*`, the two tier registries, and the exempt-project registry
+   (REQ-GGUARD-179): ownership + immutable
    check only (warn on drift, REQ-GGUARD-178; `+i` re-apply stays a
    root-run repair action).
 
@@ -1230,6 +1274,11 @@ Per guarded repo: `chown root:root config/ config/*.yaml`,
 `chmod 0755 config/`, `chattr -i` tracked policy files (drop the
 flag), keep `+i` on `.git/hooks/*` + registries. Delivered as a
 `/tmp` operator script; never a committed target (AGENTS.md).
+
+The exempt-project registry is provisioned once per host, not per repo:
+`make install-guard-host-exec` creates `/etc/workspace-guard/` and the empty
+immutable `/etc/workspace-guard/exempt-projects.yaml` under REQ-GGUARD-182 and
+preserves an existing registry byte-for-byte.
 
 ### 8.10 Interactions
 

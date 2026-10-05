@@ -147,6 +147,11 @@ Invariants enforced by the current code:
   blocked.
 - `.git/` ownership lock scoped to workspace repos and clones whose remotes
   point at provisioned hosts; everything else is untouched.
+- Operator-registered exempt projects are honored only from a root-owned,
+  immutable, parent-chain-verified registry at
+  `/etc/workspace-guard/exempt-projects.yaml`; an exemption lifts only the CI
+  hook/contract layer, is evaluated before the `vendored` anti-bypass, and every
+  honored exemption is audited as `event=exempt`.
 - Workspace detection fails closed: incomplete workspace markers or a
   workspace clone outside the workspace tree block enforcement bypass.
 - CI deployment integrity at `/opt/workspace-ci` is verified by content, not
@@ -331,6 +336,7 @@ Run from the workspace root; full detail in
 | `make guard-check`                                      | Read-only health check (git guard plus shell guard)                       |
 | `sudo make guard-down`                                  | Remove shell guard and git guard (provision state preserved)              |
 | `sudo make install-shell-guard`                         | Install the bash/sh shell guard (also part of guard-up; SPEC-SHELL-GUARD) |
+| `sudo make install-exempt-registry`                     | Provision/re-verify the root-owned CI-contract exemption registry (SPEC-GIT-GUARD §6.5) |
 | `sudo make yaml-add FILE=.. KEY=.. FIELDS=".."`         | Append a YAML policy entry                                                |
 | `sudo make yaml-remove FILE=.. KEY=.. FIELDS=".."`      | Remove matching YAML policy entries                                       |
 | `sudo make yaml-set FILE=.. KEY=.. VALUE=..`            | Set a YAML policy scalar                                                  |

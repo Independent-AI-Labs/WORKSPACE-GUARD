@@ -225,6 +225,38 @@ pub fn audit_allowed(record_fields: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Append the exempt-project audit record to the home log sink (same
+/// sink and O_NOFOLLOW discipline as block/warn/allow). Written for
+/// every invocation the verified exempt-project registry matches,
+/// before real Git runs (REQ-GGUARD-181). Unlike the sanitize/block
+/// records this is fail-closed: the caller turns a persistence failure
+/// into `GuardUnavailable`, so a registry exemption is never exercised
+/// without its evidence.
+pub fn audit_exempt(repo_root: &str, registry_path: &str) -> std::io::Result<()> {
+    let uid = getuid().as_raw();
+    let cwd = std::env::current_dir()
+        .map(|p| pct_encode(p.as_os_str().as_bytes()))
+        .unwrap_or_else(|_| "?".to_string());
+    let home = get_user_home(uid)
+        .ok_or_else(|| std::io::Error::other("no home directory for audit sink"))?;
+    let log_path = Path::new(&home).join(LOG_FILE);
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&log_path)?;
+    writeln!(
+        f,
+        "v=1|ts={}|event=exempt|exit=0|uid={}|cwd={}|repo={}|registry={}|reason=operator%20exemption",
+        timestamp_utc_z(),
+        uid,
+        cwd,
+        pct_encode(repo_root.as_bytes()),
+        pct_encode(registry_path.as_bytes())
+    )?;
+    Ok(())
+}
+
 fn get_user_home(uid: u32) -> Option<String> {
     User::from_uid(Uid::from_raw(uid))
         .ok()

@@ -1592,7 +1592,9 @@ reported as installed.
   (`dash`), or record the direct-exec path as a residual.
 - [ ] D-05: Provision `/etc/workspace-guard/workspace-roots` (see
   REQ-GGUARD-081), or reconcile the registry path with the implemented
-  `/usr/lib/workspace-guard/workspace-root`.
+  `/usr/lib/workspace-guard/workspace-root`. The exempt-project registry
+  (REQ-GGUARD-179/182) provisions the same `/etc/workspace-guard/` directory,
+  establishing the parent path; the `workspace-roots` migration remains open.
 - [ ] D-06: State the home-lock exclusion for `~/.ssh/id_ed25519_new`, or bring
   the file under the lock.
 - [ ] D-07: Record the `/usr/bin/ldconfig.real` mode exception, or restore the
@@ -1650,6 +1652,56 @@ reported as installed.
   headers and pin its behavior with known-good and known-bad fixtures.
 - [ ] WORKSPACE-CI deploy: seal each published artifact with a root-signed
   digest manifest verified at install, in addition to the immutable flag.
+
+## REQ-GGUARD-179..182: Exempt-Project Registry
+
+Operator-authorised CI-contract exemptions without weakening the core guard.
+Design and normative text: REQ-GIT-GUARD section 9A, SPEC-GIT-GUARD section 6.5,
+SPEC-GIT-GUARD-HARDENING section 11.8, REQ-GGUARD-182.
+
+- [x] REQ-GIT-GUARD section 9A (REQ-GGUARD-179/180/181) and section 15
+  (REQ-GGUARD-182).
+- [x] SPEC-GIT-GUARD section 6.5, the section 7.1 `exempt` event class, section
+  8.3 manifest, and section 8.9 migration.
+- [x] SPEC-GIT-GUARD-HARDENING section 11.8 and traceability rows;
+  SPEC-GIT-GUARD-IMPL module tree; SPEC-YAML-EDIT section 5; REQ-YE-301.
+- [x] OPERATOR.md "Exempt projects", AGENTS.md "Exempt projects are
+  operator-only", README security properties and operator commands.
+- [x] REQ-GGUARD-179: add `git-guard/src/exempt/mod.rs` (+ `exempt/tests.rs`,
+  nested so `git-guard/src` stays at the 48-file module limit):
+  trust-gate `/etc/workspace-guard/exempt-projects.yaml` (no-follow regular,
+  `root:root` 0644, non-writable, immutable, root-locked parent chain to `/`),
+  line-scan `exemptions[].path`, and match the canonical effective repository
+  root by path components.
+- [x] REQ-GGUARD-179: hold the registry path as a fixed absolute `pub const
+  EXEMPT_REGISTRY` in `exempt.rs` (mirroring `CI_DEPLOY_PATH` and
+  `WORKSPACE_ROOT_RECORD`), and wire `mod exempt;` in `main.rs`. REQ-GGUARD-179
+  specifies a fixed absolute path, so no `config/shared_paths.yaml`/`build.rs`
+  entry is required; the root-owned immutable `config/` tree is not
+  agent-editable anyway.
+- [x] REQ-GGUARD-180: in `exec.rs::check_workspace_ci_contract`, evaluate the
+  exemption before the `vendored` anti-bypass and consumer-hook integrity check,
+  and pass through on a match; leave destructive, config-key, environment,
+  `.git`-lock, and H4 rules untouched.
+- [x] REQ-GGUARD-181: add `log::audit_exempt` emitting `event=exempt`
+  (fail-closed, exit 3) before requested Git; extend the audit-grammar
+  schema/tests with the new event class.
+- [x] REQ-YE-301: add the `exempt-projects.yaml` built-in schema (`exemptions`
+  list-of-maps; required `path`, `reason`, `added_by`; `reason` >= 20) in
+  `src/yaml_edit/schema.rs`.
+- [x] REQ-GGUARD-182: add `scripts/install-exempt-registry` (idempotent:
+  root-owned `/etc/workspace-guard/` plus empty immutable registry, preserve an
+  existing file byte-for-byte) and wire it into `install-guard-host-exec`; add
+  the owner/mode/immutable report to `scripts/check-guard-host-exec-readonly`.
+- [x] REQ-GGUARD-178: include the exempt registry in `reconcile.rs` protected
+  path drift checking.
+- [~] Tests: unit tests cover exempt match by path component, non-match,
+  untrusted/absent registry granting nothing, and the `path` line-scan;
+  `tests/shell/27-exempt-registry.bats` covers provisioning (create, immutable
+  flag, byte-for-byte preservation, strip/reapply, symlink and wrong-mode
+  refusal). Still wanted (needs a root-provisioned registry, so operator/podman
+  territory): an integration test that a `vendored`-marked repo with no entry
+  stays blocked, that H4 is unchanged, and that `event=exempt` is written.
 
 ## REQ-YE-900: Make Recipe Payload Isolation
 

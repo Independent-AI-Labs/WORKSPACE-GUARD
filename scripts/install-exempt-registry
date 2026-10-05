@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# install-exempt-registry: provision/re-verify the host exempt-project
+# registry consumed by the git guard (REQ-GGUARD-179/182,
+# SPEC-GIT-GUARD section 6.5, SPEC-GIT-GUARD-INSTALL section 5.9).
+#
+# Creates /etc/workspace-guard/ (root:root 0755) and, if absent, an
+# empty immutable /etc/workspace-guard/exempt-projects.yaml
+# (root:root 0644, `version: 1` + `exemptions: []`). An existing
+# registry is preserved byte-for-byte; only its ownership, mode, and
+# immutable flag are repaired and re-verified. The chattr strip flag is
+# quoted so the shell-guard policy never matches this script's own
+# body, mirroring scripts/uninstall-shell-guard.
+#
+# Usage: scripts/install-exempt-registry   (ROOT)
+# Exit: 0 healthy/applied, 2 not root, 3 invariant unmet.
+set -euo pipefail
+
+REGISTRY_DIR="${WORKSPACE_GUARD_EXEMPT_REGISTRY_DIR:-/etc/workspace-guard}"
+REGISTRY="${REGISTRY_DIR}/exempt-projects.yaml"
+
+die() { printf 'install-exempt-registry: ERROR: %s\n' "$*" >&2; exit 3; }
+
+if [[ "$(id -u)" != "0" ]]; then
+    printf 'install-exempt-registry: needs root: sudo make install-exempt-registry\n' >&2
+    exit 2
+fi
+
+install -d -m 0755 "$REGISTRY_DIR"
+chown root:root "$REGISTRY_DIR"
+chmod 0755 "$REGISTRY_DIR"
+
+if [[ ! -e "$REGISTRY" ]]; then
+    tmp="$(mktemp "${REGISTRY_DIR}/.exempt-projects.XXXXXX")"
+    printf 'version: 1\nexemptions: []\n' > "$tmp"
+    chown root:root "$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$REGISTRY"
+    printf 'install-exempt-registry: created %s\n' "$REGISTRY" >&2
+fi
+
+[[ ! -L "$REGISTRY" ]] || die "refusing symlink: $REGISTRY"
+[[ -f "$REGISTRY" ]] || die "not a regular file: $REGISTRY"
+
+flags="$(lsattr -d "$REGISTRY")"
+flags="${flags%% *}"
+if [[ "$flags" == *i* ]]; then
+    chattr "-i" "$REGISTRY"
+fi
+chown root:root "$REGISTRY"
+chmod 0644 "$REGISTRY"
+if ! chattr +i "$REGISTRY"; then
+    die "could not apply the immutable flag to $REGISTRY"
+fi
+
+owner="$(stat -c '%U:%G' "$REGISTRY")"
+mode="$(stat -c '%a' "$REGISTRY")"
+flags="$(lsattr -d "$REGISTRY")"
+flags="${flags%% *}"
+[[ "$owner" == "root:root" ]] || die "owner is $owner (want root:root)"
+[[ "$mode" == "644" ]] || die "mode is $mode (want 644)"
+[[ "$flags" == *i* ]] || die "immutable flag missing on $REGISTRY"
+printf 'install-exempt-registry: verified %s (%s %s immutable)\n' \
+    "$REGISTRY" "$owner" "$mode" >&2

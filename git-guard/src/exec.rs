@@ -427,6 +427,11 @@ pub fn check_workspace_ci_contract(
         ));
     }
 
+    // REQ-GGUARD-179/180/181: verified exempt path skips the CI hook/contract layer.
+    if crate::exempt::honor(&toplevel)? {
+        return Ok(());
+    }
+
     crate::ci_integrity::check_ci_integrity(&toplevel, &wsroot)?;
 
     let ci_script = CONTRACT_SCRIPT;

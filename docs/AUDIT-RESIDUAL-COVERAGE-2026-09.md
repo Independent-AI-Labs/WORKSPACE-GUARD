@@ -204,7 +204,10 @@ and commits succeed. The open item in `../TODO.md` tracks adding the
 `/etc/workspace-guard` path.
 
 Required direction: provision the registry path, or reconcile the
-specification with the implemented location.
+specification with the implemented location. The exempt-project registry
+(REQ-GGUARD-179/182, SPEC-GIT-GUARD section 6.5) provisions the same
+`/etc/workspace-guard/` directory, so the parent path becomes available; the
+`workspace-roots` file itself remains open.
 
 ### D-06 LOW: Home lock does not cover every identity file
 

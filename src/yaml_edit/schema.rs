@@ -109,6 +109,15 @@ pub fn builtins() -> Vec<Schema> {
             numeric_keys: vec![s("max_lines")],
             ..Default::default()
         },
+        // Host CI-contract exemption registry (REQ-GGUARD-179).
+        Schema {
+            basename: s("exempt-projects.yaml"),
+            key: s("exemptions"),
+            kind: Kind::ListOfMaps,
+            required: vec![s("path"), s("reason"), s("added_by")],
+            min_length: vec![(s("reason"), 20)],
+            ..Default::default()
+        },
     ]
 }
 

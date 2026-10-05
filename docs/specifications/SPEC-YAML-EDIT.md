@@ -364,6 +364,9 @@ Two layers, merged at runtime (override wins per basename):
    - `coverage_thresholds.yaml`: scalar leaves under known groups must
      be numeric.
    - `file_length_limits.yaml`: `max_lines` numeric.
+   - `exempt-projects.yaml`: key `exemptions` list-of-maps; required
+     `path` (canonical absolute repo root), `reason` (>= 20 chars), and
+     `added_by`; backs the host exempt-project registry (REQ-GGUARD-179).
 2. **Override file** `yaml_edit_schemas.yaml`, looked up next to the
    target file (repo-agnostic; typically itself a root-locked policy
    file) declaring schemas for additional basenames, so consumers

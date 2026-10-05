@@ -20,6 +20,7 @@ mod ci_integrity;
 mod commit;
 mod config_keys;
 mod exec;
+mod exempt;
 mod exit_class;
 mod fetch;
 mod git_binary;

@@ -640,6 +640,50 @@ This document specifies the requirements for the Rust binary. The installation/d
   retrieval. When no contract is required, runner availability shall not be
   probed.
 
+### 9A. Exempt-Project Registry
+
+- **REQ-GGUARD-179**: An operator-owned exempt-project registry at the fixed
+  absolute path `/etc/workspace-guard/exempt-projects.yaml` shall be the only
+  authority that exempts an in-scope repository from the REQ-GGUARD-080 CI
+  contract. The registry shall be a no-follow regular file owned `root:root`
+  with every group and other write bit clear and exact mode `0644`, and its
+  parent chain shall be root-owned and not group/other-writable, ending at `/`.
+  The file shall be accepted only while it carries the filesystem immutable
+  flag. Missing, unreadable, malformed, non-root-owned, writable, replaceable,
+  symlinked, or immutable-flag-drifted registry state shall never grant an
+  exemption; the guard shall fail closed to the normal contract path and shall
+  surface the registry drift as a runtime warning under REQ-GGUARD-112. The
+  registry shall contain a top-level `exemptions` list; every entry shall carry
+  a canonical absolute `path`, a non-empty `reason`, and an `added_by` value.
+  The guard shall read only the `path` scalars with a bounded, byte-oriented
+  line scan and shall not add a runtime YAML parser to the privileged closure
+  (REQ-GGUARD-122).
+- **REQ-GGUARD-180**: For a contract-eligible invocation whose canonical
+  effective repository root (REQ-GGUARD-063) equals, or descends by path
+  components from, a `path` in the verified REQ-GGUARD-179 registry, the guard
+  shall skip the consumer-hook integrity check, the deployed-artifact integrity
+  check, and the REQ-GGUARD-083 contract runner, and shall proceed to requested
+  Git. Lexical string prefixes shall not match. The exemption shall lift only
+  the CI quality-contract and hook requirement: every other guard rule
+  (destructive and sudo-gated command policy, dangerous config-key blocks,
+  environment sanitisation, forward-only history, the `.git` ownership lock,
+  and the REQ-GGUARD-082 outside-workspace protected-destination rule) shall
+  remain in force. The exemption shall be evaluated before the `vendored`-tier
+  anti-bypass check: an exempt path proceeds, while a path marked only
+  `vendored` continues to block. Repositories matched by no entry shall be
+  unaffected, and root shall receive no additional bypass.
+- **REQ-GGUARD-181**: Every honored exemption shall append one authoritative
+  audit record with `event=exempt`, using the REQ-GGUARD-090 sink and
+  REQ-GGUARD-091 canonical encoding, carrying the canonical repository root and
+  the matched registry path as reversible evidence. The record shall be written
+  before requested Git runs; an append failure shall fail closed with the
+  guard-unavailable class (REQ-GGUARD-103) and shall not execute requested Git.
+  Registry mutations shall occur only through the sudo-gated
+  `workspace-yaml-edit` editor (REQ-YE-301 schema validation, REQ-YE-800
+  immutable-flag preservation) and shall be recorded by the REQ-YE-600 mutation
+  audit. No unseal, ownership flip, timer, state file, or out-of-band write path
+  shall be introduced (REQ-YE-402).
+
 ### 10. Audit Logging
 
 - **REQ-GGUARD-090**: Every policy denial, including exit-1 blocks and exit-4
@@ -661,10 +705,13 @@ This document specifies the requirements for the Rust binary. The installation/d
   line with fixed-order pipe-delimited `name=value` fields:
   `v=1|ts=<RFC3339-Z>|event=<class>|exit=<decimal>|uid=<decimal>|cwd=<encoded>|argc=<decimal>|arg0=<encoded>|...|reason=<encoded>\n`.
   Required event classes include `block`, `contract-reject`,
-  `contract-unavailable`, `audit-failure`, and `sanitize` (the last for
-  allowed invocations whose argv the guard rewrote under REQ-GGUARD-044:
-  `exit=0`, with `subcommand`, `drops`, and indexed `dropK` fields carrying
-  the exact removed tokens between the argv fields and the final `reason`). Runtime warnings are stderr-only
+  `contract-unavailable`, `audit-failure`, `sanitize`, and `exempt`. `sanitize`
+  covers allowed invocations whose argv the guard rewrote under REQ-GGUARD-044:
+  `exit=0`, with `subcommand`, `drops`, and indexed `dropK` fields carrying the
+  exact removed tokens between the argv fields and the final `reason`. `exempt`
+  covers a REQ-GGUARD-179/180 registry pass-through: `exit=0`, with the matched
+  registry path and canonical repository root in the evidence fields. Runtime
+  warnings are stderr-only
   under REQ-GGUARD-112 and shall not create audit records. Raw byte values shall
   be percent-encoded before insertion: preserve only the approved unreserved
   ASCII set and encode every `%`, `|`, `=`, space, CR/LF, control byte, and byte
@@ -1008,6 +1055,17 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-152**: If the guard detects that `/usr/bin/git` has been replaced (e.g., by a manual override or failed divert), the guard binary shall refuse to `execve()` real git if the inode of `/usr/bin/git` does not match its own. This prevents a scenario where an attacker replaces the capability-enabled guard binary at the filesystem level.
 - **REQ-GGUARD-153**: The installation script shall register an apt post-invoke hook (`/etc/apt/apt.conf.d/99workspace-guard`) that detects when the `git` package is installed, upgraded, or removed, and emits a warning directing the user to re-run `make install-guard-host-exec`. The hook shall NOT reinstall the guard on its own; it only warns.
 - **REQ-GGUARD-154**: The installation script shall detect and warn about alternative git installations (`snap`, `flatpak`, `nix`, `/usr/local/bin/git`). The user shall be informed that these provide alternate paths to git that bypass the guard. This is informational only: the guard does not attempt to disable them.
+- **REQ-GGUARD-182**: `make install-guard-host-exec` shall idempotently
+  provision the exempt-project registry required by REQ-GGUARD-179: create
+  `/etc/workspace-guard/` as `root:root` exact mode `0755` if absent, and create
+  `/etc/workspace-guard/exempt-projects.yaml` as `root:root` exact mode `0644`,
+  carrying the filesystem immutable flag and a valid empty document
+  (`version: 1`, `exemptions: []`) if absent. An existing registry shall be
+  preserved byte-for-byte and only re-verified. After creation or repair the
+  installer shall verify owner, group, mode, non-writability, and the immutable
+  flag, and shall fail loudly if any invariant is unmet. `make
+  check-guard-host-exec` shall report registry owner/mode/immutable drift
+  read-only, without modifying the registry or requested Git state.
 
 ### 15A. Root-Only Mode
 
@@ -1041,6 +1099,9 @@ This document specifies the requirements for the Rust binary. The installation/d
       │   ├── args.rs  block.rs  sanitize.rs
       │   ├── exec.rs  gitdir.rs  sealed_repo.rs  reconcile.rs
       │   ├── remote.rs  fetch.rs  vendored.rs
+      │   ├── exempt/            # exempt-project registry (REQ-GGUARD-179)
+      │   │   ├── mod.rs
+      │   │   └── tests.rs
       │   ├── agent_identity.rs  ci_integrity.rs  ci_hook_identity.rs
       │   ├── config_keys.rs  child.rs  log.rs  wsroot.rs
       │   └── *_tests.rs            # unit tests colocated with their module
@@ -1111,9 +1172,10 @@ guard, not in operator discipline.
   deployed for exemption files). A missed reconcile shall halt the
   pipeline, never silently pass.
 - **REQ-GGUARD-178**: `chattr +i` shall be retained ONLY for
-  `.git/hooks/*` (untracked, auto-executed) and the tier registries
+  `.git/hooks/*` (untracked, auto-executed), the tier registries
   (`ci/config/project_enforcement.yaml`,
-  `workspace/config/project_enforcement.yaml`): paths that never
+  `workspace/config/project_enforcement.yaml`), and the exempt-project registry
+  (`/etc/workspace-guard/exempt-projects.yaml`, REQ-GGUARD-179): paths that never
   change via `git pull`. The guard shall emit a typed
   `reconcile-protected-path-drift` REQ-GGUARD-112 warning
   when reconcile finds these missing root ownership or the immutable
@@ -1143,6 +1205,7 @@ guard, not in operator discipline.
 - **Contract check logic**: the WORKSPACE-CI contract checks remain in shell (`checks_quality.sh`). The guard only invokes them; it does not re-implement them.
 - **Pre-commit hook generation**: hook installation is handled by WORKSPACE-CI's `make install-hooks`.
 - **Tier/enforcement resolution**: `project_enforcement.yaml` parsing is done by the WORKSPACE-CI shell script, not by the guard binary.
+- **Exempt-registry parsing**: the guard reads only the `path` scalars of the exempt-project registry with a bounded, byte-oriented line scan (REQ-GGUARD-179). It does not parse that registry as YAML at runtime. The registry is not the WORKSPACE-CI tier registry: tier and quality-gate resolution remain delegated to WORKSPACE-CI (REQ-GGUARD-083).
 - **Interactive prompts**: the guard never prompts the user. It blocks or allows. User interaction is the responsibility of pre-commit hooks.
 - **Network operations**: the guard does not make any network requests. All checks are local.
 - **Windows/macOS support**: this binary is Linux-only. SUID has no equivalent on Windows, and macOS has different security semantics.

@@ -38,12 +38,19 @@ unknown hosts and class mismatches. No env override.
 4. Scrub pam artifacts (`capability.conf` block, pam_cap auth lines)
 5. `setcap cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep /usr/bin/git`
 6. Write `deployment-class=host-exec`
-7. Verify `runuser -u <agent> -- git --version`
+7. Provision the exempt-project registry (REQ-GGUARD-182): create
+   `/etc/workspace-guard/` (`root:root` `0755`) and, if absent, an empty
+   immutable `/etc/workspace-guard/exempt-projects.yaml` (`root:root` `0644`);
+   an existing registry is preserved byte-for-byte and only re-verified
+8. Verify `runuser -u <agent> -- git --version`
 
 ## Drift / check
 
 `make check-guard-host-exec` reads `deployment-class` only. Verifies file caps
-and functional probe via `runuser`. `make check-guard` hard-fails.
+and functional probe via `runuser`. It also reports exempt-registry
+owner/group/mode/non-writability/immutable drift read-only (REQ-GGUARD-182),
+without modifying the registry or requested Git state. `make check-guard`
+hard-fails.
 
 ## Runtime
 

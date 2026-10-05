@@ -363,6 +363,23 @@ sudo make install-guard-host-exec
 After bootstrap, agent commits use the provisioned identity with no
 writable git config path.
 
+### 5.9 Exempt-Project Registry Provisioning
+
+`install-guard-host-exec` idempotently provisions the host exempt-project
+registry (REQ-GGUARD-182, SPEC-GIT-GUARD §6.5). It creates
+`/etc/workspace-guard/` as `root:root` exact mode `0755` if absent, and creates
+`/etc/workspace-guard/exempt-projects.yaml` as `root:root` exact mode `0644`,
+immutable, with a valid empty document (`version: 1`, `exemptions: []`), if
+absent. An existing registry is preserved byte-for-byte and only re-verified;
+the installer never clobbers operator entries. After creation or repair it
+verifies owner, group, mode, non-writability, and the immutable flag and fails
+loudly on any unmet invariant.
+
+The read-only health check (`make check-guard-host-exec`) reports registry
+owner/group/mode/immutable drift without modifying it. Rollback (§6) and
+uninstall (§7) preserve the registry: it is host policy state, not a git-install
+artifact.
+
 ---
 
 ## 6. Rollback on Failure

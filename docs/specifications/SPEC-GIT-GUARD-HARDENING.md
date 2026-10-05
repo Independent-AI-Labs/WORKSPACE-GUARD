@@ -293,6 +293,29 @@ but does NOT raise anything into **Ambient**. This means:
   `git.original` with Ambient empty. The guard's Effective capability permits
   the exec permission check, but no capability survives into real Git.
 
+### 11.8 Exempt-Project Registry Trust
+
+The operator-registered exempt-project registry
+(`/etc/workspace-guard/exempt-projects.yaml`, REQ-GGUARD-179) is a root-owned
+host policy input read by the guard on each contract-eligible `commit`/`push`.
+It is accepted only when the file is a no-follow regular `root:root` exact-`0644`
+file carrying the filesystem immutable flag and every parent directory is
+root-owned and not group/other-writable up to `/`. The verified parent chain
+closes the unlink-plus-recreate gap that a root-owned file under an
+agent-writable parent leaves open. The guard reads only `path` scalars with a
+bounded line scan and grants nothing from drifted state: absent, untrusted, or
+malformed registry state falls back to the normal contract path and any drift is
+a REQ-GGUARD-112 runtime warning, never swallowed.
+
+The registry is provisioned by `make install-guard-host-exec` (REQ-GGUARD-182),
+mutated only through the sudo-gated `workspace-yaml-edit` editor (REQ-YE-301
+schema, REQ-YE-800 immutable-flag preservation, REQ-YE-600 mutation audit), and
+reconciled with `.git/hooks/*` and the tier registries under REQ-GGUARD-178. An
+honored exemption lifts only the CI quality-contract and hook layer
+(REQ-GGUARD-180): destructive-command, dangerous-config-key, environment,
+`.git` ownership-lock, and protected-destination rules remain enforced, and the
+use is recorded with `event=exempt` (REQ-GGUARD-181).
+
 ---
 
 ## 12. Requirements Traceability
@@ -317,3 +340,7 @@ but does NOT raise anything into **Ambient**. This means:
 | REQ-GGUARD-160 | §4.1 | Covered |
 | REQ-GGUARD-161 | §4.2 | Covered |
 | REQ-GGUARD-162 | §4.2 | Covered |
+| REQ-GGUARD-179 | §11.8 | Covered |
+| REQ-GGUARD-180 | §11.8 | Covered |
+| REQ-GGUARD-181 | §11.8 | Covered |
+| REQ-GGUARD-182 | §11.8 | Covered |

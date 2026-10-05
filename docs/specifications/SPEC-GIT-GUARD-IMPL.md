@@ -35,6 +35,9 @@ WORKSPACE-GUARD/
     │   ├── args.rs  block.rs  sanitize.rs
     │   ├── exec.rs  gitdir.rs  sealed_repo.rs  reconcile.rs
     │   ├── remote.rs  fetch.rs  vendored.rs
+    │   ├── exempt/            # exempt-project registry (REQ-GGUARD-179)
+    │   │   ├── mod.rs
+    │   │   └── tests.rs
     │   ├── agent_identity.rs  ci_integrity.rs  ci_hook_identity.rs
     │   ├── config_keys.rs  child.rs  log.rs  wsroot.rs
     │   └── *_tests.rs        # unit tests colocated with their module
@@ -458,3 +461,7 @@ privilege boundary failure, but its authority is bounded by the capability set.
 | REQ-GGUARD-160 | SPEC-GIT-GUARD-INSTALL §4.1 | Covered |
 | REQ-GGUARD-161 | SPEC-GIT-GUARD-INSTALL §4.2 | Covered |
 | REQ-GGUARD-162 | SPEC-GIT-GUARD-INSTALL §4.2 | Covered |
+| REQ-GGUARD-179 | SPEC-GIT-GUARD §6.5 | Covered |
+| REQ-GGUARD-180 | SPEC-GIT-GUARD §6.5 | Covered |
+| REQ-GGUARD-181 | SPEC-GIT-GUARD §6.5, §7.1 | Covered |
+| REQ-GGUARD-182 | SPEC-GIT-GUARD-INSTALL §5.9 | Covered |
