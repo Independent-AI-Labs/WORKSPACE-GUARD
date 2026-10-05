@@ -464,7 +464,9 @@ handled by `make install-shell-guard`.
     stderr and the controlling tty, append `report rule: <id>` to the audit
     sink, and continue to the real shell without changing the exit status.
     Every pattern shall have a policy-matrix case whose `expect` matches its
-    mode (`blocked` for `block`, `reported` for `report`). The report rules
+    mode (`blocked` for `block`, `reported` for `report`). A `report` hit does
+    not block, so a matrix case with `expect: allowed` remains satisfied when
+    it hits only a `report` rule; `allowed` means no `block`-mode rule matches. The report rules
     for the service-killing class (`report-port-kill`,
     `report-orphan-remove`, `report-network-remove`,
     `report-mass-container-rm`, `report-cross-unit-control`,

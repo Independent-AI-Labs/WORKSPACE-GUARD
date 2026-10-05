@@ -293,3 +293,33 @@ cases:
   - id: sudo-fuser-ok
     input: sudo fuser -k 8080/tcp
     expect: allowed
+  - id: report-port-kill
+    input: fuser -k 3000/tcp
+    expect: reported
+    rule: report-port-kill
+    ctx: untrusted-script
+  - id: report-orphan-remove
+    input: podman-compose down --remove-orphans
+    expect: reported
+    rule: report-orphan-remove
+    ctx: untrusted-script
+  - id: report-network-remove
+    input: podman network rm -f shared-net
+    expect: reported
+    rule: report-network-remove
+    ctx: untrusted-script
+  - id: report-mass-container-rm
+    input: podman ps -a | xargs podman rm
+    expect: reported
+    rule: report-mass-container-rm
+    ctx: untrusted-script
+  - id: report-cross-unit-control
+    input: systemctl --user stop gateway.service
+    expect: reported
+    rule: report-cross-unit-control
+    ctx: untrusted-script
+  - id: report-compose-run
+    input: podman-compose run --rm app
+    expect: reported
+    rule: report-compose-run
+    ctx: untrusted-script

@@ -81,16 +81,33 @@ fn policy_matrix_agrees() {
         );
         let hit = report::find_hit(case.input.as_bytes(), &rules, &case.ctx);
         match case.expect.as_str() {
-            "blocked" | "reported" => {
-                let rule =
+            "blocked" => {
+                let found =
                     hit.unwrap_or_else(|| panic!("case {}: expected a hit, got allow", case.id));
+                assert_eq!(
+                    found.rule.mode, "block",
+                    "case {}: expected a block rule, matched report rule {}",
+                    case.id, found.rule.id
+                );
                 if let Some(want) = &case.rule {
-                    assert_eq!(&rule.rule.id, want, "case {}: wrong rule matched", case.id);
+                    assert_eq!(&found.rule.id, want, "case {}: wrong rule matched", case.id);
+                }
+            }
+            "reported" => {
+                let found =
+                    hit.unwrap_or_else(|| panic!("case {}: expected a hit, got allow", case.id));
+                assert_eq!(
+                    found.rule.mode, "report",
+                    "case {}: expected a report rule, matched block rule {}",
+                    case.id, found.rule.id
+                );
+                if let Some(want) = &case.rule {
+                    assert_eq!(&found.rule.id, want, "case {}: wrong rule matched", case.id);
                 }
             }
             "allowed" => {
                 assert!(
-                    hit.is_none(),
+                    hit.as_ref().is_none_or(|h| h.rule.mode == "report"),
                     "case {}: expected allow, got block by {}",
                     case.id,
                     hit.unwrap().rule.id

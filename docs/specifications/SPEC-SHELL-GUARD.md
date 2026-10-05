@@ -1017,6 +1017,15 @@ rule cannot be added without an answer. The runtime decision is
 `should_block(rule) = rule.mode != "report"`; the renderer is
 `report::report_notice`.
 
+The policy matrix is evaluated mode-aware. `expect: blocked` requires the
+matched rule to be `mode: block`; `expect: reported` requires it to be
+`mode: report`; and `expect: allowed` requires that no `block`-mode rule
+matches. Because a `report` hit is non-blocking, an `allowed` case may still
+hit a report rule and remains `allowed` - the notice is its only effect. This
+happens deliberately for the service-killing class: the anchored `port-kill`
+block rule exempts `sudo fuser -k` from blocking, while the `scope: both`
+`report-port-kill` rule still observes it.
+
 The report rules (`report-port-kill`, `report-orphan-remove`,
 `report-network-remove`, `report-mass-container-rm`,
 `report-cross-unit-control`, `report-compose-run`) are `scope: both`, so they

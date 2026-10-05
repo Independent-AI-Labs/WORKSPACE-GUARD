@@ -96,3 +96,33 @@ patterns:
     regex: (^|([\n\x3b|&\x60]|&&|\|\||\x24\()[[:space:]]*|\b(env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b([[:space:]]+(-[^|&[:space:]]*|[A-Za-z_][A-Za-z0-9_]*=\S*))*[[:space:]]+)(/[^[:space:]|&\x60]+/)?((fuser\b[^\x3b|&]*\s-[^\x3b|&\s]*k)|((lsof|ss|netstat)\b([^\x3b|&]*[|])+[^\x3b|&]*\bkill\b))
     hint: use kill <pid> on the specific process - port and file-use kills are an operator operation
     scope: command
+  - id: report-port-kill
+    regex: \bfuser\b[^\x3b|&]*\s-k\b
+    hint: port-based kill - verify the listener belongs to the target unit before killing
+    scope: both
+    mode: report
+  - id: report-orphan-remove
+    regex: \bdown\b[^\x3b|&]*--remove-orphans|--remove-orphans
+    hint: orphan removal must be project-scoped - confirm the compose project before running
+    scope: both
+    mode: report
+  - id: report-network-remove
+    regex: \bnetwork\s+(rm|remove)\b[^\x3b|&]*\s-f\b
+    hint: removing a shared network affects every project attached to it
+    scope: both
+    mode: report
+  - id: report-mass-container-rm
+    regex: \bps\b[^\x3b|&]*\s-a[^\x3b|&]*\|[^\x3b|&]*\bxargs\b[^\x3b|&]*\b(rm|pod\s+rm)\b
+    hint: host-wide container removal - filter by compose project label
+    scope: both
+    mode: report
+  - id: report-cross-unit-control
+    regex: \bsystemctl\s+--user\s+(stop|restart|kill)\b
+    hint: stopping or restarting a unit you do not own can kill a running service
+    scope: both
+    mode: report
+  - id: report-compose-run
+    regex: \bcompose\b[^\x3b|&]*\brun\b
+    hint: compose run reconciles dependencies unless --no-deps is passed
+    scope: both
+    mode: report

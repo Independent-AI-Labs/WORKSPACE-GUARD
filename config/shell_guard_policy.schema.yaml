@@ -36,3 +36,8 @@ fields:
     required: false
     default: both
     description: Scan context the rule applies to (command = -c text, script = script bodies, both) - REQ-SHG-312
+  - path: patterns[].mode
+    type: string
+    required: false
+    default: block
+    description: match action - block terminates the command (default), report logs and continues without changing the exit status

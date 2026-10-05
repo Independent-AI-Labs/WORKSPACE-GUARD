@@ -242,6 +242,7 @@ test: ## Run cargo test (all feature combinations; integration gated by euid)
 
 test-unit: ## Unit/binary tests only (both feature combinations)
 	if [ "$(_OS)" != "Darwin" ]; then \
+		set -e; \
 		if command -v cargo-nextest; then \
 			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --workspace --bins; \
 			CARGO_TARGET_DIR="$(_AGENT_TARGET)" $(CARGO) nextest run --workspace --bins --features binary-guard; \
