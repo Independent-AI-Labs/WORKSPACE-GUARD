@@ -265,10 +265,9 @@ F26. `install-lock-runtime` runs a long serial external-command chain
     freshly installed guard. scripts/install-lock-runtime:178-326.
     Fix: batch metadata collection; one warm run per binary.
 
-F27. `make sync-gtfobins` also runs a full gitleaks scan of
-    docs/references via gitleaks-ignore-regen. Makefile:355-369,
-    scripts/regen-gitleaksignore:46. Fix: decouple regen from baseline
-    sync or run it only when docs/references changes.
+F27. `make sync-gtfobins` also ran a full gitleaks scan of
+    docs/references to regenerate a fingerprint suppression file.
+    Fix: decouple it from baseline sync.
 
 F28. Tier-1 container test rebuilds both feature sets and runs
     `chown -R target/` twice. scripts/podman/tier1-test.sh:28-55.
@@ -382,10 +381,10 @@ F20/F21/F26/F27/F28 implementation notes:
   one-time preflight probe of the guard binary proved works. The
   dpkg-divert test double learned the real tool's bare `--list` form
   (lists all diversions).
-- F27: `make gitleaks-ignore-regen` now skips the gitleaks scan when a
-  sha256 stamp of docs/references matches the last regen; the stamp
-  (.gitleaksignore.refs-sha256) is per-host and gitignored. sync-gtfobins
-  still invokes the regen target; it is just usually a no-op now.
+- F27: obsolete. The fingerprint suppression file and its regen
+  automation were removed (CI bans gitleaks suppressions); the reviewed
+  .gitleaks.toml path allowlist, which the CI secret scan loads, is the
+  only exclusion.
 - F28: tier1-test.sh's second `chown -R target/` is skipped when a
   full-tree find shows no non-testagent-owned files (early-exit on
   first match), so the chown only re-runs after a build step actually

@@ -141,6 +141,29 @@ EOF
     ! grep -qxF "$p" "$GUARD_DIVERT_DB"
 }
 
+@test "uninstall-lock: unseals diverted copy and restores original mode" {
+    _setup_uninstall
+    local p="$FAKE_USR/sudo"
+    mkdir -p "$(dirname "$p")"
+    touch "${p}.real" "${p}.distrib"
+    chmod 0700 "${p}.distrib"
+    echo "$p" >> "$GUARD_DIVERT_DB"
+    cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
+lock_state:
+  - path: "$p"
+    real_sha256: "abc"
+    original_path_mode: "4755"
+    immutable: true
+    dpkg_diverted: true
+    contained_at: "2026-01-01T00:00:00Z"
+EOF
+    run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
+    assert_success
+    grep -q -- "-i ${p}.distrib" "$GUARD_STUB_LOG"
+    [ ! -e "${p}.distrib" ]
+    assert_equal "4755" "$(stat -c '%a' "$p")"
+}
+
 @test "uninstall-lock: clears state file after rollback" {
     _setup_uninstall
     local p="$FAKE_USR/sudo"

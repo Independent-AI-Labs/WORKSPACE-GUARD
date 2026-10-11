@@ -23,7 +23,6 @@ copy_real_scripts() {
     cp "$GUARD_ROOT/scripts/install-home-lock"    "$dir/scripts/install-home-lock"
     cp "$GUARD_ROOT/scripts/uninstall-home-lock"  "$dir/scripts/uninstall-home-lock"
     cp "$GUARD_ROOT/scripts/home-drift-check"     "$dir/scripts/home-drift-check"
-    cp "$GUARD_ROOT/scripts/regen-gitleaksignore" "$dir/scripts/regen-gitleaksignore"
     cp "$GUARD_ROOT/scripts/install-lock-runtime" "$dir/scripts/install-lock-runtime"
     cp "$GUARD_ROOT/scripts/uninstall-lock-runtime" "$dir/scripts/uninstall-lock-runtime"
     cp "$GUARD_ROOT/scripts/lib/"*.sh "$dir/scripts/lib/"

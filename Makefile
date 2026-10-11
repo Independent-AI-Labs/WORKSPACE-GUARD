@@ -469,9 +469,8 @@ compliance: ## Run the WORKSPACE-CI compliance audit on this repo
 DEVNULL := /dev/null
 
 .PHONY: sync-gtfobins sync-gtfobins-linux
-sync-gtfobins: ## Fetch GTFOBins + konstruktoid, scan live SUID/CAP, write res/ baselines + refresh .gitleaksignore
+sync-gtfobins: ## Fetch GTFOBins + konstruktoid, scan live SUID/CAP, write res/ baselines
 	$(SCRIPT_BASH) scripts/sync-gtfobins
-	$(MAKE) --no-print-directory gitleaks-ignore-regen
 
 sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not sync on Darwin for commit)
 	_podman=""; \
@@ -483,21 +482,6 @@ sync-gtfobins-linux: ## Regenerate res/ baselines in Linux container (do not syn
 		-w /projects/WORKSPACE-GUARD \
 		$${WORKSPACE_GUARD_TEST_IMAGE:-workspace-guard-test:ubuntu-22.04} \
 		$(SCRIPT_BASH) scripts/sync-gtfobins
-	$(MAKE) --no-print-directory gitleaks-ignore-regen
-
-.PHONY: gitleaks-ignore-regen
-# Runs the gitleaks scan only when docs/references content actually
-# changed since the last regen (the scan walks every cached reference
-# file and dominated `make sync-gtfobins` wall time). The stamp hash is
-# stored next to .gitleaksignore; deleting it forces a rescan.
-gitleaks-ignore-regen: ## Regenerate .gitleaksignore fingerprints for docs/references/ cached content (skips when unchanged)
-	_refs_hash="$$(find docs/references -type f -exec sha256sum {} + 2>$(DEVNULL) | sort -k2 | sha256sum | cut -d' ' -f1)"; \
-	_stamp=".gitleaksignore.refs-sha256"; \
-	if [ -f "$$_stamp" ] && [ "$$(cat "$$_stamp")" = "$$_refs_hash" ] && [ -f .gitleaksignore ]; then \
-		echo "gitleaks-ignore-regen: docs/references unchanged, skipping scan"; \
-	else \
-		$(SCRIPT_BASH) scripts/regen-gitleaksignore && printf '%s\n' "$$_refs_hash" > "$$_stamp"; \
-	fi
 
 .PHONY: sync-gtfobins-verify
 sync-gtfobins-verify: ## Re-fetch sources and emit SHA-256 manifest of canonical references
@@ -537,29 +521,6 @@ guard-check: ## Read-only combined guard health check (non-root safe)
 
 guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 	"$(SCRIPT_BASH)" scripts/guard-operator.sh '$*'
-
-# =============================================================================
-# Storage
-# =============================================================================
-
-WS_BACKUP_DEVICE ?= /dev/disk/by-uuid/3466BD2C66BCF02A
-WS_BACKUP_MOUNT ?= /mnt/ws-backup
-WS_BACKUP_USER ?= agent
-
-.PHONY: mount-ws-backup unmount-ws-backup
-mount-ws-backup: ## Mount WS-BACKUP for agent (ROOT)
-	if [ "$$(id -u)" -ne 0 ]; then \
-		echo "ERROR: mount-ws-backup needs root: sudo make mount-ws-backup" >&2; exit 1; \
-	fi
-	uid="$$(id -u "$(WS_BACKUP_USER)")"; gid="$$(id -g "$(WS_BACKUP_USER)")"; \
-		$(SCRIPT_BASH) scripts/mount-storage-device.sh "$(WS_BACKUP_DEVICE)" "$(WS_BACKUP_MOUNT)" \
-		"rw,nosuid,nodev,noexec,uid=$$uid,gid=$$gid,umask=0077"
-
-unmount-ws-backup: ## Unmount WS-BACKUP (ROOT)
-	if [ "$$(id -u)" -ne 0 ]; then \
-		echo "ERROR: unmount-ws-backup needs root: sudo make unmount-ws-backup" >&2; exit 1; \
-	fi
-	$(SCRIPT_BASH) scripts/unmount-storage-device.sh "$(WS_BACKUP_MOUNT)"
 
 # =============================================================================
 # YAML Policy Edit (sudo-gated secure YAML editor; SPEC-YAML-EDIT)

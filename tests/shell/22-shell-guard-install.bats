@@ -39,10 +39,12 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     assert_output --partial "--dry-run"
 }
 
-@test "shell-guard-install: prefers cargo-configured release binary" {
-    grep -q 'target/agent/release/workspace-shell-guard' "$INSTALL"
-    grep -q 'target/release/workspace-shell-guard' "$INSTALL"
-    ! grep -q ' -nt ' "$INSTALL"
+@test "shell-guard-install/check: one artifact path, never the agent-writable target" {
+    for f in "$INSTALL" "$CHECK"; do
+        grep -q 'target/release/workspace-shell-guard' "$f"
+        ! grep -q 'target/agent/release' "$f"
+        ! grep -q ' -nt ' "$f"
+    done
 }
 
 @test "shell-guard-install: unknown arg exits 2" {

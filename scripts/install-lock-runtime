@@ -209,6 +209,17 @@ append_state_entry() {
 if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "==> DRY RUN: no filesystem changes will be made"
 fi
+# Keep the previous run's records: original_path_mode must survive
+# re-runs (the live <path> is the guard by then).
+prev_state_tmp="$(mktemp -t lock-prev-state.XXXXXX)"; register_temp "$prev_state_tmp"
+if [[ -f "$STATE_FILE" ]]; then cp "$STATE_FILE" "$prev_state_tmp"; fi
+prev_original_mode() {
+    awk -v p="$1" '
+        /^  - path: *"/ { v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); cur=v }
+        cur==p && /^    original_path_mode: *"/ { m=$0; sub(/^.*: *"/,"",m); sub(/".*$/,"",m); print m; exit }
+    ' "$prev_state_tmp"
+}
+
 if [[ "$DRY_RUN" -eq 0 ]]; then
     write_state_header
 fi
@@ -221,6 +232,43 @@ FAILED=0
 # ---------------------------------------------------------------------------
 # 3. Per-binary containment.
 # ---------------------------------------------------------------------------
+# divert_target PATH: print dpkg's diverted copy of PATH, or nothing
+# when PATH is not diverted or the copy does not exist.
+divert_target() {
+    local t
+    t="$(dpkg-divert --truename "$1")" || return 1
+    if [[ "$t" != "$1" && -f "$t" ]]; then printf '%s\n' "$t"; fi
+}
+
+# seal_divert_target PATH: the diverted copy is the untouched package
+# binary (set-ID, world-executable). Left as-is it bypasses the guard,
+# so seal it like the .real: root:root 0700 (drops set-ID), chattr +i.
+# Idempotent: clears +i first so chown/chmod succeed on re-runs.
+seal_divert_target() {
+    local t
+    t="$(divert_target "$1")" || return 1
+    [[ -n "$t" ]] || return 0
+    # -i failing (no immutability support) is not fatal; a file that is
+    # really still immutable fails the chown/chmod below.
+    if [[ "$HAVE_CHATTR" -eq 1 ]] && ! chattr -i "$t"; then
+        echo "  WARN: chattr -i $t failed" >&2
+    fi
+    chown root:root "$t" || return 1
+    chmod 0700 "$t" || return 1
+    if [[ "$HAVE_CHATTR" -eq 1 ]] && ! chattr +i "$t"; then
+        echo "  WARN: chattr +i $t failed" >&2
+        CHATTR_FAIL=1
+    fi
+}
+
+# unseal_divert_target PATH: clear +i so dpkg-divert --remove --rename
+# can move the diverted copy back.
+unseal_divert_target() {
+    local t
+    t="$(divert_target "$1")" || return 1
+    if [[ -n "$t" && "$HAVE_CHATTR" -eq 1 ]]; then chattr -i "$t" || return 1; fi
+}
+
 # rollback PATH: undo any partial state for this path. Idempotent.
 # If $path is the guard binary, restore the original from .real.
 rollback_path() {
@@ -236,6 +284,7 @@ rollback_path() {
     fi
     rm -f "${p}.real" "${p}.guard_new"
     if dpkg-divert --list "$p" 2>"$DEVNULL" | grep -q .; then
+        unseal_divert_target "$p" || rc=$?
         dpkg-divert --remove --rename "$p" 2>"$DEVNULL" || rc=$?
     fi
 }
@@ -266,14 +315,29 @@ while IFS= read -r path; do
             if [[ -n "${SURFACE_DIVERTED["$path"]:-}" ]]; then
                 echo "  ALREADY CONTAINED (skip)"
                 SKIPPED=$((SKIPPED+1))
-                if [[ "$DRY_RUN" -eq 0 ]]; then
+                if [[ "$DRY_RUN" -eq 1 ]]; then
+                    echo "  WOULD: seal divert target (root:root 0700, +i)"
+                else
+                    # An unsealed divert copy still carries the package
+                    # mode and is authoritative; once sealed (700), use
+                    # the previous run's record.
+                    _dt="$(divert_target "$path")" || _dt=""
+                    orig_mode=""
+                    if [[ -n "$_dt" ]]; then orig_mode="$(stat -c '%a' "$_dt")"; fi
+                    if [[ -z "$orig_mode" || "$orig_mode" == "700" ]]; then
+                        orig_mode="$(prev_original_mode "$path")"
+                    fi
+                    if ! seal_divert_target "$path"; then
+                        echo "  FAIL: seal divert target of $path" >&2
+                        FAILED=$((FAILED+1))
+                    fi
                     imm_now=false
                     if [[ "$HAVE_CHATTR" -eq 1 && -n "${REAL_IMM["$real"]:-}" ]]; then
                         imm_now=true
                     fi
                     append_state_entry "$path" \
                         "${REAL_SHA["$real"]:-}" \
-                        "${SURFACE_MODE["$path"]:-?}" "$imm_now" true "$NOW"
+                        "${orig_mode:-?}" "$imm_now" true "$NOW"
                 fi
                 already=1
             fi
@@ -348,8 +412,9 @@ while IFS= read -r path; do
     fi
 
     # 3h. dpkg-divert so apt upgrades leave <path> alone. --rename moves
-    #     the original to <path>.distrib (required for package-owned
-    #     files). After this, <path> is briefly empty.
+#     the original to <path>.distrib (required for package-owned
+#     files). After this, <path> is briefly empty. The diverted copy
+#     is sealed in 3i'.
     div_flag=false
     if command -v dpkg-divert; then
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
@@ -371,6 +436,13 @@ while IFS= read -r path; do
     #     in-place (original is already sealed in .real).
     if ! mv "$guard_new" "$path"; then
         echo "  FAIL: mv $guard_new -> $path" >&2
+        rollback_path "$path"; FAILED=$((FAILED+1)); continue
+    fi
+
+    # 3i'. Seal the diverted package copy (would otherwise stay set-ID
+    #      and world-executable next to the guard).
+    if ! seal_divert_target "$path"; then
+        echo "  FAIL: seal divert target of $path" >&2
         rollback_path "$path"; FAILED=$((FAILED+1)); continue
     fi
 

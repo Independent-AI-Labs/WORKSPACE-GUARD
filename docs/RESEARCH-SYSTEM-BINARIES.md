@@ -302,7 +302,7 @@ risks".
 
 1. GTFOBins SUID list. https://gtfobins.github.io/#+suid -> references/gtfobins-suid.html
 2. konstruktoid hardening SUID list. https://raw.githubusercontent.com/konstruktoid/hardening/master/misc/suid.list -> references/konstruktoid-suid-list.txt and .pdf
-3. capabilities(7) man page. https://man7.org/linux/man-pages/man7/capabilities.7.html -> references/capabilities.7.html
+3. capabilities(7) man page. https://manpages.debian.org/bookworm/manpages/capabilities.7.en.html (cached copy fetched from man7.org) -> references/capabilities.7.html
 4. CVE-2021-4034 PwnKit NVD. https://nvd.nist.gov/vuln/detail/CVE-2021-4034 -> references/NVD-CVE-2021-4034.html
 5. CVE-2021-3156 Baron Samedit NVD. https://nvd.nist.gov/vuln/detail/CVE-2021-3156 -> references/sudo-Baron-Samedit-CVE-2021-3156.html
 6. CVE-2025-32463 sudo chroot advisory. https://www.sudo.ws/security/advisories/chroot_bug/ -> references/sudo-chroot-CVE-2025-32463.html and .pdf

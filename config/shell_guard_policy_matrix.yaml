@@ -323,3 +323,21 @@ cases:
     expect: reported
     rule: report-compose-run
     ctx: untrusted-script
+  - id: zsh-after-and
+    input: true && zsh
+    expect: blocked
+    rule: alt-shell
+  - id: rc-sudo
+    input: sudo rc
+    expect: blocked
+    rule: alt-shell
+  - id: zsh-after-pipe
+    input: echo hi | zsh
+    expect: blocked
+    rule: alt-shell
+  - id: rc-varname-ok
+    input: local f rc
+    expect: allowed
+  - id: nu-word-ok
+    input: echo nu ash dash
+    expect: allowed

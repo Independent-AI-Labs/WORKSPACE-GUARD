@@ -49,13 +49,10 @@ SETCAP="${SHG_SETCAP:-/usr/sbin/setcap}"
 GETCAP="${SHG_GETCAP:-/usr/sbin/getcap}"
 
 SHG_ROOT="${SHG_ROOT:-}"
-if [[ -n "${SHG_GUARD_BIN:-}" ]]; then
-    GUARD_BIN="$SHG_GUARD_BIN"
-elif [[ -x "$REPO_ROOT/target/agent/release/workspace-shell-guard" ]]; then
-    GUARD_BIN="$REPO_ROOT/target/agent/release/workspace-shell-guard"
-else
-    GUARD_BIN="$REPO_ROOT/target/release/workspace-shell-guard"
-fi
+# Only the root-built artifact (build-shell-guard -> target/release) is
+# installable. target/agent/ is agent-writable: installing from it would
+# put an agent-controlled, possibly stale binary at the root shell path.
+GUARD_BIN="${SHG_GUARD_BIN:-$REPO_ROOT/target/release/workspace-shell-guard}"
 
 DRY_RUN=0
 while [[ $# -gt 0 ]]; do

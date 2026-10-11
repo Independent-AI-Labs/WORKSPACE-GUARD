@@ -682,11 +682,20 @@ line2" ]
 
 @test "shell-guard: untrusted script alternate-shell text remains blocked" {
     require_root_guard
-    printf '#!/bin/bash\nprintf "dash\\n"\n' > "$TEST_TMPDIR/untrusted-dash.sh"
+    printf '#!/bin/bash\ndash -c true\n' > "$TEST_TMPDIR/untrusted-dash.sh"
     chmod +x "$TEST_TMPDIR/untrusted-dash.sh"
     run shg "$TEST_TMPDIR/untrusted-dash.sh"
     [ "$status" -eq 1 ]
     [[ "$output" == *"alt-shell"* ]]
+}
+
+@test "shell-guard: untrusted script may mention a shell name as plain text" {
+    require_root_guard
+    printf '#!/bin/bash\nlocal_rc=0; printf "dash\\n"\n' > "$TEST_TMPDIR/untrusted-text.sh"
+    chmod +x "$TEST_TMPDIR/untrusted-text.sh"
+    run shg "$TEST_TMPDIR/untrusted-text.sh"
+    [ "$status" -eq 0 ]
+    [ "$output" = "dash" ]
 }
 
 @test "shell-guard: world-writable file drops out of the trusted tier" {

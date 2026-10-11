@@ -58,7 +58,7 @@ One machine runs **one** git class for its lifetime unless uninstall + scrub + r
 
 Kernel / standards mapping:
 
-- Non-NNP arbitrary spawn (Grok, IDE terminals) → file-cap on the wrapped binary (**host-exec**). See [capabilities(7)](https://www.man7.org/linux/man-pages/man7/capabilities.7.html).
+- Non-NNP arbitrary spawn (Grok, IDE terminals) → file-cap on the wrapped binary (**host-exec**). See [capabilities(7)](https://manpages.debian.org/bookworm/manpages/capabilities.7.en.html).
 - NNP sandbox services → systemd ambient + bounding set (**sandbox-service**). Matches `workspace-agent@.service`.
 
 ### 2.3 Install entry points

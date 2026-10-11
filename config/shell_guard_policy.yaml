@@ -28,9 +28,6 @@ patterns:
     regex: '\b(wipefs|fdisk|sfdisk|cfdisk|parted|mkfs(\.[a-z0-9]+)?)\b'
     hint: "filesystem/partition destruction is blocked"
   # --- shell escape (REQ-SHG-307) ---
-  - id: alt-shell
-    regex: '\b(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)\b'
-    hint: "only bash/sh are permitted on this host"
   - id: busybox-shell
     regex: '\bbusybox\s+(sh|ash)\b'
     hint: "only bash/sh are permitted on this host"
@@ -126,3 +123,6 @@ patterns:
     hint: compose run reconciles dependencies unless --no-deps is passed
     scope: both
     mode: report
+  - id: alt-shell
+    regex: (?m)(^|#!|[\x3b&|(`]|\b(env|exec|command|sudo|nohup|xargs|nice|timeout)\s+(-\S+\s+)*)(\S*/)?(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)(\s|[\x3b&|)`]|\z)
+    hint: only bash/sh are permitted on this host

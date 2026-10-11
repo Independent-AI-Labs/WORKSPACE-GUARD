@@ -266,3 +266,35 @@ YEOF
     # .distrib should exist (dpkg-divert --rename moved the original).
     [ -f "${p}.distrib" ]
 }
+
+@test "install-lock: seals the diverted copy (0700, set-ID stripped, +i)" {
+    _setup_install
+    local p="$FAKE_USR/sudo"
+    _setup_paths "$p"
+    chmod 4755 "$p"
+    run bash "$FAKE_REPO/scripts/install-lock-runtime"
+    assert_success
+    assert_equal "700" "$(stat -c '%a' "${p}.distrib")"
+    grep -q -- "+i ${p}.distrib" "$GUARD_STUB_LOG"
+    grep -q 'original_path_mode: "4755"' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
+}
+
+@test "install-lock: re-run heals an unsealed diverted copy and keeps original mode" {
+    _setup_install
+    local p="$FAKE_USR/sudo"
+    _setup_paths "$p"
+    chmod 4755 "$p"
+    run bash "$FAKE_REPO/scripts/install-lock-runtime"
+    assert_success
+    # Simulate a host contained by the old installer: set-ID .distrib.
+    chmod 4755 "${p}.distrib"
+    run bash "$FAKE_REPO/scripts/install-lock-runtime"
+    assert_success
+    assert_output --partial "ALREADY CONTAINED"
+    assert_equal "700" "$(stat -c '%a' "${p}.distrib")"
+    grep -q 'original_path_mode: "4755"' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
+    # Third run: sealed copy is 700, mode comes from the prior record.
+    run bash "$FAKE_REPO/scripts/install-lock-runtime"
+    assert_success
+    grep -q 'original_path_mode: "4755"' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
+}

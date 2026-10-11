@@ -91,7 +91,7 @@ while IFS= read -r path; do
         echo "  WOULD: rm -f $real"
         if command -v dpkg-divert; then
             if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
-                echo "  WOULD: dpkg-divert --remove --rename $path"
+                echo "  WOULD: chattr -i divert target, dpkg-divert --remove --rename $path"
             fi
         fi
         ROLLED=$((ROLLED+1))
@@ -110,9 +110,26 @@ while IFS= read -r path; do
     fi
     if command -v dpkg-divert; then
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
+            # install-lock-runtime sealed the diverted copy (0700, +i);
+            # unseal it so --rename can move it back.
+            divert="$(dpkg-divert --truename "$path")"
+            if [[ "$HAVE_CHATTR" -eq 1 && "$divert" != "$path" && -f "$divert" ]]; then
+                chattr -i "$divert" || rc=$?
+            fi
             if ! dpkg-divert --remove --rename "$path" 2>"$DEVNULL"; then
                 echo "  WARN: dpkg-divert --remove $path failed (manual cleanup needed)" >&2
             fi
+        fi
+    fi
+    # Restore the package mode (set-ID bits) the seal stripped.
+    orig_mode="$(awk -v p="$path" '
+        /^  - path: *"/ { v=$0; sub(/^.*path: *"/,"",v); sub(/".*$/,"",v); cur=v }
+        cur==p && /^    original_path_mode: *"/ { m=$0; sub(/^.*: *"/,"",m); sub(/".*$/,"",m); print m; exit }
+    ' "$STATE_FILE")"
+    if [[ "$orig_mode" =~ ^[0-7]{3,4}$ && -f "$path" ]]; then
+        if ! chmod "$orig_mode" "$path"; then
+            echo "  FAIL: chmod $orig_mode $path" >&2
+            FAILED=$((FAILED+1)); continue
         fi
     fi
     echo "  ROLLED BACK"
