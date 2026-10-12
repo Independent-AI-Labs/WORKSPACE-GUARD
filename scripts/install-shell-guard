@@ -21,8 +21,8 @@
 # host where the guard is already active, the script's own body
 # (sanity probes, chattr calls) would be pattern-scanned as an
 # untrusted script. Root execution is re-exec'd through a root-owned
-# copy under /run (trusted tier: exempt-with-audit) so the scanner
-# logs instead of blocking. The probe string is built by concat so
+# copy under /var/lib/workspace-guard (trusted tier, so the guard execs
+# it without scanning the body). The probe string is built by concat so
 # the policy pattern never matches this script's own text.
 #
 # Usage:
@@ -130,12 +130,9 @@ if [ "$DRY_RUN" -eq 0 ]; then
         STAGE="$STAGE_DIR/install-shell-guard.$$"
         install -m 0700 -o root -g root "$0" "$STAGE"
         log "re-exec via root-owned staging copy (trusted tier): $STAGE"
-        # Once the guard is live, a shebang re-exec resolves bash to
-        # the guard. Root bypasses AT_SECURE but its script body is still
-        # scanned; the sealed bash.real never scans, so use it when present.
-        if [ -x /bin/bash.real ]; then
-            SHG_STAGED=1 SHG_GUARD_BIN="$GUARD_BIN" exec /bin/bash.real "$STAGE" "$@"
-        fi
+        # The staged copy lives in a root-owned 0700 tree, so the guard
+        # classifies it trusted and execs the backing shell for it without
+        # scanning the body. No direct /bin/bash.real invocation is needed.
         SHG_STAGED=1 SHG_GUARD_BIN="$GUARD_BIN" exec "$STAGE" "$@"
     fi
 fi

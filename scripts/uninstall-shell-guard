@@ -83,12 +83,9 @@ if [ "$DRY_RUN" -eq 0 ]; then
         STAGE="$STAGE_DIR/uninstall-shell-guard.$$"
         install -m 0700 -o root -g root "$0" "$STAGE"
         log "re-exec via root-owned staging copy (trusted tier): $STAGE"
-        # Once the guard is live, a shebang re-exec resolves bash to
-        # the guard, which fails closed for root (AT_SECURE == 0).
-        # The sealed bash.real never scans; use it when present.
-        if [ -x /bin/bash.real ]; then
-            SHG_STAGED=1 exec /bin/bash.real "$STAGE" "$@"
-        fi
+        # The staged copy lives in a root-owned 0700 tree, so the guard
+        # classifies it trusted and execs the backing shell for it without
+        # scanning the body. No direct /bin/bash.real invocation is needed.
         SHG_STAGED=1 exec "$STAGE" "$@"
     fi
 fi

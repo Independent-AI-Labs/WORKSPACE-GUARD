@@ -657,9 +657,9 @@ Root-only. All paths target the RESOLVED bash path (usrmerge:
    `target/release/workspace-shell-guard`); the script never builds.
    Verify it is a valid ELF.
 2. Self-stage when `$0` is outside the trusted tier (e.g. the
-   agent-owned repo): copy to `/var/lib/workspace-guard/` (root:root 0700) and re-exec. Once the guard is live, a shebang re-exec
-   would resolve bash to the guard and fail closed, so the staged
-   copy is run through the sealed `/bin/bash.real` when present.
+   agent-owned repo): copy to `/var/lib/workspace-guard/` (root:root 0700) and re-exec. The staged copy is trusted-tier, so the guard
+   execs the backing shell for it without scanning the body; the re-exec
+   does not invoke `/bin/bash.real` directly.
 3. Seal the stock bash as `/bin/bash.real`: copy from the resolved
    bash path (first install) or from `<bash>.distrib` (reconcile).
    `chown root:root`, `chmod 0700`, ELF-magic check. When
