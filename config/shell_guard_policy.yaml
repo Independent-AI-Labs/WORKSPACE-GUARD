@@ -124,5 +124,5 @@ patterns:
     scope: both
     mode: report
   - id: alt-shell
-    regex: (?m)(^|#!|[\x3b&|(`]|\b(env|exec|command|sudo|nohup|xargs|nice|timeout)\s+(-\S+\s+)*)(\S*/)?(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)(\s|[\x3b&|)`]|\z)
+    regex: (?m)(^|#!|[\x3b&|(`]|\b(env|exec|command|sudo|nohup|xargs|nice|timeout)\s+(-\S+\s+)*)\s*(\S*/)?(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)(\s|[\x3b&|)`]|\z)
     hint: only bash/sh are permitted on this host
