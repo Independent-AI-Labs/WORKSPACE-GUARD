@@ -132,6 +132,12 @@ fn check_blocks_non_root_and_allows_root() {
 fn block_engine_wires_commit_attribution_rules() {
     use crate::block::check_blocked;
     use std::ffi::OsString;
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    for &var in crate::BLOCKED_BYPASS_VARS {
+        std::env::remove_var(var);
+    }
     let argv: Vec<OsString> = ["git", "commit", "--author=X <x@y>"]
         .iter()
         .map(OsString::from)

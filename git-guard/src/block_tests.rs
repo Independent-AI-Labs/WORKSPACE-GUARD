@@ -316,6 +316,10 @@ fn config_read_shape_allows_key_display() {
     // Reads display a value and persist nothing: sudo-gated identity
     // keys and dangerous keys must pass as single positionals or under
     // get forms (Claude Code probes these constantly).
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     for args in [
         vec!["git", "config", "user.name"],
         vec!["git", "config", "--get", "user.email"],
@@ -334,6 +338,10 @@ fn config_read_passes_with_benign_dash_c_preamble() {
     // Exact Claude Code shapes: dangerous -c keys are stripped by the
     // sanitizer, benign pairs REMAIN in argv, and the surviving
     // operands must not be miscounted as config positionals.
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let preamble = [
         "-c",
         "submodule.recurse=false",

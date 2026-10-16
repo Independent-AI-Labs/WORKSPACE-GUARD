@@ -16,7 +16,7 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 }
 
 fn run_git(dir: &Path, args: &[&str]) -> bool {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = crate::test_git_command("git");
     cmd.current_dir(dir)
         .arg("-C")
         .arg(dir)

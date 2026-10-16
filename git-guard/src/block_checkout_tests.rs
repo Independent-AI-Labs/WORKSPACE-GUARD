@@ -38,6 +38,10 @@ fn checkout_dotless_nonexistent_name_allowed() {
 
 #[test]
 fn sudo_gated_checkout_allowed_for_root() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let state = empty_state("checkout");
     let argv_os = argv(&["git", "checkout", "main"]);
     let root = crate::is_config_privileged();
@@ -155,6 +159,10 @@ fn restore_is_sudo_gated_not_blocked() {
 
 #[test]
 fn sudo_gated_restore_allowed_for_root() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
     let state = empty_state("restore");
     let argv_os = argv(&["git", "restore", "README.md"]);
     let root = crate::is_config_privileged();

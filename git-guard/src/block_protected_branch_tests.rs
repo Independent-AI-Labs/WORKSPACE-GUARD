@@ -3,7 +3,6 @@
 use super::*;
 use crate::args;
 use std::path::Path;
-use std::process::Command;
 
 fn find_git() -> Option<String> {
     for candidate in ["/usr/bin/git", "/usr/local/bin/git"] {
@@ -11,7 +10,7 @@ fn find_git() -> Option<String> {
             return Some(candidate.to_string());
         }
     }
-    Command::new("git")
+    crate::test_git_command("git")
         .arg("--version")
         .output()
         .ok()
@@ -21,7 +20,7 @@ fn find_git() -> Option<String> {
 
 fn init_main_repo(dir: &Path, git: &str) -> bool {
     let run = |args: &[&str]| -> bool {
-        Command::new(git)
+        crate::test_git_command(git)
             .args(args)
             .current_dir(dir)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -279,7 +278,7 @@ fn protected_branch_release_prefix_pull_blocked() {
         return;
     }
     let git_cmd = |args: &[&str]| -> bool {
-        Command::new(&git)
+        crate::test_git_command(&git)
             .args(args)
             .current_dir(dir.path())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")

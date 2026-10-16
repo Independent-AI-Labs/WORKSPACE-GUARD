@@ -22,7 +22,7 @@ fn resolve_toplevel_honors_dash_c_over_guard_cwd() {
     // entire workspace CI contract check. The resolver must follow -C
     // to the repo the commit actually targets.
     let dir = exec_test_scratch("toplevel-dashc");
-    let st = std::process::Command::new("git")
+    let st = crate::test_git_command("git")
         .arg("-C")
         .arg(&dir)
         .args(["init", "-q"])
@@ -210,6 +210,9 @@ fn fork_child_clears_and_exits() {
 
 #[test]
 fn sudo_gated_env_warnings_non_sudo_drops_with_message() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     std::env::set_var("GIT_AUTHOR_NAME", "evil");
     std::env::set_var("GIT_COMMITTER_EMAIL", "c@d.com");
     std::env::set_var("EDITOR", "vim");
@@ -266,6 +269,9 @@ fn session_marker_is_guard_owned_and_exact() {
     assert!(should_drop_child_env(crate::SESSION_ENV, false));
     assert!(should_drop_child_env(crate::SESSION_ENV, true));
 
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     std::env::remove_var(crate::SESSION_ENV);
     assert!(!is_nested_session());
     std::env::set_var(crate::SESSION_ENV, "1");

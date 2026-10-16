@@ -23,7 +23,7 @@ fn repo_with_provisioned_remote_is_flagged() {
     let dir = tempfile::tempdir().unwrap();
     let top = dir.path().to_string_lossy().to_string();
     let run = |args: &[&str]| {
-        std::process::Command::new("git")
+        crate::test_git_command("git")
             .arg("-C")
             .arg(&top)
             .args(args)

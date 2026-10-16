@@ -162,6 +162,12 @@ fn evaluate_case(case: &PolicyMatrixCase) -> Result<(), String> {
 
 #[test]
 fn policy_matrix_all_cases() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    for &var in crate::BLOCKED_BYPASS_VARS {
+        std::env::remove_var(var);
+    }
     let matrix = load_matrix();
     assert!(
         matrix.cases.len() >= 70,

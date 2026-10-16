@@ -441,6 +441,20 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
 #[cfg(test)]
 pub static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+// Test helper: a `git` command whose child environment has the guard's blocked
+// hook-bypass variables removed. Env-mutating tests (block_bypass_env_tests)
+// set those process-wide; because tests run in parallel, a spawned guard would
+// otherwise inherit e.g. SKIP and correctly block the command, flaking every
+// git-spawning test. Scrubbing the child keeps those tests isolated.
+#[cfg(test)]
+pub fn test_git_command(program: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    for &var in BLOCKED_BYPASS_VARS {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 #[cfg(test)]
 #[path = "config_consistency_tests.rs"]
 mod config_consistency;
