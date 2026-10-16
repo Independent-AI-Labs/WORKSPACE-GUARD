@@ -1,6 +1,6 @@
 # Git Guard - Deployment Reconciliation Plan
 
-**Status:** SUPERSEDED - the deployment-class machinery this plan describes has since shipped (`install-shell-guard`/`shell-guard-check`/`guard-operator.sh` reconcile flow); kept for historical traceability  
+**Status:** SUPERSEDED - the deployment-class machinery this plan describes has since shipped (`install-shell-guard`/`shell-guard-check`/`guard-operator.sh` reconcile flow); kept for historical traceability. The guard-policy helpers named below as `CI/lib/` now live in the WORKSPACE-GUARD repo under `scripts/lib/` (for example `scripts/lib/guard-drift.sh`, `scripts/lib/guard-host-exec.sh`); those `CI/lib/` paths are historical.  
 **Date:** 2026-07-14  
 **Location:** `docs/PLAN-GUARD-DEPLOYMENT-RECONCILIATION.md`
 

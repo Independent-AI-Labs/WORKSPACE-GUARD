@@ -10,9 +10,9 @@ requirement decisions.
   and diagnostics.
 - [x] Remove `CAP_FSETID` from `git-guard/src/exec.rs` inheritable capability setup.
 - [x] Change `GUARD_WORKLOAD_FILE_CAP_STRING` in
-  `WORKSPACE-CI/lib/guard-drift.sh` to
-  `cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep` (done in the
-  WORKSPACE-CI repo; deploy to `/opt/workspace-ci` on the host).
+  `scripts/lib/guard-drift.sh` (the guard-owned copy; it replaced the former
+  `WORKSPACE-CI/lib/guard-drift.sh`) to
+  `cap_setpcap,cap_chown,cap_dac_override,cap_fowner=ep`.
 - [x] Update host-exec installer and drift tests for the exact four-capability
   set (installer reads the shared string; `tests/shell/15` asserts it).
 - [x] Update `scripts/podman/e2e-host-exec.sh` to require the four approved

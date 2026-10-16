@@ -24,7 +24,7 @@ Host (Darwin or Linux)
   |
   |-- Tier 1+2 (podman run, ubuntu:22.04, non-privileged, root inside)
   |     make lint / check / test / test-shell / build-binary-guard
-  |     e2e-root-only.sh (install root-only guard, sanity check, uninstall)
+  |     e2e-root-only.sh (root-only deployment no-op; covered by Tier 1)
   |
   |-- Tier 3 (podman run --privileged, ubuntu:22.04)
         e2e-capability.sh (install capability guard, non-root sanity check, uninstall)
@@ -44,7 +44,7 @@ Orchestrator: `scripts/test-in-podman.sh`
 | `scripts/podman/tier1-test.sh`        | Tier 1 quality gate (unit + feature-gated integration)        |
 | `scripts/podman/run-tier12.sh`        | Non-privileged container: Tier 1 + Tier 2                     |
 | `scripts/podman/run-tier3.sh`         | Privileged container: Tier 3                                  |
-| `scripts/podman/e2e-root-only.sh`     | Root-only install sanity check (runs inside container)        |
+| `scripts/podman/e2e-root-only.sh`     | Root-only deployment no-op (covered by Tier 1 integration)    |
 | `scripts/podman/e2e-capability.sh`    | Capability install sanity check (runs inside container)       |
 | `scripts/podman/e2e-policy-matrix.sh` | Policy-matrix live vectors (Tier 3, after capability install) |
 
@@ -87,7 +87,9 @@ Host:  <workspace>/projects/          -->  Container: /projects/
 
 Mount flag: `-v "${PROJECTS_ROOT}:/projects:rw"`
 
-Precondition: `test -d "${PROJECTS_ROOT}/WORKSPACE-CI/scripts/bootstrap-workspace-guard"`.
+Precondition: `${PROJECTS_ROOT}/WORKSPACE-GUARD` is the guard checkout; the
+harness and its install helpers live under that mount (`scripts/`, `scripts/lib`).
+No deployed CI mount is required for the guard E2E tiers.
 
 ---
 
@@ -143,46 +145,24 @@ Then invokes `e2e-root-only.sh` in the same container session (second
 
 ## 8. Tier 2 : Root-Only E2E
 
-`scripts/podman/e2e-root-only.sh` (container root required):
+`scripts/podman/e2e-root-only.sh` (container root required) is a **no-op**. It
+verifies it is running as container root, prints that root-only deployment is
+covered by the Tier 1 root-only integration suite, and exits 0. It performs no
+guard install or uninstall, needs no deployed CI mount, and no longer consumes
+`BUILD_MODE=root-only` / `FORCE_ROOT_ONLY=1` / `GUARD_NONINTERACTIVE=1`.
 
-Environment:
+The root-only deployment properties are exercised by the Tier 1 root-only
+feature combination (`cargo test --no-default-features --features root-only
+--test integration_test`) run as container root inside `tier1-test.sh`, in the
+same container session.
 
-```bash
-export BUILD_MODE=root-only
-export FORCE_ROOT_ONLY=1
-export GUARD_NONINTERACTIVE=1
-```
-
-Install:
-
-```bash
-bash /opt/workspace-ci/scripts/bootstrap-workspace-guard install
-```
-
-sanity check (fresh repo). Tier 2 runs as container root: repo identity may be
-set with root-local `git config` (operator bootstrap). Tier 3 runs
-`provision-host` (admin break-glass, agent sudo strip, per-user git/SSH,
-home-lock, guard stack) before agent tests. Guard injects `GIT_CONFIG_*` from
-locked `~/.gitconfig`.
-Agents never run `git config` for `user.*`. Env-var injection
-(`GIT_AUTHOR_*`, etc.) is never valid in harness or production paths.
-
-```bash
-tmpdir=$(mktemp -d)
-cd "$tmpdir"
-git init -q
-git config user.email "podman@test.local"
-git config user.name "Podman Test"
-echo test > file.txt && git add file.txt && git commit -q -m "init"
-git status          # expect success
-git reset --hard    # expect failure (blocked)
-```
-
-Cleanup:
-
-```bash
-bash /opt/workspace-ci/scripts/bootstrap-workspace-guard uninstall
-```
+Historical context: Tier 2 previously installed the guard in root-only mode via
+the now-removed `/opt/workspace-ci/scripts/bootstrap-workspace-guard install`,
+ran a fresh-repo sanity check (root-local `git config` identity; `git status`
+succeeds, `git reset --hard` blocked), then uninstalled. That obsolete install
+path is gone. Guard installs now run only through the in-repo installer
+(`scripts/install-git-guard`, invoked by `make install-guard-host-exec`); the
+Tier 3 host-exec E2E drives that installer directly.
 
 ---
 
@@ -210,10 +190,9 @@ podman run --rm --privileged \
 6. As `agent`: sanity check repo (`git status` pass, `git reset --hard` blocked).
 7. As `agent`: `/usr/bin/git.original` must fail (not executable).
 8. `bash scripts/podman/e2e-policy-matrix.sh` (plumbing, switch, bypass vectors).
-9. `bash /opt/workspace-ci/scripts/bootstrap-workspace-guard uninstall`
+9. `bash scripts/install-git-guard uninstall`
 
 `--privileged` is required so `setcap` and `chattr` behave like bare metal.
-This tier is a **dev sanity check**; real file-capability delivery is skipped in
 Rootless Podman is a development sanity check only; release sign-off uses a
 separate real-Linux guest harness.
 
@@ -243,11 +222,16 @@ test-podman-quick: init-check + TEST_PODMAN_QUICK=1 + scripts/test-in-podman.sh
 test-podman-provision: init-check + scripts/podman/run-tier3-provision.sh (phases 0-4)
 check-push:     lint + check + test + test-shell + test-podman-provision (Linux pre-push)
 
-build-guard:      bash /opt/workspace-ci/scripts/bootstrap-workspace-guard build-only
-install-guard:    sudo bash /opt/workspace-ci/scripts/bootstrap-workspace-guard install-only
-uninstall-guard:  sudo bash /opt/workspace-ci/scripts/bootstrap-workspace-guard uninstall
-check-guard:      bash /opt/workspace-ci/scripts/bootstrap-workspace-guard check
+build-guard:               sudo make build-guard   (routes via scripts/guard-root-exec)
+install-guard-host-exec:   sudo make install-guard-host-exec
+uninstall-guard:           sudo make uninstall-guard
+check-guard-host-exec:     make check-guard-host-exec
+reconcile-guard-host-exec: sudo make reconcile-guard-host-exec
 ```
+
+`make build-guard` and `make install-guard-host-exec` execute the in-repo
+installer `scripts/install-git-guard` (through `scripts/guard-root-exec` for the
+build); there is no separate deployed-CI install entry point.
 
 `scripts/test-in-podman.sh` calls `ensure-machine.sh` at startup (machine
 ready + base image pull) before Tier 0.
@@ -267,7 +251,7 @@ ready + base image pull) before Tier 0.
 
 ## 13. `GUARD_NONINTERACTIVE` Patch
 
-In `/opt/workspace-ci/scripts/bootstrap-workspace-guard`, the install prompt:
+In `scripts/lib/guard-install.sh`, the install prompt:
 
 ```bash
 if [[ -t 0 ]] && [[ "${GUARD_NONINTERACTIVE:-0}" != "1" ]]; then
@@ -286,8 +270,6 @@ When `GUARD_NONINTERACTIVE=1`, installation proceeds without prompting.
 | `WORKSPACE_GUARD_TEST_IMAGE` | `workspace-guard-test:ubuntu-22.04` | Image tag                          |
 | `TEST_PODMAN_QUICK`          | `0`                                 | `1` skips Tier 3                   |
 | `GUARD_NONINTERACTIVE`       | unset                               | `1` skips install prompt           |
-| `BUILD_MODE`                 | unset (capability)                  | `root-only` for Tier 2             |
-| `FORCE_ROOT_ONLY`            | unset                               | `1` allows root-only on multi-user |
 
 ---
 
@@ -295,8 +277,7 @@ When `GUARD_NONINTERACTIVE=1`, installation proceeds without prompting.
 
 | Symptom                          | Likely cause                | Fix                                       |
 | -------------------------------- | --------------------------- | ----------------------------------------- |
-| `WORKSPACE-CI not found`         | Missing `/opt/workspace-ci` | Run reviewed WORKSPACE-CI deployment      |
 | `podman: command not found`      | Podman not bootstrapped     | `make init`                               |
 | `podman machine` errors (Darwin) | VM not running              | `podman machine start`                    |
 | Tier 3 `setcap` failure          | Container not privileged    | Ensure `run-tier3.sh` uses `--privileged` |
-| Root-only refused                | Non-root users in container | Set `FORCE_ROOT_ONLY=1`                   |
+| `scripts/install-git-guard` missing | Guard checkout not mounted | Mount `${PROJECTS_ROOT}` at `/projects`  |

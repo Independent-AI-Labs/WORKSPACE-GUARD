@@ -286,5 +286,5 @@ new host.
 | Sudo helpers | `scripts/lib/host-provision-sudo.sh` |
 | Operator warnings | `scripts/lib/host-provision-operator.sh` |
 | Fleet user helpers | `scripts/lib/host-provision-users.sh` |
-| Install gate | `CI/lib/guard-host-exec.sh` |
+| Install gate | `scripts/lib/guard-host-exec.sh` |
 | Marker | `/usr/lib/workspace-guard/host-provision.ok` |

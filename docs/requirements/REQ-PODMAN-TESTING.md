@@ -67,8 +67,9 @@ model exercised in Tier 2.
   `cargo` artifacts persist across runs.
 - **REQ-POD-021**: Container working directory shall be
   `/projects/WORKSPACE-GUARD`.
-- **REQ-POD-022**: The host harness shall require `/opt/workspace-ci`; container
-  fixtures mount WORKSPACE-CI source at `/projects/WORKSPACE-CI`.
+- **REQ-POD-022**: The host harness shall require only the guard checkout
+  (`${PROJECTS_ROOT}/WORKSPACE-GUARD`); the guard E2E tiers and their
+  `scripts/lib` helpers are taken from it. A deployed CI mount is not required.
 
 ### 4. Tier 0 :  macOS Host Shell Tests
 
@@ -89,19 +90,21 @@ model exercised in Tier 2.
 ### 6. Tier 2 :  Root-Only E2E (Same Container, Root)
 
 - **REQ-POD-050**: After Tier 1 in the same container session, the harness
-  shall install the guard in **root-only mode** via
-  `BUILD_MODE=root-only FORCE_ROOT_ONLY=1 GUARD_NONINTERACTIVE=1` and
-  `/opt/workspace-ci/scripts/bootstrap-workspace-guard install`.
-- **REQ-POD-051**: Tier 2 sanity check tests shall verify: `git status` succeeds in a
-  fresh repo; `git reset --hard` is blocked. Tier 2 runs as container root:
-  repo identity may be set via root-local `git config` (operator bootstrap).
-  Agents never configure identity; production agents consume root-locked
-  per-user `~/.gitconfig` (and SSH keys via `git-ssh-wrapper`) per
+  shall run `scripts/podman/e2e-root-only.sh` as container root. The script is a
+  **no-op entry point**: it asserts it is root, reports that root-only deployment is covered
+  by the Tier 1 root-only integration suite, and exits 0 without installing or
+  uninstalling the guard.
+- **REQ-POD-051**: Root-only deployment shall be asserted by the Tier 1
+  root-only feature combination (`cargo test --no-default-features --features
+  root-only --test integration_test`) run as container root inside
+  `tier1-test.sh`. Agents never configure identity; production agents consume
+  root-locked per-user `~/.gitconfig` (and SSH keys via `git-ssh-wrapper`) per
   [SPEC-GIT-IDENTITY](../specifications/SPEC-GIT-IDENTITY.md).
   Harness shall not use `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env injection.
-- **REQ-POD-052**: Tier 2 shall uninstall the guard (`bootstrap-workspace-guard
-  uninstall`) before the container exits, leaving no installed guard on the
-  host.
+- **REQ-POD-052**: Tier 2 shall leave no installed guard on the host: it
+  performs no install, so no uninstall step is required. (Tier 3, which does
+  install, uninstalls via `scripts/install-git-guard uninstall` before the
+  container exits.)
 
 ### 7. Tier 3 :  Capability E2E (Privileged Container)
 
@@ -124,9 +127,11 @@ model exercised in Tier 2.
   (the latter includes `test-podman-provision` on Linux). System packages are
   `config/system-deps.yaml` and resolved via `/opt/workspace-ci/scripts/install-system-deps`
   (no inline `brew install` / `apt-get` in the Makefile).
-- **REQ-POD-071**: The Makefile shall expose guard delegation targets matching
-  WORKSPACE-CI: `build-guard`, `install-guard`, `uninstall-guard`,
-  `check-guard` (via `/opt/workspace-ci/scripts/bootstrap-workspace-guard`).
+- **REQ-POD-071**: The Makefile shall expose guard install targets
+  (`build-guard`, `install-guard-host-exec`, `uninstall-guard`,
+  `reconcile-guard-host-exec`, `check-guard-host-exec`) that invoke the in-repo
+  installer `scripts/install-git-guard`, with the build routed through
+  `scripts/guard-root-exec`.
 - **REQ-POD-072**: `moon.yml` task `build-guard` shall resolve via
   `make build-guard` without error.
 
@@ -144,7 +149,7 @@ model exercised in Tier 2.
 
 ### 10. Non-Interactive Install
 
-- **REQ-POD-090**: `/opt/workspace-ci/scripts/bootstrap-workspace-guard` shall honour
+- **REQ-POD-090**: `scripts/lib/guard-install.sh` shall honour
   `GUARD_NONINTERACTIVE=1` to skip the `[y/N]` installation prompt (required
   for container E2E).
 
