@@ -69,7 +69,7 @@ fn policy_matrix_agrees() {
         manifest
     ))
     .expect("matrix yaml readable");
-    let matrix: Matrix = serde_yaml::from_str(&text).expect("matrix yaml parses");
+    let matrix: Matrix = noyalib::compat::serde_yaml::from_str(&text).expect("matrix yaml parses");
     assert!(!matrix.cases.is_empty());
     let rules = rules();
     for case in &matrix.cases {
@@ -126,7 +126,7 @@ fn every_pattern_has_a_blocked_case() {
         manifest
     ))
     .expect("matrix yaml readable");
-    let matrix: Matrix = serde_yaml::from_str(&text).expect("matrix yaml parses");
+    let matrix: Matrix = noyalib::compat::serde_yaml::from_str(&text).expect("matrix yaml parses");
     for (id, _, _, scope, mode) in shell_config::SHELL_PATTERNS {
         let want = if *mode == "report" {
             "reported"

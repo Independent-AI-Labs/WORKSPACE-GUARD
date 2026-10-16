@@ -43,12 +43,12 @@ impl std::fmt::Display for GuardError {
             GuardError::MissingCapabilities(msg) => write!(f, "{msg}"),
             GuardError::GitOriginalMissing => write!(
                 f,
-                "FATAL: /usr/bin/git.original is missing or not a regular file; \
+                "FATAL: /usr/lib/workspace-guard/sealed/git is missing or not a regular file; \
                  run make install-guard-host-exec"
             ),
             GuardError::GitOriginalBadPerms => write!(
                 f,
-                "FATAL: /usr/bin/git.original has unsafe ownership or mode \
+                "FATAL: /usr/lib/workspace-guard/sealed/git has unsafe ownership or mode \
                  (need root:root 0700); run make install-guard-host-exec"
             ),
             GuardError::InvalidInvocation(msg) => write!(f, "FATAL: {msg}"),

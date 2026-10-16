@@ -35,7 +35,7 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
     // anything into Ambient here: the parent already has Effective caps
     // from the file's +ep flags and does not need Ambient. Keeping
     // Ambient empty ensures policy-check sub-calls (block.rs git_cmd)
-    // that fork+exec git.original from the parent get NO caps.
+    // that fork+exec sealed/git from the parent get NO caps.
     const INHERITABLE_CAPS: [caps::Capability; 4] = [
         caps::Capability::CAP_SETPCAP,
         caps::Capability::CAP_CHOWN,
@@ -48,9 +48,9 @@ pub fn raise_ambient_caps() -> Result<(), GuardError> {
     Ok(())
 }
 
-/// Called in the child process after fork, just before execve(git.original).
+/// Called in the child process after fork, just before execve(sealed/git).
 /// Raises CAP_DAC_OVERRIDE into the child's Ambient set so that
-/// git.original (a non-privileged binary with no file caps) inherits it
+/// sealed/git (a non-privileged binary with no file caps) inherits it
 /// across exec and can write to root-owned .git/ files.
 ///
 /// Requires CAP_SETPCAP in Effective (inherited from parent via fork)
@@ -231,7 +231,7 @@ pub fn execve_real_git(
     // Real Git is invoked via the fixed pathname; argv[0] is replaced but
     // every other argument is forwarded byte-for-byte.
     let mut argv_c = argv_to_cstrings(argv_os)?;
-    let fixed_argv0 = CString::new("/usr/bin/git.original").expect("static path has no NUL");
+    let fixed_argv0 = CString::new(crate::GIT_ORIGINAL_PATH).expect("static path has no NUL");
     match argv_c.first_mut() {
         Some(slot) => *slot = fixed_argv0,
         None => argv_c.push(fixed_argv0),
@@ -314,7 +314,7 @@ pub fn execve_real_git(
                 }
                 ChildStatus::Executed => {}
             }
-            // Post-exec relock: reclaim files git.original created back to
+            // Post-exec relock: reclaim files sealed/git created back to
             // root:root. Reuses the git dir resolved once in main.rs; when
             // no git dir was resolved (no subcommand, or not a repo) the
             // relock is skipped entirely instead of spawning a rev-parse.
@@ -324,9 +324,9 @@ pub fn execve_real_git(
                     crate::gitdir::lock(gd);
                 }
             };
-            let t = crate::trace_start("git.original exec+wait");
+            let t = crate::trace_start("sealed/git exec+wait");
             let waited = waitpid(child_pid, None);
-            crate::trace_end(t, "git.original exec+wait");
+            crate::trace_end(t, "sealed/git exec+wait");
             match waited {
                 Ok(WaitStatus::Exited(_, code)) => {
                     #[cfg(feature = "capability-mode")]
@@ -358,7 +358,7 @@ pub fn execve_real_git(
 }
 
 /// Resolve the toplevel of the repo this invocation actually targets.
-/// Mirrors exactly what the exec'd git.original will see: -C,
+/// Mirrors exactly what the exec'd sealed/git will see: -C,
 /// --git-dir/--work-tree argv pass through to it verbatim, so they are
 /// honored here; GIT_DIR/GIT_WORK_TREE are NOT in ALLOWED_VARS and are
 /// stripped by execve_real_git, so they must NOT be honored here (doing
@@ -393,7 +393,7 @@ pub fn check_workspace_ci_contract(
     // whether this commit/push is subject to the workspace contract, so
     // the safe default is to block. (git would reject the operation
     // outside a work tree anyway.)
-    let toplevel = match resolve_toplevel(location, "/usr/bin/git.original") {
+    let toplevel = match resolve_toplevel(location, crate::GIT_ORIGINAL_PATH) {
         Some(t) => t,
         None => {
             return Err(GuardError::ContractFailed(format!(

@@ -11,8 +11,8 @@
 // Validators run against the parsed document (post-transform for
 // mutations, as-is for `validate`), never against line text.
 
+use noyalib::compat::serde_yaml::Value;
 use serde::Deserialize;
-use serde_yaml::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -163,7 +163,7 @@ pub fn registry_for(target: &Path) -> Result<Vec<Schema>, String> {
     }
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let parsed: OverrideFile = serde_yaml::from_str(&raw)
+    let parsed: OverrideFile = noyalib::compat::serde_yaml::from_str(&raw)
         .map_err(|e| format!("{}: not valid YAML: {e}", path.display()))?;
     for o in parsed.schemas {
         let kind = match o.kind.as_deref() {
@@ -249,7 +249,7 @@ fn validate_entry(schema: &Schema, idx: usize, entry: &Value, errors: &mut Vec<S
 fn check_numeric(node: &Value, keys: &[String], path: &str, errors: &mut Vec<String>) {
     if let Value::Mapping(m) = node {
         for (k, v) in m {
-            let name = k.as_str().unwrap_or_default();
+            let name = k.as_str();
             let here = if path.is_empty() {
                 name.to_string()
             } else {

@@ -4,14 +4,14 @@
 // serde_yaml to the intended document (REQ-YE-006/103).
 
 use super::splice;
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 
 fn doc(yaml: &str) -> Value {
-    serde_yaml::from_str(yaml).expect("test yaml must parse")
+    noyalib::compat::serde_yaml::from_str(yaml).expect("test yaml must parse")
 }
 
 fn parse(yaml: &str) -> Value {
-    serde_yaml::from_str(yaml).expect("splice result must parse")
+    noyalib::compat::serde_yaml::from_str(yaml).expect("splice result must parse")
 }
 
 fn seq_of(yaml: &str, key: &str) -> Vec<Value> {
@@ -88,6 +88,28 @@ fn add_into_multiline_flow_list() {
         .expect("add");
     let seq = seq_of(&out, "safe_exceptions");
     assert_eq!(seq.len(), 3);
+}
+
+#[test]
+fn add_block_inserts_nested_policy_item() {
+    // The add-block primitive: an item carrying a nested sequence of
+    // mappings (reject_patterns), which the scalar field-spec grammar
+    // cannot express.
+    let entry = doc(
+        "{kind: reject, subcommand: run, requires_flags: [--privileged], \
+         reject_patterns: [{kind: substring, pattern: -v, reason: escape}]}",
+    );
+    let out = splice::splice_add("rules: []\n", "rules", &entry, &[]).expect("add-block");
+    assert_eq!(seq_of(&out, "rules"), vec![entry.clone()]);
+    let parsed = parse(&out);
+    let nested = parsed
+        .get("rules")
+        .and_then(Value::as_sequence)
+        .and_then(|s| s.first())
+        .and_then(|e| e.get("reject_patterns"))
+        .and_then(Value::as_sequence)
+        .expect("nested patterns");
+    assert_eq!(nested.len(), 1);
 }
 
 #[test]
@@ -268,7 +290,7 @@ fn exotic_indentation_fails_closed_not_corrupt() {
     // A list whose items sit at mixed dash indents cannot be mapped
     // to parsed items; the splice must refuse rather than guess.
     let base = "exceptions:\n  - hook: q\n    paths: [a]\n   - hook: c\n     paths: [b]\n";
-    let parsed: Result<Value, _> = serde_yaml::from_str(base);
+    let parsed: Result<Value, _> = noyalib::compat::serde_yaml::from_str(base);
     if let Ok(v) = parsed {
         if let Some(items) = v.get("exceptions").and_then(Value::as_sequence) {
             let r = splice::splice_remove(base, "exceptions", items, &[0]);

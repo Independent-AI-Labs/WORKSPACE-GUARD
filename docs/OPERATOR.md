@@ -98,6 +98,7 @@ brackets (`paths=[a,b]`, single-element `paths=[x]`):
 
 ```bash
 sudo make yaml-add      FILE=config/quality_exceptions.yaml KEY=exceptions FIELDS="hook=pre-commit;added_by=me;reason=<20+ chars>;paths=[src/x.py]"
+sudo make yaml-add-block FILE=config/binary_guard_policy_rules.yaml KEY=rules BLOCK=/tmp/rule.yaml
 sudo make yaml-remove   FILE=config/quality_exceptions.yaml KEY=exceptions FIELDS="hook=pre-commit;paths=[src/x.py]"
 sudo make yaml-set      FILE=config/coverage_thresholds.yaml KEY=unit.threshold VALUE=80
 sudo make yaml-bootstrap FILE=config/file_length_limits.yaml KEY=max_file_bytes VALUE=262144
@@ -113,6 +114,11 @@ make yaml-validate      FILE=config/quality_exceptions.yaml
 Useful flags: `--dry-run` (print a unified diff, no install, no root
 needed), `--allow-no-match` (remove: no-match exits 0), `--string`
 (set: force string typing).
+
+`yaml-add-block` appends a list item whose field is itself a
+collection (e.g. a sequence of mappings) that the scalar field-spec
+grammar cannot express; `BLOCK` names a file holding exactly one YAML
+mapping, which is parsed fail-closed before the target is touched.
 
 Payload isolation (REQ-YE-403): the recipes read `FILE`, `KEY`, `VALUE`, and
 `FIELDS` from the exported environment at runtime; the payload is never

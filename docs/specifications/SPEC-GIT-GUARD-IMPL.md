@@ -64,7 +64,7 @@ caps = { version = "0.5", optional = true }
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+noyalib = { version = "0.0.58", default-features = false, features = ["std", "compat-serde-yaml"] }
 regex = "1"
 ```
 
@@ -76,9 +76,10 @@ safe `nix` substitute (see §8.3). `caps` is present only in the capability-mode
 normal closure. Root-only and capability-mode are mutually exclusive and exactly
 one is selected.
 
-Build dependencies are a distinct reviewed boundary: `serde`, `serde_yaml`, and
-`regex` are used only by the policy compiler. Their complete normal/build/
-proc-macro closure, including `serde_derive` and `unsafe-libyaml`, is recorded in
+Build dependencies are a distinct reviewed boundary: `serde`, `noyalib` (pure
+Rust, `#![forbid(unsafe_code)]`, reached through its `compat::serde_yaml` module),
+and `regex` are used only by the policy compiler. Their complete normal/build/
+proc-macro closure, including `serde_derive`, is recorded in
 a versioned machine-readable closure manifest with exact versions, sources,
 checksums, features, edge kinds, build scripts, and proc-macro status. No runtime
 serialization, regex, YAML, hashing, or tooling crate enters the normal Git-guard

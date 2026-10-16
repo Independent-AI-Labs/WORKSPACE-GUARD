@@ -6,10 +6,10 @@
 #   - guard binary present at the resolved bash path, ELF, root:root
 #     0755, cap_dac_override=ep, hash-match against the repo build
 #     when available
-#   - /bin/bash.real sealed: root:root 0700, chattr +i, hash equal to
-#     the diverted original
-#   - dpkg-divert present for the resolved bash path (and /bin/sh
-#     when covered)
+#   - /usr/lib/workspace-guard/sealed/bash sealed: root:root 0700, chattr
+#     +i, hash equal to the diverted original
+#   - dpkg-divert present for the resolved bash path (targeting the sealed
+#     package slot) and /bin/sh when covered
 #   - apt post-invoke hook installed
 #   - policy configs root-owned and immutable
 #
@@ -80,10 +80,10 @@ have_override_cap() {
     [ -n "$GETCAP" ] && "$GETCAP" "$1" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'
 }
 
-# lsattr needs read permission on the target; /bin/bash.real is 0700
-# root:root, so a non-root caller gets EACCES. That is the installed
-# posture, not drift: report OK-with-note when the file is unreadable,
-# drift only when lsattr runs and shows no +i.
+# lsattr needs read permission on the target; the sealed original is
+# 0700 root:root, so a non-root caller gets EACCES. That is the
+# installed posture, not drift: report OK-with-note when the file is
+# unreadable, drift only when lsattr runs and shows no +i.
 check_immutable() {
     local path="$1" out
     if out="$(lsattr -d "$path" 2>&1)"; then
@@ -104,8 +104,9 @@ BASH_PATH="$(readlink -f "$BASH_LINK" 2>"$DEVNULL")"
 if [ -z "$BASH_PATH" ]; then
     BASH_PATH="$BASH_LINK"
 fi
-REAL_PATH="$SHG_ROOT/bin/bash.real"
-DISTRIB_PATH="$BASH_PATH.distrib"
+REAL_PATH="$SHG_ROOT/usr/lib/workspace-guard/sealed/bash"
+SEALED_PKG_DIR="$SHG_ROOT/usr/lib/workspace-guard/sealed/pkg"
+DISTRIB_PATH="$SEALED_PKG_DIR/bash"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
 APT_CHECK="$SHG_ROOT/usr/lib/workspace-guard/apt-shell-check"
 CONFIG_DIR="$REPO_ROOT/config"
@@ -177,16 +178,20 @@ if [ -f "$DISTRIB_PATH" ]; then
 fi
 
 # --- diversion -----------------------------------------------------------------
-if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
-    ok "diversion for $BASH_PATH"
+divert_target() {
+    dpkg-divert --list "$1" 2>"$DEVNULL" \
+        | sed -n 's/.*diversion of .* to \([^ ]*\).*/\1/p'
+}
+if [ "$(divert_target "$BASH_PATH")" = "$DISTRIB_PATH" ]; then
+    ok "diversion for $BASH_PATH -> $DISTRIB_PATH"
 else
-    bad "no dpkg-divert for $BASH_PATH"
+    bad "no dpkg-divert for $BASH_PATH targeting $DISTRIB_PATH"
 fi
-if [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
-    if dpkg-divert --list "$SHG_ROOT/bin/sh" 2>"$DEVNULL" | grep -q "diversion of $SHG_ROOT/bin/sh"; then
+if [ -e "$SEALED_PKG_DIR/sh" ] || [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
+    if [ -n "$(divert_target "$SHG_ROOT/bin/sh")" ]; then
         ok "diversion for /bin/sh"
     else
-        bad "sh.distrib present but no dpkg-divert for /bin/sh"
+        bad "sealed sh present but no dpkg-divert for /bin/sh"
     fi
 fi
 

@@ -40,7 +40,13 @@ pub fn check_categories(
                 hint: "Destructive checkout/switch is forbidden for all users".into(),
             });
         }
-        if !operator_root {
+        // REQ-GGUARD-183: the `stash create`/`stash apply` snapshot that an
+        // approved porcelain (merge/rebase/am/pull) forks internally is
+        // authorized structurally, so a non-root non-fast-forward merge does
+        // not deadlock on the guarded exec-path frontend. A caller-issued
+        // stash verb never matches: its parent is a shell, not a running
+        // porcelain, so the non-root denial below still applies.
+        if !operator_root && !internal_stash_approved(subcommand, argv_os) {
             return Err(GuardError::Blocked {
                 reason: format!(
                     "sudo-gated subcommand: git {} (non-root denied)",
@@ -226,7 +232,11 @@ pub fn check_subcommand_rules(
         }
     }
 
-    if subcommand == "pull" && is_protected_branch(git_path, cwd) && !state.safe_pull_flag {
+    if subcommand == "pull"
+        && is_protected_branch(git_path, cwd)
+        && !state.pull_ff_only
+        && !state.pull_rebase
+    {
         return Err(GuardError::Blocked {
             reason: "git pull on protected branch without --ff-only or --rebase".into(),
             hint: "Use 'git pull --ff-only' or 'git pull --rebase' to avoid merge commits".into(),
@@ -236,8 +246,8 @@ pub fn check_subcommand_rules(
     if subcommand == "merge"
         && !operator_root
         && is_protected_branch(git_path, cwd)
-        && !state.has_ff_only
-        && !state.has_merge_abort
+        && !state.merge_ff_only
+        && !state.merge_abort
     {
         return Err(GuardError::Blocked {
             reason: "git merge on protected branch without --ff-only".into(),
@@ -245,7 +255,17 @@ pub fn check_subcommand_rules(
         });
     }
 
-    if subcommand == "rebase" && !state.has_rebase_safe_flag {
+    // REQ-GGUARD-064: a direct `git rebase` remains blocked for every user
+    // (including root). The one exception is the rebase Git itself forks as
+    // the child of a `pull` the guard already allowed. That child is
+    // identified structurally - its parent process is the sealed real Git
+    // running a `pull`, which only the guard can launch - and its argv
+    // carries the `--onto` signature Git always generates. Without this the
+    // exec-path guard deadlocks `git pull --rebase` on a diverged branch.
+    if subcommand == "rebase"
+        && !state.has_rebase_safe_flag
+        && !rebase_approval(rebase_has_onto(argv_os), parent_is_pull_rebase())
+    {
         return Err(GuardError::Blocked {
             reason: "git rebase (destructive rewrite of history)".into(),
             hint: "Use 'git rebase --continue/--abort/--skip' to complete an in-progress rebase, or use 'git pull --rebase' instead".into(),
@@ -264,35 +284,6 @@ pub fn check_subcommand_rules(
     }
 
     Ok(())
-}
-
-/// Decode the process-group fields the background-push check needs from a
-/// `/proc/<pid>/stat` line (REQ-GGUARD-053). `comm` (field 2) is wrapped in
-/// parentheses and may itself contain spaces or `)`, so the fields are read
-/// relative to the final `)`: relative index 2 is `pgrp` and relative index 5
-/// is `tpgid`. Any missing delimiter, short field list, non-integer, or
-/// out-of-range value is a typed failure; the caller turns it into a block.
-fn parse_stat_process_groups(stat: &str) -> Result<(i32, i32), &'static str> {
-    let close = stat.rfind(')').ok_or("missing comm delimiter")?;
-    let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
-    if fields.len() <= 5 {
-        return Err("too few fields after comm");
-    }
-    let pgrp = fields[2]
-        .parse::<i32>()
-        .map_err(|_| "pgrp is not an integer")?;
-    let tpgid = fields[5]
-        .parse::<i32>()
-        .map_err(|_| "tpgid is not an integer")?;
-    Ok((pgrp, tpgid))
-}
-
-/// REQ-GGUARD-053: a push is backgrounded when it has a controlling terminal
-/// (`tpgid > 0`) whose foreground process group differs from the push's own.
-/// `tpgid <= 0` (no controlling terminal) is treated as foreground, and the
-/// decision is the same for root and non-root.
-fn push_is_backgrounded(pgrp: i32, tpgid: i32) -> bool {
-    tpgid > 0 && tpgid != pgrp
 }
 
 fn git_cmd(git_path: &str, cwd: Option<&str>) -> std::process::Command {
@@ -484,6 +475,11 @@ fn extract_worktree_verb(argv_os: &[OsString]) -> String {
     }
     String::new()
 }
+
+use crate::child::{
+    internal_stash_approved, parent_is_pull_rebase, parse_stat_process_groups,
+    push_is_backgrounded, rebase_approval, rebase_has_onto,
+};
 
 #[cfg(test)]
 #[path = "block_tests.rs"]

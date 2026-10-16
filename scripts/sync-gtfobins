@@ -22,7 +22,11 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]}"
+# When the shell guard stages this script into a memfd, BASH_SOURCE no longer
+# names the real file; the guard publishes the original in SHG_SCRIPT_PATH.
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RES_DIR="$REPO_ROOT/res"
 REF_DIR="$REPO_ROOT/docs/references"

@@ -17,6 +17,8 @@ setup() {
     cp /bin/true "$GUARD_FIX"
     printf '#' >> "$GUARD_FIX"
     export SHG_ROOT="$FAKE" SHG_GUARD_BIN="$GUARD_FIX"
+    SEALED="$FAKE/usr/lib/workspace-guard/sealed"
+    SEALED_PKG="$SEALED/pkg"
     export GUARD_DIVERT_DB="$TEST_TMPDIR/divert.db"
     export GUARD_SETCAP_DB="$TEST_TMPDIR/setcap.db"
     export GUARD_LSATTR_DB="$TEST_TMPDIR/lsattr.db"
@@ -31,6 +33,9 @@ UNINSTALL="$GUARD_ROOT/scripts/uninstall-shell-guard"
 CHECK="$GUARD_ROOT/scripts/shell-guard-check"
 
 hash_of() { sha256sum "$1" | awk '{print $1}'; }
+assert_diverted() {
+    awk -F'\t' -v p="$1" '$1==p{found=1} END{exit !found}' "$GUARD_DIVERT_DB"
+}
 
 @test "shell-guard-install: --help prints usage and exits 0" {
     run bash "$INSTALL" --help
@@ -57,7 +62,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     run bash "$INSTALL" --dry-run
     assert_success
     assert_output --partial "dry-run"
-    [ ! -e "$FAKE/bin/bash.real" ]
+    [ ! -e "$SEALED/bash" ]
     [ ! -e "$GUARD_DIVERT_DB" ]
 }
 
@@ -71,17 +76,17 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     [ "$(hash_of "$FAKE/bin/bash")" = "$(hash_of "$GUARD_FIX")" ]
     [ "$(stat -c %a "$FAKE/bin/bash")" = "755" ]
     # sealed original
-    [ -f "$FAKE/bin/bash.real" ]
-    [ "$(stat -c %a "$FAKE/bin/bash.real")" = "700" ]
+    [ -f "$SEALED/bash" ]
+    [ "$(stat -c %a "$SEALED/bash")" = "700" ]
     # diverted original preserved
-    [ -f "$FAKE/bin/bash.distrib" ]
-    [ "$(hash_of "$FAKE/bin/bash.distrib")" = "$(hash_of /bin/true)" ]
-    [ "$(stat -c %a "$FAKE/bin/bash.distrib")" = "700" ]
+    [ -f "$SEALED_PKG/bash" ]
+    [ "$(hash_of "$SEALED_PKG/bash")" = "$(hash_of /bin/true)" ]
+    [ "$(stat -c %a "$SEALED_PKG/bash")" = "700" ]
     # capabilities recorded against the installed inode
     run getcap "$FAKE/bin/bash"
     assert_output --partial "cap_dac_override=ep"
     # immutable flag toggled via chattr stub
-    grep -q "chattr +i $FAKE/bin/bash.real" "$GUARD_STUB_LOG"
+    grep -q "chattr +i $SEALED/bash" "$GUARD_STUB_LOG"
     # apt hook written
     [ -f "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
     [ -x "$FAKE/usr/lib/workspace-guard/apt-shell-check" ]
@@ -120,7 +125,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     run bash "$INSTALL"
     assert_success
     [ "$(hash_of "$FAKE/bin/sh")" = "$(hash_of "$GUARD_FIX")" ]
-    grep -qxF "$FAKE/bin/sh" "$GUARD_DIVERT_DB"
+    assert_diverted "$FAKE/bin/sh"
 }
 
 @test "shell-guard-check: reports NOT INSTALLED on an empty fixture" {
@@ -160,7 +165,7 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
 @test "shell-guard-check: flags relaxed .real mode as DRIFTED" {
     run bash "$INSTALL"
     assert_success
-    chmod 0755 "$FAKE/bin/bash.real"
+    chmod 0755 "$SEALED/bash"
     run bash "$CHECK"
     [ "$status" -eq 1 ]
     assert_output --partial "mode != 0700"
@@ -210,12 +215,12 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     assert_output --partial "is not a directory"
 }
 
-@test "shell-guard-check: unreadable bash.real reports OK-with-note for the +i probe" {
+@test "shell-guard-check: unreadable sealed bash reports OK-with-note for the +i probe" {
     [ "$(id -u)" -ne 0 ] || skip "unreadable-file premise needs a non-root caller (root reads through chmod 0000)"
     run bash "$INSTALL"
     assert_success
-    chmod 0000 "$FAKE/bin/bash.real"
-    export GUARD_LSATTR_FAIL="$FAKE/bin/bash.real"
+    chmod 0000 "$SEALED/bash"
+    export GUARD_LSATTR_FAIL="$SEALED/bash"
     run bash "$CHECK"
     [ "$status" -eq 1 ]
     assert_output --partial "mode != 0700"
@@ -239,12 +244,12 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     assert_output --partial "stock bash restored"
     [ "$(hash_of "$FAKE/bin/bash")" = "$(hash_of /bin/true)" ]
     [ "$(stat -c %a "$FAKE/bin/bash")" = "755" ]
-    [ ! -e "$FAKE/bin/bash.real" ]
-    [ ! -e "$FAKE/bin/bash.distrib" ]
+    [ ! -e "$SEALED/bash" ]
+    [ ! -e "$SEALED_PKG/bash" ]
     [ ! -e "$FAKE/etc/apt/apt.conf.d/99workspace-guard-shell" ]
     [ ! -e "$FAKE/usr/lib/workspace-guard/apt-shell-check" ]
     [ ! -s "$GUARD_DIVERT_DB" ]
-    grep -q "chattr -i $FAKE/bin/bash.real" "$GUARD_STUB_LOG"
+    grep -q "chattr -i $SEALED/bash" "$GUARD_STUB_LOG"
 }
 
 @test "shell-guard-uninstall: no-op when not installed" {
@@ -258,6 +263,6 @@ hash_of() { sha256sum "$1" | awk '{print $1}'; }
     assert_success
     run bash "$UNINSTALL" --dry-run
     assert_success
-    [ -e "$FAKE/bin/bash.real" ]
+    [ -e "$SEALED/bash" ]
     [ -f "$GUARD_DIVERT_DB" ]
 }

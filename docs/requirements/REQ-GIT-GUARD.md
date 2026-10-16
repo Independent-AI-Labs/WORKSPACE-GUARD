@@ -432,6 +432,36 @@ This document specifies the requirements for the Rust binary. The installation/d
   values and post-separator operands cannot create safety state. Configuration
   alone shall not satisfy the explicit FF-only requirement. The verified root
   operator path may perform other merge modes.
+- **REQ-GGUARD-064**: A direct `rebase` shall remain blocked for every user,
+  including verified root, except for recovery flags already defined by
+  REQ-GGUARD-020b. The single additional exception shall be the `rebase` child
+  that real Git forks for an allowed `pull` in effective rebase mode. That child
+  shall be authorized only when its parent process is the sealed real Git
+  running a `pull` (identified by the parent's executable
+  and command line, which only the guard can launch) and its argv contains the
+  `--onto` signature Git always generates. No caller-settable environment
+  variable or argument shall authorize a direct rebase, and a rebase without
+  `--onto` shall not be authorized. This exception exists solely to prevent
+  `git pull --rebase` from deadlocking on the guarded exec-path frontend when a
+  branch has diverged.
+- **REQ-GGUARD-183**: Non-root `stash` shall remain denied for every
+  caller-issued verb (REQ-GGUARD-050), but the `stash create`/`stash apply`
+  snapshot that a porcelain forks *internally* for an operation the guard
+  already allowed shall be authorized. Real Git runs `git stash create`
+  unconditionally when it performs a real (non-fast-forward) merge
+  (`save_state` in `builtin/merge.c`), independent of `--autostash` and
+  `merge.autostash`; `restore_state`/`apply_autostash` may later fork
+  `git stash apply`, and `rebase`/`am` autostash likewise fork
+  `git stash create`. Because the guard owns the exec-path frontend those
+  children re-enter the guard and would otherwise deadlock the operation. The
+  child shall be authorized only when its parent process is the sealed real Git
+  running `merge`, `rebase`, `am`, or `pull` (identified by the parent's
+  executable and command line, which only the guard can launch) and its own
+  subcommand verb is `create` or `apply`. No caller-settable environment
+  variable or argument shall authorize a `stash` invocation, and a
+  caller-issued `git stash` (whose parent is a shell, not a running porcelain)
+  shall stay blocked. This mirrors the structural authorization of
+  REQ-GGUARD-064.
 - **REQ-GGUARD-063**: Protected-branch classification shall use the same
   effective repository context as the eventual Git command, including every
   validated global repository selector. Repository resolution shall return a
@@ -962,9 +992,10 @@ This document specifies the requirements for the Rust binary. The installation/d
   I/O, file watching, dynamic loading, CLI parsing, serialization, regex, hashing,
   or plugin facilities. Argument parsing remains manual `OsStr`/`OsString` code.
   The policy compiler may directly build-depend only on locked `serde`,
-  `serde_yaml`, and `regex` with exact reviewed features; their normal/build/
-  proc-macro transitive closure, including `unsafe-libyaml` and `serde_derive`,
-  shall be a separately versioned allow-list. Builds shall use Cargo resolver 2,
+  `noyalib` (pure Rust, `#![forbid(unsafe_code)]`, reached through its
+  `compat::serde_yaml` module), and `regex` with exact reviewed features; their
+  normal/build/proc-macro transitive closure, including `serde_derive`, shall be
+  a separately versioned allow-list. Builds shall use Cargo resolver 2,
   exact package/binary/feature/target selection, and
   `--locked --frozen --offline` against a trusted checksum-verified source store.
   Git dependencies, alternate registries, unapproved path dependencies, duplicate

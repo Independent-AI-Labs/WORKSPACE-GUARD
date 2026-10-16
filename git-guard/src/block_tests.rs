@@ -12,10 +12,11 @@ fn empty_state(subcommand: &str) -> ArgState {
         has_force_with_lease_flag: false,
         has_branch_d: false,
         has_branch_force_rename: false,
-        safe_pull_flag: false,
+        pull_ff_only: false,
+        pull_rebase: false,
+        merge_ff_only: false,
+        merge_abort: false,
         has_rebase_safe_flag: false,
-        has_ff_only: false,
-        has_merge_abort: false,
         has_cached: false,
         has_delete_flag: false,
         dangerous_config_keys: Vec::new(),
@@ -176,84 +177,6 @@ fn rm_cached_allowed() {
         "rm --cached should be allowed: {:?}",
         result
     );
-}
-
-#[test]
-fn rebase_without_safe_flag_blocked() {
-    let state = empty_state("rebase");
-    let argv_os = argv(&["git", "rebase", "main"]);
-    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
-    assert!(matches!(result, Err(GuardError::Blocked { .. })));
-}
-
-#[test]
-fn rebase_continue_allowed() {
-    let _env_guard = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    clear_blocked_bypass_env_vars();
-    let mut state = empty_state("rebase");
-    state.has_rebase_safe_flag = true;
-    let argv_os = argv(&["git", "rebase", "--continue"]);
-    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
-    assert!(
-        result.is_ok(),
-        "rebase --continue should be allowed: {:?}",
-        result
-    );
-}
-
-#[test]
-fn stash_is_sudo_gated_not_blocked() {
-    // REQ-GGUARD-050: stash moved from the unconditional block to the
-    // sudo-gated category, matching checkout/restore/switch.
-    assert!(!BLOCKED_SUBCOMMANDS.contains(&"stash"));
-    assert!(SUDO_GATED_SUBCOMMANDS.contains(&"stash"));
-}
-
-#[test]
-fn stash_denied_for_non_root_allowed_for_root() {
-    // REQ-GGUARD-050: non-root agents are denied every verb before any
-    // operation parsing; root (operator) may run the whole subcommand.
-    let _env_guard = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    clear_blocked_bypass_env_vars();
-    let cases: &[&[&str]] = &[
-        &["git", "stash"],
-        &["git", "stash", "push"],
-        &["git", "stash", "save"],
-        &["git", "stash", "pop"],
-        &["git", "stash", "apply"],
-        &["git", "stash", "list"],
-        &["git", "stash", "show"],
-        &["git", "stash", "drop"],
-        &["git", "stash", "clear"],
-        &["git", "stash", "future-op"],
-        &["git", "stash", "--", "drop"],
-    ];
-    let root = crate::is_config_privileged();
-    for case in cases {
-        let state = empty_state("stash");
-        let argv_os = argv(case);
-        let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
-        if root {
-            assert!(
-                result.is_ok(),
-                "{case:?} must be allowed for root: {result:?}"
-            );
-        } else {
-            match result {
-                Err(GuardError::Blocked { hint, .. }) => {
-                    assert!(
-                        hint.contains("sudo"),
-                        "non-root hint must name sudo: {hint}"
-                    );
-                }
-                other => panic!("{case:?} must be blocked for non-root: {other:?}"),
-            }
-        }
-    }
 }
 
 #[test]

@@ -257,7 +257,7 @@ _clear_stub_env() {
 # real bash. Never use the package-diverted .distrib copy as a bypass.
 _stock_bash_override() {
     [ "$(id -u)" -eq 0 ] || return 0
-    local stock=/bin/bash.real
+    local stock="${SHG_SEALED_BASH:-/usr/lib/workspace-guard/sealed/bash}"
     [ -x "$stock" ] || return 0
     local dir="$TEST_TMPDIR/shell-override"
     mkdir -p "$dir"
@@ -286,6 +286,7 @@ guard_setup() {
     export WORKSPACE_GUARD_STATE_DIR="$TEST_TMPDIR/guard-state"
     export WORKSPACE_BINARY_GUARD_STATE_DIR="$TEST_TMPDIR/binary-guard-state"
     mkdir -p "$WORKSPACE_GUARD_STATE_DIR" "$WORKSPACE_BINARY_GUARD_STATE_DIR"
+    export WORKSPACE_GUARD_SEALED_DIR="$TEST_TMPDIR/sealed"
     export GUARD_STUB_LOG="$TEST_TMPDIR/chattr.log"
     export GUARD_DIVERT_DB="$TEST_TMPDIR/diverts.db"
     # A stderr sink threaded through a variable so test source never
@@ -304,6 +305,10 @@ guard_setup() {
 guard_teardown() {
     _teardown_tmpdir
 }
+
+# Sealed-tree path helpers (mirror scripts/lib/sealed-paths.sh).
+sealed_of()     { printf '%s/%s' "$WORKSPACE_GUARD_SEALED_DIR" "${1##*/}"; }
+sealed_pkg_of() { printf '%s/%s' "$WORKSPACE_GUARD_SEALED_DIR/pkg" "${1##*/}"; }
 
 # Convenience: source fake_repo.bash helpers. Call after guard_setup so
 # TEST_TMPDIR exists.

@@ -145,6 +145,10 @@ Invariants enforced by the current code:
   `config/git_guard_resource_limits.yaml`).
 - `git fetch` refspecs restricted to ref names; arbitrary URL refspecs are
   blocked.
+- Upstream updates on protected branches are limited to fast-forward or rebase:
+  `git pull --ff-only` and `git pull --rebase` (the rebase Git forks for the
+  pull is authorized internally, REQ-GGUARD-064). Plain `git pull`/`git merge`
+  and direct `git rebase` are blocked (see `AGENTS.md`).
 - `.git/` ownership lock scoped to workspace repos and clones whose remotes
   point at provisioned hosts; everything else is untouched.
 - Operator-registered exempt projects are honored only from a root-owned,
@@ -338,6 +342,7 @@ Run from the workspace root; full detail in
 | `sudo make install-shell-guard`                         | Install the bash/sh shell guard (also part of guard-up; SPEC-SHELL-GUARD) |
 | `sudo make install-exempt-registry`                     | Provision/re-verify the root-owned CI-contract exemption registry (SPEC-GIT-GUARD §6.5) |
 | `sudo make yaml-add FILE=.. KEY=.. FIELDS=".."`         | Append a YAML policy entry                                                |
+| `sudo make yaml-add-block FILE=.. KEY=.. BLOCK=..`       | Append a list item from raw YAML (nested collections)                     |
 | `sudo make yaml-remove FILE=.. KEY=.. FIELDS=".."`      | Remove matching YAML policy entries                                       |
 | `sudo make yaml-set FILE=.. KEY=.. VALUE=..`            | Set a YAML policy scalar                                                  |
 | `sudo make yaml-unset FILE=.. KEY='hooks[].safety'`      | Remove a field through a dotted mapping/list-wildcard path                 |

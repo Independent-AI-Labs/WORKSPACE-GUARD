@@ -3,10 +3,10 @@
 #
 # Implements docs/specifications/SPEC-BINARY-LOCK.md section 4.3 EXCEPT
 # the Rust-guard-removal steps (which were never applied: install-lock-
-# runtime only registers the .real seal and the dpkg-divert). For every
+# runtime only registers the sealed copy and the dpkg-divert). For every
 # entry recorded by install-lock-runtime in lock-state.yaml this
-# script: removes the immutable flag, deletes <path>.real, drops the
-# dpkg-divert, and clears the state record.
+# script: removes the immutable flag, deletes the sealed original, drops
+# the dpkg-divert, and clears the state record.
 #
 # Usage:
 #   scripts/uninstall-lock-runtime           # full rollback
@@ -20,9 +20,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]}"
+# When the shell guard stages this script into a memfd, BASH_SOURCE no longer
+# names the real file; the guard publishes the original in SHG_SCRIPT_PATH.
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/runtime_state.sh" || exit 1
+# shellcheck source=lib/sealed-paths.sh
+source "$SCRIPT_DIR/lib/sealed-paths.sh" || exit 1
 init_binary_guard_runtime_state "$REPO_ROOT"
 STATE_FILE="$(binary_lock_state_file)"
 
@@ -38,7 +44,7 @@ while [[ $# -gt 0 ]]; do
             cat <<EOF
 Usage: $0 [--dry-run]
 Reverse contain-via-guard per lock-state.yaml (SPEC-BINARY-LOCK 4.3).
-Root-only. Removes chattr +i, deletes <path>.real, drops dpkg-divert.
+Root-only. Removes chattr +i, deletes the sealed original, drops dpkg-divert.
 Exit: 0 ok, 1 rollback failure, 2 not root/missing state file.
 EOF
             exit 0 ;;
@@ -82,7 +88,8 @@ while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     echo "---- $path"
 
-    real="${path}.real"
+    real="$(sealed_path "$path")"
+    legacy_real="${path}.real"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         if [[ "$HAVE_CHATTR" -eq 1 && -f "$real" ]]; then
@@ -99,14 +106,19 @@ while IFS= read -r path; do
     fi
 
     rc=0
-    if [[ "$HAVE_CHATTR" -eq 1 && -f "$real" ]]; then
-        chattr -i "$real" 2>"$DEVNULL" || rc=$?
-    fi
+    for _f in "$real" "$legacy_real"; do
+        if [[ "$HAVE_CHATTR" -eq 1 && -f "$_f" ]]; then
+            chattr -i "$_f" 2>"$DEVNULL" || rc=$?
+        fi
+    done
     if [[ -f "$real" ]]; then
         if ! rm -f "$real"; then
             echo "  FAIL: rm $real" >&2
             FAILED=$((FAILED+1)); continue
         fi
+    fi
+    if [[ -f "$legacy_real" ]]; then
+        rm -f "$legacy_real"
     fi
     if command -v dpkg-divert; then
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then

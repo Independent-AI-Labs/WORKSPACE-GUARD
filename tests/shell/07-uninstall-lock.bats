@@ -13,6 +13,7 @@ _setup_uninstall() {
     copy_real_scripts "$FAKE_REPO"
     FAKE_USR="$TEST_TMPDIR/fakeusr/bin"
     mkdir -p "$FAKE_USR"
+    mkdir -p "$WORKSPACE_GUARD_SEALED_DIR/pkg"
 }
 
 @test "uninstall-lock: --help prints usage and exits 0" {
@@ -53,7 +54,7 @@ EOF
     _setup_uninstall
     local p="$FAKE_USR/sudo"
     mkdir -p "$(dirname "$p")"
-    touch "$p" "${p}.real"
+    touch "$p" "$(sealed_of "$p")"
     mkdir -p "$FAKE_REPO/res"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
@@ -72,14 +73,14 @@ EOF
     assert_output --partial "rm -f"
     assert_output --partial "dpkg-divert --remove"
     # .real should still exist (dry-run does not change).
-    [ -f "${p}.real" ]
+    [ -f "$(sealed_of "$p")" ]
 }
 
 @test "uninstall-lock: removes .real file on rollback" {
     _setup_uninstall
     local p="$FAKE_USR/sudo"
     mkdir -p "$(dirname "$p")"
-    touch "$p" "${p}.real"
+    touch "$p" "$(sealed_of "$p")"
     mkdir -p "$FAKE_REPO/res"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
@@ -93,14 +94,14 @@ EOF
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
     assert_success
     assert_output --partial "ROLLED BACK"
-    [ ! -f "${p}.real" ]
+    [ ! -f "$(sealed_of "$p")" ]
 }
 
 @test "uninstall-lock: invokes chattr -i on .real" {
     _setup_uninstall
     local p="$FAKE_USR/sudo"
     mkdir -p "$(dirname "$p")"
-    touch "$p" "${p}.real"
+    touch "$p" "$(sealed_of "$p")"
     mkdir -p "$FAKE_REPO/res"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
@@ -114,16 +115,16 @@ EOF
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
     assert_success
     grep -q '\-i' "$GUARD_STUB_LOG"
-    grep -q "${p}.real" "$GUARD_STUB_LOG"
+    grep -q "$(sealed_of "$p")" "$GUARD_STUB_LOG"
 }
 
 @test "uninstall-lock: invokes dpkg-divert --remove for diverted path" {
     _setup_uninstall
     local p="$FAKE_USR/sudo"
     mkdir -p "$(dirname "$p")"
-    touch "$p" "${p}.real"
+    touch "$p" "$(sealed_of "$p")"
     # Record the divert so --list shows it's diverted.
-    echo "$p" >> "$GUARD_DIVERT_DB"
+    printf '%s\t%s\n' "$p" "$(sealed_pkg_of "$p")" >> "$GUARD_DIVERT_DB"
     mkdir -p "$FAKE_REPO/res"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
@@ -138,16 +139,16 @@ EOF
     assert_success
     assert_output --partial "ROLLED BACK"
     # dpkg-divert stub should have removed the entry from GUARD_DIVERT_DB.
-    ! grep -qxF "$p" "$GUARD_DIVERT_DB"
+    ! awk -F'\t' -v p="$p" '$1==p{found=1} END{exit !found}' "$GUARD_DIVERT_DB"
 }
 
 @test "uninstall-lock: unseals diverted copy and restores original mode" {
     _setup_uninstall
     local p="$FAKE_USR/sudo"
     mkdir -p "$(dirname "$p")"
-    touch "${p}.real" "${p}.distrib"
-    chmod 0700 "${p}.distrib"
-    echo "$p" >> "$GUARD_DIVERT_DB"
+    touch "$(sealed_of "$p")" "$(sealed_pkg_of "$p")"
+    chmod 0700 "$(sealed_pkg_of "$p")"
+    printf '%s\t%s\n' "$p" "$(sealed_pkg_of "$p")" >> "$GUARD_DIVERT_DB"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
   - path: "$p"
@@ -159,8 +160,8 @@ lock_state:
 EOF
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
     assert_success
-    grep -q -- "-i ${p}.distrib" "$GUARD_STUB_LOG"
-    [ ! -e "${p}.distrib" ]
+    grep -q -- "-i $(sealed_pkg_of "$p")" "$GUARD_STUB_LOG"
+    [ ! -e "$(sealed_pkg_of "$p")" ]
     assert_equal "4755" "$(stat -c '%a' "$p")"
 }
 
@@ -168,7 +169,7 @@ EOF
     _setup_uninstall
     local p="$FAKE_USR/sudo"
     mkdir -p "$(dirname "$p")"
-    touch "$p" "${p}.real"
+    touch "$p" "$(sealed_of "$p")"
     mkdir -p "$FAKE_REPO/res"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
@@ -189,7 +190,7 @@ EOF
     _setup_uninstall
     local p1="$FAKE_USR/sudo" p2="$FAKE_USR/passwd"
     mkdir -p "$(dirname "$p1")"
-    touch "$p1" "${p1}.real" "$p2" "${p2}.real"
+    touch "$p1" "$(sealed_of "$p1")" "$p2" "$(sealed_of "$p2")"
     mkdir -p "$FAKE_REPO/res"
     cat > "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml" <<EOF
 lock_state:
@@ -208,8 +209,8 @@ lock_state:
 EOF
     run bash "$FAKE_REPO/scripts/uninstall-lock-runtime"
     assert_success
-    [ ! -f "${p1}.real" ]
-    [ ! -f "${p2}.real" ]
+    [ ! -f "$(sealed_of "$p1")" ]
+    [ ! -f "$(sealed_of "$p2")" ]
     # Two entries rolled back.
     assert_output --partial "2 entries"
 }

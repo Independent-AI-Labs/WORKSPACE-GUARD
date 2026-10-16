@@ -127,11 +127,11 @@ struct PathsConfig {
     enforcement_config: String,
 }
 
-fn read_yaml<T: DeserializeOwned>(config_dir: &Path, name: &str) -> T {
+fn read_yaml<T: DeserializeOwned + 'static>(config_dir: &Path, name: &str) -> T {
     let path = config_dir.join(name);
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("build.rs: failed to read {}: {}", path.display(), e));
-    serde_yaml::from_str(&text)
+    noyalib::compat::serde_yaml::from_str(&text)
         .unwrap_or_else(|e| panic!("build.rs: failed to parse {}: {}", path.display(), e))
 }
 

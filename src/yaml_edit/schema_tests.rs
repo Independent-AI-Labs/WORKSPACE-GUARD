@@ -4,11 +4,11 @@
 // so the tool remains generic.
 
 use super::schema;
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 use std::io::Write;
 
 fn doc(yaml: &str) -> Value {
-    serde_yaml::from_str(yaml).expect("test yaml must parse")
+    noyalib::compat::serde_yaml::from_str(yaml).expect("test yaml must parse")
 }
 
 fn validate(basename: &str, yaml: &str) -> Result<(), String> {

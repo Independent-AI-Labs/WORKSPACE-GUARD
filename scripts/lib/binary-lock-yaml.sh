@@ -2,7 +2,9 @@
 #
 # emit_binary_lock: join config/binary_guard_policy_rules.yaml against the GTFOBins
 # parse + live surface, emit res/binary-lock.yaml (full GTFOBins coverage with
-# per-host contained flags).
+# per-host contained flags). Extra managed binaries listed in
+# res/binary-lock-extras.yaml (e.g. podman) are folded in when the catalog has
+# an explicit name rule for them.
 #
 # SOURCED by scripts/sync-gtfobins. Relies on these globals being set by the
 # parent script before calling emit_binary_lock:
@@ -12,6 +14,9 @@
 #   register_temp(), DEVNULL
 #
 # Pure bash + awk. No higher-level scripting interpreter is used.
+
+# shellcheck source=lib/sealed-paths.sh
+source "$(dirname "${BASH_SOURCE[0]}")/sealed-paths.sh" || return 1
 
 emit_binary_lock() {
     local rules_file="$REPO_ROOT/config/binary_guard_policy_rules.yaml"
@@ -33,7 +38,7 @@ emit_binary_lock() {
         [[ -z "$path" ]] && continue
         local bname has_real=0
         bname="${path##*/}"
-        [[ -f "${path}.real" ]] && has_real=1
+        [[ -f "$(sealed_path "$path")" ]] && has_real=1
         live_seen["$bname"]=1
         printf '%s\t%s\t%s\n' "$bname" "$path" "$has_real" >> "$live_tmp"
     done < "$SUID_LIVE_TMP"
@@ -41,7 +46,7 @@ emit_binary_lock() {
         [[ -z "$path" ]] && continue
         local bname has_real=0
         bname="${path##*/}"
-        [[ -f "${path}.real" ]] && has_real=1
+        [[ -f "$(sealed_path "$path")" ]] && has_real=1
         # Skip if already recorded via SUID loop (basename collision).
         if [[ -n "${live_seen["$bname"]:-}" ]]; then continue; fi
         printf '%s\t%s\t%s\n' "$bname" "$path" "$has_real" >> "$live_tmp"
@@ -118,14 +123,59 @@ emit_binary_lock() {
         }
     ' >> "$universe_tmp"
 
-    # Rules parsed into TSV: ruleidx \t name \t tags \t policy \t allow_sub \t self_uid \t env
+    # Explicit extra managed binaries (res/binary-lock-extras.yaml): guarded
+    # binaries that are neither in GTFOBins nor on the SUID/capability
+    # surface (e.g. podman, installed at a boot-dir path by its own
+    # installer). An extra is only folded in when the catalog has an
+    # explicit name rule for it; otherwise it would fall through to the
+    # deny-all catch-all and lock agents out, so it is skipped with a warning.
+    local extras_file="$REPO_ROOT/res/binary-lock-extras.yaml"
+    if [[ -f "$extras_file" ]]; then
+        local extras_ok
+        extras_ok="$(mktemp)"; register_temp "$extras_ok"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^[[:space:]]*-[[:space:]]* ]] || continue
+            local nm="$line"
+            nm="${nm#*-}"; nm="${nm%%#*}"
+            nm="${nm//[[:space:]]/}"
+            [[ -z "$nm" ]] && continue
+            if grep -qE "^  - name:[[:space:]]+${nm}[[:space:]]*\$" "$rules_file"; then
+                printf '%s\n' "$nm" >> "$extras_ok"
+            else
+                echo "    WARN: binary-lock-extras: '${nm}' has no explicit name rule in the catalog; skipped" >&2
+            fi
+        done < "$extras_file"
+        awk -v univ="$universe_tmp" -v ok="$extras_ok" '
+            BEGIN {
+                while ((getline ln < univ) > 0) { split(ln, f, "\t"); seen[f[1]]=1 }
+                close(univ)
+            }
+            { n=$0; if (n=="" || n in seen) next; seen[n]=1; print n "\textra" }
+        ' "$extras_ok" >> "$universe_tmp"
+        # Optional host path for an extra, supplied at sync time via
+        # BINARY_LOCK_EXTRA_PATHS="name=/abs/path name2=/abs/path2" (the lock
+        # is a host snapshot, like the live SUID/cap surface). Without a path
+        # the entry lands with path: null and install-lock skips it.
+        local pair enm epath has_real
+        while IFS= read -r enm || [[ -n "$enm" ]]; do
+            [[ -z "$enm" ]] && continue
+            epath=""
+            for pair in ${BINARY_LOCK_EXTRA_PATHS:-}; do
+                if [[ "${pair%%=*}" == "$enm" ]]; then epath="${pair#*=}"; break; fi
+            done
+            [[ -z "$epath" ]] && continue
+            has_real=0
+            [[ -f "$(sealed_path "$epath")" ]] && has_real=1
+            printf '%s\t%s\t%s\n' "$enm" "$epath" "$has_real" >> "$live_tmp"
+        done < "$extras_ok"
+    fi
     # reject_patterns are serialised into a parallel file keyed by ruleidx.
     # First-match-wins is preserved by the ascending ruleidx order.
     local rules_tmp rejects_tmp
     rules_tmp="$(mktemp)"; register_temp "$rules_tmp"
     rejects_tmp="$(mktemp)"; register_temp "$rejects_tmp"
 
-    awk -v rules_out="$rules_tmp" '
+    awk -v rules_out="$rules_tmp" -v rejects_out="$rejects_tmp" '
         function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
         function split_tags_raw(s, a,  n,i) {
             gsub(/\[|\]/,"",s)
@@ -156,7 +206,7 @@ emit_binary_lock() {
             if (cur!="") cur=cur ", "
             renv[rule]=cur val
         }
-        BEGIN { ruleidx=0; in_env_block=0 }
+        BEGIN { ruleidx=0; in_env_block=0; in_reject=0 }
         /^[[:space:]]*#/ { next }
         /^[[:space:]]*$/ { next }
         /^[[:space:]]*version:/ { next }
@@ -167,6 +217,7 @@ emit_binary_lock() {
         /^  - / {
             ruleidx++
             in_env_block=0
+            in_reject=0
             line=$0
             sub(/^  - /,"",line)
         }
@@ -174,6 +225,15 @@ emit_binary_lock() {
             if ($0 !~ /^  - /) line=$0
             key=line; sub(/[[:space:]]*:.*$/,"",key); key=trim(key)
             val=line; sub(/^[^:]*:[[:space:]]*/,"",val); val=trim(val)
+            # reject_patterns is a nested list of maps. Capture its lines
+            # verbatim (6+ space indent) into a parallel file keyed by
+            # ruleidx so the join can re-emit them unchanged. The rule
+            # header "reject_patterns:" itself is not captured.
+            if (key=="reject_patterns" && val=="") { in_reject=1; next }
+            if (in_reject) {
+                if ($0 ~ /^      /) { print ruleidx "\t" $0 >> rejects_out; next }
+                in_reject=0
+            }
             # Block-list env_sanitise: bare "env_sanitise:" -> collect items.
             if (key=="env_sanitise" && val=="") { in_env_block=1; next }
             if (in_env_block) {
@@ -204,7 +264,7 @@ emit_binary_lock() {
     # serialising them through the TSV).
     awk -F'\t' \
         -v rules_file="$rules_tmp" \
-        -v rejects_file="$rules_file" \
+        -v rejects_file="$rejects_tmp" \
         -v live_file="$live_tmp" \
         '
         function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
@@ -261,6 +321,15 @@ emit_binary_lock() {
             }
             close(rules_file)
 
+            # Load per-rule reject_patterns blocks verbatim, keyed by rule
+            # index. Each line keeps its original 6/8-space indent so the
+            # join can emit it under "    reject_patterns:" unchanged.
+            while ((getline ln < rejects_file) > 0) {
+                split(ln, f, "\t")
+                rej[f[1]] = rej[f[1]] f[2] "\n"
+            }
+            close(rejects_file)
+
             # Load live-surface by bname (last writer wins, but bnames unique).
             while ((getline ln < live_file) > 0) {
                 split(ln, f, "\t")
@@ -279,8 +348,17 @@ emit_binary_lock() {
         {
             bn=$1; bt=$2
             chosen=0
+            # Pass 1: an explicit name rule wins regardless of position, so a
+            # named rule appended after the "*" catch-all is still honoured
+            # (add-block appends; the catalog keeps its catch-all last).
             for (r=1;r<=nrules;r++) {
-                if (matches_rule(rname[r],rtags[r],bn,bt)) { chosen=r; break }
+                if (rname[r]!="" && rname[r]!="*" && rname[r]==bn) { chosen=r; break }
+            }
+            # Pass 2: ordered tag/catch-all scan (first match wins).
+            if (chosen==0) {
+                for (r=1;r<=nrules;r++) {
+                    if (matches_rule(rname[r],rtags[r],bn,bt)) { chosen=r; break }
+                }
             }
             if (chosen==0) { rpol_v="deny-all-non-root"; rsub_v=""; rself_v="false"; renv_v="LD_PRELOAD, LD_LIBRARY_PATH" }
             else { rpol_v=rpol[chosen]; rsub_v=rsub[chosen]; rself_v=rself[chosen]; renv_v=renv[chosen] }
@@ -313,11 +391,15 @@ emit_binary_lock() {
             else printf "    allow_self_username: false\n"
             if (renv_v!="") emit_list("env_sanitise", renv_v)
             else printf "    env_sanitise: []\n"
-            # reject_patterns section is emitted by stream-replaying the rule
-            # file blocks; for the initial full-coverage generator we emit the
-            # catch-all empty list per row and rely on the build.rs step to
-            # read the rule file for the binary-specific reject patterns.
-            printf "    reject_patterns: []\n"
+            # reject_patterns: re-emit the matched-rule block verbatim
+            # (captured in rejects_tmp). Binaries matched by the catch-all
+            # or a rule without reject patterns get an empty list.
+            if (chosen!=0 && (rid[chosen] in rej) && rej[rid[chosen]]!="") {
+                printf "    reject_patterns:\n"
+                printf "%s", rej[rid[chosen]]
+            } else {
+                printf "    reject_patterns: []\n"
+            }
             printf "\n"
         }
     ' "$universe_tmp" > "$out"

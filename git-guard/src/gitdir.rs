@@ -39,7 +39,7 @@
 //!
 //! Once locked, the user cannot directly write to any locked path.
 //! They can still operate the repository normally because the guard
-//! grants `CAP_DAC_OVERRIDE` to `git.original` via the Ambient
+//! grants `CAP_DAC_OVERRIDE` to `sealed/git` via the Ambient
 //! capability set for the duration of the authorized subcommand only.
 //!
 //! The lock runs TWICE per invocation:
@@ -47,8 +47,8 @@
 //!      where a planted `.git/config` payload could fire during
 //!      policy-check sub-calls, and locks exception files before any
 //!      git operation can read them.
-//!   2. After `git.original` exits (`exec.rs`): reclaims files
-//!      that git.original created or modified back to `root:root`,
+//!   2. After `sealed/git` exits (`exec.rs`): reclaims files
+//!      that sealed/git created or modified back to `root:root`,
 //!      closing the backdoor window between git operations.
 //!
 //! Both passes share a single `rev-parse` git-dir resolution performed

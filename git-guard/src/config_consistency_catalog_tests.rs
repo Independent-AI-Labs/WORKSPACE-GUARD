@@ -1,6 +1,6 @@
 //! Sandbox and CVE catalog consistency tests (split from config_consistency_tests).
 
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -12,7 +12,8 @@ fn repo_path(rel: &str) -> String {
 fn load_yaml(rel: &str) -> Value {
     let raw =
         fs::read_to_string(repo_path(rel)).unwrap_or_else(|e| panic!("failed to read {rel}: {e}"));
-    serde_yaml::from_str(&raw).unwrap_or_else(|e| panic!("failed to parse {rel} as YAML: {e}"))
+    noyalib::compat::serde_yaml::from_str(&raw)
+        .unwrap_or_else(|e| panic!("failed to parse {rel} as YAML: {e}"))
 }
 
 fn seq_strings<'a>(root: &'a Value, key: &str, field: &str) -> Vec<&'a str> {

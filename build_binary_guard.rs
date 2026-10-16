@@ -75,7 +75,7 @@ pub fn emit_binary_guard_config(manifest: &Path) {
             "res/binary-lock.yaml is the generated build input for the binary guard.",
         )
     });
-    let lock: BinaryLockFile = serde_yaml::from_str(&text)
+    let lock: BinaryLockFile = noyalib::compat::serde_yaml::from_str(&text)
         .unwrap_or_else(|e| panic!("build.rs: failed to parse {}: {}", lock_path.display(), e));
 
     // F15: the policy table is emitted sorted by name so the runtime
@@ -201,6 +201,7 @@ fn policy_variant(s: &str) -> &'static str {
         "deny-non-root" => "PolicyKind::DenyNonRoot",
         "deny-all-non-root" => "PolicyKind::DenyAllNonRoot",
         "arg-validate" => "PolicyKind::ArgValidate",
+        "arg-validate-all" => "PolicyKind::ArgValidateAllUsers",
         "pass-through" => "PolicyKind::PassThrough",
         other => panic!(
             "build.rs: unknown policy string {:?} in res/binary-lock.yaml",

@@ -4,11 +4,12 @@
 // (audit findings 6, 14, 31).
 
 use super::emit::{emit_dash_item, emit_kv, render_scalar};
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 
 fn roundtrip(v: &Value) {
     let token = render_scalar(v);
-    let back: Value = serde_yaml::from_str(&token).expect("emitted token must parse");
+    let back: Value =
+        noyalib::compat::serde_yaml::from_str(&token).expect("emitted token must parse");
     assert_eq!(&back, v, "token {token:?} must round-trip");
 }
 
@@ -97,7 +98,7 @@ fn single_quotes_double_up() {
 fn emit_kv_scalar() {
     let lines = emit_kv("min_coverage", &Value::from(95), 0);
     assert_eq!(lines, vec!["min_coverage: 95"]);
-    let doc: Value = serde_yaml::from_str(&lines.join("\n")).expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str(&lines.join("\n")).expect("parse");
     assert_eq!(doc.get("min_coverage").and_then(Value::as_i64), Some(95));
 }
 
@@ -105,24 +106,27 @@ fn emit_kv_scalar() {
 fn emit_kv_list_stays_a_list_with_one_item() {
     let items = Value::Sequence(vec![Value::String("only".to_string())]);
     let lines = emit_kv("paths", &items, 2);
-    let doc: Value = serde_yaml::from_str(&lines.join("\n")).expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str(&lines.join("\n")).expect("parse");
     assert_eq!(doc.get("paths"), Some(&items));
 }
 
 #[test]
 fn emit_kv_nested_mapping() {
-    let inner: Value = serde_yaml::from_str("{version: 2, min_coverage: 95}").expect("parse");
+    let inner: Value =
+        noyalib::compat::serde_yaml::from_str("{version: 2, min_coverage: 95}").expect("parse");
     let lines = emit_kv("coverage_thresholds", &inner, 0);
-    let doc: Value = serde_yaml::from_str(&lines.join("\n")).expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str(&lines.join("\n")).expect("parse");
     assert_eq!(doc.get("coverage_thresholds"), Some(&inner));
 }
 
 #[test]
 fn emit_dash_item_mapping_first_pair_on_dash_line() {
-    let entry: Value = serde_yaml::from_str("{hook: quality, reason: 'x'}").expect("parse");
+    let entry: Value =
+        noyalib::compat::serde_yaml::from_str("{hook: quality, reason: 'x'}").expect("parse");
     let lines = emit_dash_item(&entry, 2);
     assert_eq!(lines[0], "  - hook: quality");
-    let doc: Value = serde_yaml::from_str(&format!("k:\n{}", lines.join("\n"))).expect("parse");
+    let doc: Value =
+        noyalib::compat::serde_yaml::from_str(&format!("k:\n{}", lines.join("\n"))).expect("parse");
     let items = doc.get("k").and_then(Value::as_sequence).expect("seq");
     assert_eq!(items[0], entry);
 }

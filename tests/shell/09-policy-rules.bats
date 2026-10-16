@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # 09-policy-rules.bats: structural validation of
-# config/binary_guard_policy_rules.yaml. Verifies the rule ordering, policy
-# validity, tag-AND-name matching contract, and that the catch-all at
-# the tail covers all remaining GTFOBins entries. These are pure
+# config/binary_guard_policy_rules.yaml. Verifies policy validity, the
+# tag-AND-name matching contract, and that the catch-alls at the tail
+# cover the remaining GTFOBins entries. Rule POSITION is not asserted:
+# scripts/lib/binary-lock-yaml.sh resolves an explicit name rule ahead of
+# tag/"*" catch-alls regardless of order (generator behaviour tested in
+# 05-binary-lock-yaml.bats), so append-only edits are safe. These are pure
 # config checks (no script execution).
 
 load lib/harness
@@ -70,20 +73,10 @@ RULES="$GUARD_ROOT/config/binary_guard_policy_rules.yaml"
     local p
     while IFS= read -r p; do
         case "$p" in
-            deny-non-root|deny-all-non-root|arg-validate|pass-through) ;;
+            deny-non-root|deny-all-non-root|arg-validate|arg-validate-all|pass-through) ;;
             *) echo "unknown policy: $p" >&2; return 1 ;;
         esac
     done < <(awk '/^    policy:/ && !/^#/{gsub(/.*policy: */,""); gsub(/[[:space:]].*/,""); print}' "$RULES")
-}
-
-@test "policy-rules: name rules appear before tag catch-alls" {
-    # The first tag-only rule (no name:) should appear AFTER the last
-    # explicit name rule (name: starts with a lowercase letter, not "*").
-    local last_name_line first_tag_line
-    last_name_line="$(awk '/^  - name: [a-z]/{print NR}' "$RULES" | tail -1)"
-    first_tag_line="$(awk '/^  - tags:/ && !/name:/{print NR; exit}' "$RULES")"
-    [ -n "$last_name_line" ] && [ -n "$first_tag_line" ]
-    [ "$last_name_line" -lt "$first_tag_line" ]
 }
 
 @test "policy-rules: env_sanitise entries are uppercase identifiers" {

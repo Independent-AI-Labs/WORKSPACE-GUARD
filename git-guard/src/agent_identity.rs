@@ -2,7 +2,7 @@
 //!
 //! Agents never run `git config` for `user.*`. Identity is read from
 //! root-owned `$HOME/.gitconfig` (preferred), then fleet fallbacks, and
-//! injected into `git.original` via `GIT_CONFIG_*` overrides. SSH transport
+//! injected into `sealed/git` via `GIT_CONFIG_*` overrides. SSH transport
 //! uses guard-injected `GIT_SSH_COMMAND` → `git-ssh-wrapper`.
 
 #[cfg(test)]
@@ -247,7 +247,7 @@ fn ssh_wrapper_env_pairs() -> Vec<(String, String)> {
     ]
 }
 
-/// Push git env overrides for `git.original` child exec.
+/// Push git env overrides for `sealed/git` child exec.
 ///
 /// Privileged (`euid == 0`) callers keep normal global/system config so
 /// operators may use `sudo git config`. Non-privileged agents get nulled

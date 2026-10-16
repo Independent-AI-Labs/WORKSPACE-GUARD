@@ -434,10 +434,7 @@ fn parse_args_message_values_are_not_policy_flags() {
         let args = bytes(raw);
         let state = parse_args(&args).unwrap_or_else(|e| panic!("{what}: blocked: {e:?}"));
         assert!(!state.has_amend, "{what}: message set has_amend");
-        assert!(
-            !state.has_merge_abort,
-            "{what}: message set has_merge_abort"
-        );
+        assert!(!state.merge_abort, "{what}: message set merge_abort");
         assert!(!state.has_force_flag, "{what}: message set has_force_flag");
     }
 }
@@ -454,34 +451,6 @@ fn parse_args_branch_d_flag() {
     let args = bytes(&["git", "branch", "-D", "foo"]);
     let state = parse_args(&args).unwrap();
     assert!(state.has_branch_d);
-}
-
-#[test]
-fn parse_args_safe_pull_ff_only() {
-    let args = bytes(&["git", "pull", "--ff-only"]);
-    let state = parse_args(&args).unwrap();
-    assert!(state.safe_pull_flag);
-}
-
-#[test]
-fn parse_args_merge_abort() {
-    let args = bytes(&["git", "merge", "--abort"]);
-    let state = parse_args(&args).unwrap();
-    assert!(state.has_merge_abort);
-}
-
-#[test]
-fn parse_args_merge_abort_after_dash_is_pathspec() {
-    let args = bytes(&["git", "merge", "--", "--abort"]);
-    let state = parse_args(&args).unwrap();
-    assert!(!state.has_merge_abort);
-}
-
-#[test]
-fn parse_args_safe_pull_rebase() {
-    let args = bytes(&["git", "pull", "--rebase"]);
-    let state = parse_args(&args).unwrap();
-    assert!(state.safe_pull_flag);
 }
 
 #[test]

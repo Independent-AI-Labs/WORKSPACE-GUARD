@@ -24,12 +24,18 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]}"
+# When the shell guard stages this script into a memfd, BASH_SOURCE no longer
+# names the real file; the guard publishes the original in SHG_SCRIPT_PATH.
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RES_DIR="$REPO_ROOT/res"
 SUID_BASELINE="$RES_DIR/suid-baseline.yaml"
 FCAP_BASELINE="$RES_DIR/fcap-baseline.yaml"
 source "$SCRIPT_DIR/lib/runtime_state.sh" || exit 1
+# shellcheck source=lib/sealed-paths.sh
+source "$SCRIPT_DIR/lib/sealed-paths.sh" || exit 1
 init_binary_guard_runtime_state "$REPO_ROOT"
 DRIFT_REPORT="$(binary_drift_report_file)"
 
@@ -282,12 +288,12 @@ fi
 
 while IFS= read -r path; do
     [[ -z "$path" ]] && continue
-    real="${path}.real"
+    real="$(sealed_path "$path")"
     if [[ ! -f "$real" ]]; then
         if [[ -f "$path" ]]; then
             cls="CRITICAL"; CRITICAL=$((CRITICAL+1))
-            msg="CRITICAL: contained binary $path has no ${path}.real (guard never installed or removed)"
-            log "$msg"; gather "$path" "missing-real" "$cls" "no-.real-file"
+            msg="CRITICAL: contained binary $path has no sealed copy at $real (guard never installed or removed)"
+            log "$msg"; gather "$path" "missing-real" "$cls" "no-sealed-copy"
         fi
         continue
     fi

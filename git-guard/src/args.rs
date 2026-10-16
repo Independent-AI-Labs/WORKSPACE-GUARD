@@ -20,10 +20,21 @@ pub struct ArgState {
     pub has_force_with_lease_flag: bool,
     pub has_branch_d: bool,
     pub has_branch_force_rename: bool,
-    pub safe_pull_flag: bool,
+    /// Final effective pull fast-forward mode is `--ff-only` (REQ-GGUARD-061).
+    /// Last-wins: a later `--ff`/`--no-ff` clears it, a later `--ff-only`
+    /// restores it. Explicit argv only; config never sets it.
+    pub pull_ff_only: bool,
+    /// Final effective pull rebase mode (REQ-GGUARD-061). `-r`/`--rebase`
+    /// and non-false `--rebase=<v>` set it; `--rebase=<false>`/`--no-rebase`
+    /// clear it. Explicit argv only.
+    pub pull_rebase: bool,
+    /// Final effective merge fast-forward-only mode (REQ-GGUARD-062).
+    pub merge_ff_only: bool,
+    /// A merge recovery mode that creates no merge commit (`--abort`,
+    /// `--quit`) is in effect (REQ-GGUARD-062).
+    pub merge_abort: bool,
+    /// An in-progress rebase recovery flag (`--continue`/`--abort`/`--skip`).
     pub has_rebase_safe_flag: bool,
-    pub has_ff_only: bool,
-    pub has_merge_abort: bool,
     pub has_cached: bool,
     pub has_delete_flag: bool,
     pub dangerous_config_keys: Vec<String>,
@@ -78,8 +89,8 @@ fn resolve_subcommand_abbreviation(raw: &str) -> String {
 #[path = "args_scan.rs"]
 pub(crate) mod scan;
 use scan::{
-    classify_leading_global, note_config_key, option_takes_operand, parse_config_key, scan_tokens,
-    Leading,
+    classify_leading_global, note_config_key, option_takes_operand, parse_config_key,
+    scan_merge_args, scan_pull_args, scan_tokens, Leading,
 };
 
 pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
@@ -93,10 +104,11 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
         has_force_with_lease_flag: false,
         has_branch_d: false,
         has_branch_force_rename: false,
-        safe_pull_flag: false,
+        pull_ff_only: false,
+        pull_rebase: false,
+        merge_ff_only: false,
+        merge_abort: false,
         has_rebase_safe_flag: false,
-        has_ff_only: false,
-        has_merge_abort: false,
         has_cached: false,
         has_delete_flag: false,
         dangerous_config_keys: Vec::new(),
@@ -280,9 +292,6 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if arg_str.starts_with("--amend") {
                 state.has_amend = true;
             }
-            if arg_str.starts_with("--ff-only") || arg_str.starts_with("--rebase") {
-                state.safe_pull_flag = true;
-            }
             if arg_str == "--cached" {
                 state.has_cached = true;
             }
@@ -388,16 +397,11 @@ pub fn parse_args(argv: &[&[u8]]) -> Result<ArgState, GuardError> {
             if resolved == "commit" {
                 crate::commit::scan_commit_args(&argv[i + 1..], &mut state);
             }
+            if resolved == "pull" {
+                scan_pull_args(&argv[i + 1..], &mut state);
+            }
             if resolved == "merge" {
-                for &sarg in &scan_tokens("merge", &argv[i + 1..]) {
-                    let s = std::str::from_utf8(sarg).unwrap_or("");
-                    if s == "--ff-only" {
-                        state.has_ff_only = true;
-                    }
-                    if s == "--abort" {
-                        state.has_merge_abort = true;
-                    }
-                }
+                scan_merge_args(&argv[i + 1..], &mut state);
             }
             if resolved == "rebase" {
                 for &sarg in &scan_tokens("rebase", &argv[i + 1..]) {

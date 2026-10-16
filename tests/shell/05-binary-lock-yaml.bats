@@ -149,7 +149,7 @@ _setup_emit() {
         | grep -q 'null'
 }
 
-@test "binary-lock-yaml: contained false when .real absent" {
+@test "binary-lock-yaml: contained false when sealed copy absent" {
     _setup_emit
     emit_binary_lock
     local lk="$FAKE_REPO/res/binary-lock.yaml"
@@ -157,15 +157,16 @@ _setup_emit() {
         | grep -q 'false'
 }
 
-@test "binary-lock-yaml: contained true when .real exists" {
+@test "binary-lock-yaml: contained true when sealed copy exists" {
     _setup_emit
     # Use a path under TEST_TMPDIR for the live mount binary and create
-    # a .real seal alongside it. mount IS in the GTFOBins SUID HTML so
+    # a sealed copy of it. mount IS in the GTFOBins SUID HTML so
     # the universe entry exists.
     local mpath="$TEST_TMPDIR/bin/mount"
     mkdir -p "$(dirname "$mpath")"
     touch "$mpath"
-    touch "${mpath}.real"
+    mkdir -p "$WORKSPACE_GUARD_SEALED_DIR"
+    touch "$(sealed_of "$mpath")"
     printf '%s\n' /usr/bin/sudo "$mpath" > "$SUID_LIVE_TMP"
     emit_binary_lock
     local lk="$FAKE_REPO/res/binary-lock.yaml"
@@ -211,4 +212,71 @@ _setup_emit() {
     local lk="$FAKE_REPO/res/binary-lock.yaml"
     # Every entry should have a reject_patterns line.
     grep -q 'reject_patterns: \[\]' "$lk"
+}
+
+@test "binary-lock-yaml: reject_patterns emitted for sudo (CVE rules)" {
+    _setup_emit
+    emit_binary_lock
+    local lk="$FAKE_REPO/res/binary-lock.yaml"
+    # The sudo rule's reject_patterns block must be re-emitted verbatim,
+    # not collapsed to an empty list.
+    awk '/^  - name: "sudo"/{c=1} c && /^  - name: / && !/sudo/{exit} c{print}' "$lk" \
+        | grep -q 'Baron Samedit'
+}
+
+@test "binary-lock-yaml: extras folded in when catalog has a name rule" {
+    _setup_emit
+    # newuidmap is a catalog name rule but is NOT in the fake GTFOBins
+    # universe; list it as an extra managed binary.
+    printf 'version: 1\nbinaries:\n  - newuidmap\n' > "$FAKE_REPO/res/binary-lock-extras.yaml"
+    emit_binary_lock
+    local lk="$FAKE_REPO/res/binary-lock.yaml"
+    awk '/^  - name: "newuidmap"/{c=1} c && /policy:/{print; exit}' "$lk" \
+        | grep -q 'arg-validate'
+}
+
+@test "binary-lock-yaml: extras without a name rule are skipped" {
+    _setup_emit
+    printf 'version: 1\nbinaries:\n  - no-such-binary\n' > "$FAKE_REPO/res/binary-lock-extras.yaml"
+    emit_binary_lock
+    local lk="$FAKE_REPO/res/binary-lock.yaml"
+    ! grep -q 'no-such-binary' "$lk"
+}
+
+@test "binary-lock-yaml: extras path from BINARY_LOCK_EXTRA_PATHS gives non-null path" {
+    _setup_emit
+    printf 'version: 1\nbinaries:\n  - newuidmap\n' > "$FAKE_REPO/res/binary-lock-extras.yaml"
+    export BINARY_LOCK_EXTRA_PATHS="newuidmap=$TEST_TMPDIR/bin/newuidmap"
+    emit_binary_lock
+    unset BINARY_LOCK_EXTRA_PATHS
+    local lk="$FAKE_REPO/res/binary-lock.yaml"
+    grep -q "path: \"$TEST_TMPDIR/bin/newuidmap\"" "$lk"
+}
+
+@test "binary-lock-yaml: extras final line without trailing newline still folds" {
+    _setup_emit
+    # Regression: `while read` skips a final unterminated line, so an extras
+    # file saved without a trailing newline silently dropped its last entry.
+    printf 'version: 1\nbinaries:\n  - newuidmap' > "$FAKE_REPO/res/binary-lock-extras.yaml"
+    export BINARY_LOCK_EXTRA_PATHS="newuidmap=$TEST_TMPDIR/bin/newuidmap"
+    emit_binary_lock
+    unset BINARY_LOCK_EXTRA_PATHS
+    local lk="$FAKE_REPO/res/binary-lock.yaml"
+    grep -q "path: \"$TEST_TMPDIR/bin/newuidmap\"" "$lk"
+}
+
+@test "binary-lock-yaml: explicit name rule appended after the catch-all still wins" {
+    _setup_emit
+    # add-block appends; the catalog keeps its "*" catch-all last. An exact
+    # name rule must beat the catch-all regardless of position.
+    cat >> "$FAKE_REPO/config/binary_guard_policy_rules.yaml" <<'EOF'
+
+  - name: mount
+    policy: pass-through
+    env_sanitise: [LD_PRELOAD]
+EOF
+    emit_binary_lock
+    local lk="$FAKE_REPO/res/binary-lock.yaml"
+    awk '/^  - name: "mount"/{c=1} c && /policy:/{print; exit}' "$lk" \
+        | grep -q 'pass-through'
 }

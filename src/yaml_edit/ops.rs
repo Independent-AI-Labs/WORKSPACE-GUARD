@@ -1,5 +1,5 @@
 use crate::install::install;
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,7 @@ const LOCK_PATH: &str = "/var/lib/workspace-guard/yaml-edit.lock";
 #[derive(Debug, PartialEq)]
 pub enum Intent {
     Add,
+    AddBlock,
     MapAdd,
     Remove,
     Set,
@@ -54,6 +55,7 @@ pub fn fail(code: i32, msg: &str) -> ! {
 pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
     let intent = match args.first().map(String::as_str) {
         Some("add") => Intent::Add,
+        Some("add-block") => Intent::AddBlock,
         Some("map-add") => Intent::MapAdd,
         Some("remove") => Intent::Remove,
         Some("set") => Intent::Set,
@@ -93,7 +95,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         i += 1;
     }
     let need = match intent {
-        Intent::Add | Intent::Remove => 3,
+        Intent::Add | Intent::AddBlock | Intent::Remove => 3,
         Intent::MapAdd => 4,
         Intent::Set | Intent::Bootstrap => 3,
         Intent::Unset | Intent::RemoveComment => 2,
@@ -108,6 +110,7 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
         return Err("missing arguments".to_string());
     }
     let valid_len = match intent {
+        Intent::AddBlock => positional.len() == 3,
         Intent::Add | Intent::Remove => positional.len() >= 3,
         Intent::MapAdd => positional.len() >= 4,
         Intent::List => positional.len() <= 2,
@@ -133,11 +136,21 @@ pub fn parse_cli(args: &[String]) -> Result<Cli, String> {
     if intent == Intent::Format && (allow_no_match || force_string || create) {
         return Err("format supports only --dry-run".to_string());
     }
+    if intent == Intent::AddBlock && (allow_no_match || force_string || create) {
+        return Err("add-block supports only --dry-run".to_string());
+    }
     let file = PathBuf::from(&positional[0]);
     let (key, specs, value) = match intent {
         Intent::Add | Intent::Remove => {
             (Some(positional[1].clone()), positional[2..].to_vec(), None)
         }
+        // The block file path rides in `value`; it is read and parsed
+        // fail-closed by run_add_block, not typed as a YAML scalar.
+        Intent::AddBlock => (
+            Some(positional[1].clone()),
+            Vec::new(),
+            Some(positional[2].clone()),
+        ),
         Intent::MapAdd => (Some(positional[1].clone()), positional[3..].to_vec(), None),
         Intent::Set | Intent::Bootstrap => (
             Some(positional[1].clone()),
@@ -234,7 +247,7 @@ pub(crate) fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
     let key = cli.key.clone().unwrap_or_default();
     let fields = if matches!(
         cli.intent,
-        Intent::Set | Intent::Bootstrap | Intent::RemoveComment
+        Intent::Set | Intent::Bootstrap | Intent::RemoveComment | Intent::AddBlock
     ) {
         format!("value={}", cli.value.clone().unwrap_or_default())
     } else if cli.intent == Intent::Delete {
@@ -257,7 +270,7 @@ pub(crate) fn audit(cli: &Cli, intent: &str) -> Result<(), String> {
 }
 
 pub(crate) fn parse_doc(raw: &str, path: &Path) -> Value {
-    serde_yaml::from_str(raw)
+    noyalib::compat::serde_yaml::from_str(raw)
         .unwrap_or_else(|e| fail(1, &format!("{}: not valid YAML: {e}", path.display())))
 }
 
@@ -274,10 +287,7 @@ fn set_node(doc: &mut Value, segs: &[String], val: Value) {
     for seg in segs {
         // Segments were resolved against this document, so every
         // level exists; a miss here is unreachable in practice.
-        let Some(next) = node
-            .as_mapping_mut()
-            .and_then(|m| m.get_mut(Value::String(seg.clone())))
-        else {
+        let Some(next) = node.as_mapping_mut().and_then(|m| m.get_mut(seg.as_str())) else {
             return;
         };
         node = next;
@@ -336,7 +346,7 @@ pub fn run_add(cli: &Cli) {
         let mut expected = doc.clone();
         expected
             .as_mapping_mut()
-            .and_then(|m| m.get_mut(Value::String(key.to_string())))
+            .and_then(|m| m.get_mut(key))
             .and_then(|v| v.as_sequence_mut())
             .map(|s| s.push(entry.clone()))
             .unwrap_or_else(|| fail(1, &format!("key is not a list: {key}")));
@@ -360,7 +370,7 @@ pub fn run_remove(cli: &Cli) {
         let mut expected = doc.clone();
         let seq = expected
             .as_mapping_mut()
-            .and_then(|m| m.get_mut(Value::String(key.to_string())))
+            .and_then(|m| m.get_mut(key))
             .and_then(|v| v.as_sequence_mut())
             .unwrap_or_else(|| fail(1, &format!("key is not a list: {key}")));
         for i in idx.iter().rev() {
@@ -424,7 +434,7 @@ fn create_node(
     }
     node.as_mapping_mut()
         .expect("parent checked")
-        .insert(Value::String(leaf.to_string()), value.clone());
+        .insert(leaf.to_string(), value.clone());
     splice::splice_insert_map_key(original, &parent_segs, leaf, &value).map(|out| (out, expected))
 }
 
@@ -481,6 +491,7 @@ pub(crate) fn mutate(cli: &Cli, op: &mut dyn FnMut(&Value, &str) -> Transform) {
     }
     let intent = match cli.intent {
         Intent::Add => "add",
+        Intent::AddBlock => "add-block",
         Intent::MapAdd => "map-add",
         Intent::Remove => "remove",
         Intent::Set => "set",

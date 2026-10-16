@@ -10,9 +10,9 @@ use std::os::fd::{AsRawFd, OwnedFd};
 
 use nix::errno::Errno;
 
-/// Child could not loan `CAP_DAC_OVERRIDE` to git.original.
+/// Child could not loan `CAP_DAC_OVERRIDE` to sealed/git.
 pub const CHILD_SETUP_CAP_FAIL: u8 = 1;
-/// `execve(git.original)` failed.
+/// `execve(sealed/git)` failed.
 pub const CHILD_SETUP_EXEC_FAIL: u8 = 2;
 
 /// Child exit code after a reported setup failure. The parent ignores it and
@@ -21,11 +21,11 @@ pub const CHILD_SETUP_EXIT: i32 = 127;
 
 /// Typed parent-side view of the child setup channel.
 pub enum ChildStatus {
-    /// EOF: git.original executed and the kernel closed the close-on-exec pipe.
+    /// EOF: sealed/git executed and the kernel closed the close-on-exec pipe.
     Executed,
     /// CAP_DAC_OVERRIDE could not be loaned to the child.
     CapFailed,
-    /// `execve(git.original)` failed.
+    /// `execve(sealed/git)` failed.
     ExecFailed,
 }
 

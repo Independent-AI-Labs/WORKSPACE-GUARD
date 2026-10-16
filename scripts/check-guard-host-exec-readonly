@@ -17,20 +17,21 @@ else
     bad "deployment class is not host-exec"
 fi
 
-if [[ -f /usr/bin/git.original ]]; then
+sealed_git="/usr/lib/workspace-guard/sealed/git"
+if [[ -f "$sealed_git" ]]; then
     original_stat=""
-    if original_stat="$(stat -c '%a %U:%G' /usr/bin/git.original)"; then
+    if original_stat="$(stat -c '%a %U:%G' "$sealed_git")"; then
         read -r original_mode original_owner <<<"$original_stat"
     else
         original_mode="unknown"; original_owner="unknown"
     fi
     if [[ "${original_mode:-}" == "700" && "${original_owner:-}" == "root:root" ]]; then
-        ok "/usr/bin/git.original is 0700 root:root"
+        ok "$sealed_git is 0700 root:root"
     else
-        bad "/usr/bin/git.original expected 0700 root:root, got ${original_mode:-unknown} ${original_owner:-unknown}"
+        bad "$sealed_git expected 0700 root:root, got ${original_mode:-unknown} ${original_owner:-unknown}"
     fi
 else
-    bad "/usr/bin/git.original missing"
+    bad "$sealed_git missing"
 fi
 
 if [[ -x /usr/bin/git ]]; then
@@ -62,7 +63,7 @@ else
     bad "/usr/sbin/getcap missing"
 fi
 
-if dpkg-divert --list /usr/bin/git | grep -q 'git.distrib'; then
+if dpkg-divert --list /usr/bin/git | grep -q 'sealed/pkg/git$'; then
     ok "dpkg diversion active for /usr/bin/git"
 else
     bad "dpkg diversion missing for /usr/bin/git"
@@ -74,7 +75,7 @@ if [[ -e /usr/lib/git-core/git ]]; then
     else
         bad "/usr/lib/git-core/git is not the guard symlink to /usr/bin/git"
     fi
-    if dpkg-divert --list /usr/lib/git-core/git | grep -q 'git.distrib'; then
+    if dpkg-divert --list /usr/lib/git-core/git | grep -q 'sealed/pkg/git-core/git$'; then
         ok "dpkg diversion active for /usr/lib/git-core/git"
     else
         bad "dpkg diversion missing for /usr/lib/git-core/git"
@@ -93,6 +94,28 @@ if git --version; then
     ok "git runs through host-exec guard"
 else
     bad "git cannot run through host-exec guard"
+fi
+
+# `git --version` does not exercise the guard's safe.directory injection: a
+# stock or missing /usr/bin/git still prints a version. In a root-locked repo
+# (.git root:root) that injection is the only thing suppressing git's
+# dubious-ownership refusal, so probe it directly here.
+workspace_root_file="/usr/lib/workspace-guard/workspace-root"
+rev_parse_rc=0
+if [[ -r "$workspace_root_file" ]]; then
+    workspace_root="$(cat "$workspace_root_file")"
+    if [[ -n "$workspace_root" && -e "$workspace_root/.git" ]]; then
+        rev_parse_out="$(git -C "$workspace_root" rev-parse --show-toplevel 2>&1)" || rev_parse_rc=$?
+        if [[ "$rev_parse_rc" -eq 0 ]]; then
+            ok "safe.directory injection works in $workspace_root"
+        else
+            bad "git -C $workspace_root rev-parse failed (safe.directory injection missing): $rev_parse_out"
+        fi
+    else
+        note "workspace root $workspace_root is not a git repo; skipping injection check"
+    fi
+else
+    note "workspace-root marker unreadable; skipping injection check"
 fi
 
 if lsattr_path="$(command -v lsattr)" && [[ -e /usr/bin/git ]]; then

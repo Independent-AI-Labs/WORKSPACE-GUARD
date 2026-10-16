@@ -430,6 +430,22 @@ unlink/recreate. The non-root hint directs the operator to `sudo git stash`;
 agent alternatives remain the temporary worktree and `git diff` snapshot in
 `AGENTS.md`.
 
+The one exception to the non-root denial is the snapshot Git forks *itself*
+during an operation the guard already allowed (REQ-GGUARD-183). Real Git runs
+`git stash create` unconditionally when it performs a real (non-fast-forward)
+merge (`save_state` in `builtin/merge.c`), independent of `--autostash` and
+`merge.autostash`, so `--no-autostash` does not avoid it; `restore_state` and
+`apply_autostash` may later fork `git stash apply`, and `rebase`/`am` autostash
+likewise fork `git stash create`. Because the guard owns the exec-path
+frontend, those children re-enter the guard, and without an exception a
+non-fast-forward merge would deadlock. The child is authorized structurally
+with the same machinery as the REQ-GGUARD-064 pull rebase: the guard reads
+`/proc/<ppid>/exe` and `/proc/<ppid>/cmdline` and approves only when the parent
+is the sealed real Git running `merge`, `rebase`, `am`, or `pull`, and the
+child's own verb is `create` or `apply`. No environment variable is consulted,
+so a caller cannot forge it, and a caller-issued `git stash`, whose parent is
+a shell, not a running porcelain, stays denied.
+
 `branch` policy derives operations from branch's own option grammar. Any actual
 force option blocks, whether standalone or combined with delete, move, or copy.
 Consequently `-D`, `--delete --force`, `-df`, `-fd`, `-f`, `--force`, `-M`,
@@ -490,6 +506,22 @@ consumed before policy classification, so values such as the message in
 `-m --ff-only` or `-m --abort` cannot authorize a merge. Long abbreviations and
 `--` follow the pinned parser. Config-derived FF mode does not replace the
 required explicit argv choice. Verified root may use other merge modes.
+
+`rebase` remains blocked for every user (REQ-GGUARD-020b), with one
+authorization for the child Git forks from an allowed `pull --rebase`
+(REQ-GGUARD-064). Git's `pull` runs `git rebase ... --onto <newbase>
+<upstream>` as a child; because the guard owns the exec-path frontend, that
+child re-enters the guard and would otherwise be blocked, deadlocking the pull
+on any diverged branch. The guard therefore authorizes the child structurally:
+it reads `/proc/<ppid>/exe` and `/proc/<ppid>/cmdline` and approves only when
+the parent process is the sealed real Git (`sealed/git`, `root:root 0700`, which
+only the guard can launch) running a `pull`, and the child's
+argv carries the `--onto` signature. No environment variable is consulted, so a
+caller cannot forge authorization; a direct `git rebase`, with or without
+`--onto`, with or without forged session variables, stays blocked. The same
+structural parent check, accepting `merge`, `rebase`, `am`, or `pull` as the
+parent, authorizes Git's internal `stash create`/`stash apply` snapshot
+(REQ-GGUARD-183).
 
 For every otherwise-allowed push, the guard parses `/proc/self/stat` by finding
 the final `)` of `comm` and then treating the following state token as absolute

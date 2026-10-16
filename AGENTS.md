@@ -44,6 +44,31 @@ pointer; untracked files remain. Every allowed root `sudo_gated` operation,
 including this one, is recorded to the audit sink as `event=allow` before real
 Git runs (REQ-GGUARD-021a); a sink failure aborts the invocation with exit 3.
 
+## Updating from upstream (fetch / pull / merge / rebase)
+
+The git guard blocks history rewrites and merge commits on protected
+branches (`main`, `master`, `develop`, `release/*`, ...). The sanctioned
+ways to incorporate upstream work are:
+
+| Situation | Do this |
+|-----------|---------|
+| Inspect upstream without touching the worktree | `git fetch origin` |
+| Fast-forward only | `git pull --ff-only` (or `git fetch && git merge --ff-only origin/<branch>`) |
+| Local commits need replaying onto upstream (divergence) | `git pull --rebase` |
+
+- `git pull --ff-only`, `git pull --rebase`, `-r`, and `--rebase=<value>`
+  are the only safe pull modes. `--ff`, `--no-ff`, `--rebase=false`, and
+  `--no-rebase` make a pull unsafe and are blocked on a protected branch.
+- Ordinary `git pull`, `git merge` (without `--ff-only`), and every
+  direct `git rebase` are blocked by design; a `git rebase` only passes
+  for `--continue`/`--abort`/`--skip` recovery.
+- The rebase Git itself forks for an allowed `git pull --rebase` is
+  authorized internally (REQ-GGUARD-064) by its parent process being the
+  sealed real Git running that pull, not by any environment variable. Do
+  not try to run `git rebase --onto ...` directly, and do not set
+  `WORKSPACE_GUARD_APPROVED_REBASE`/`WORKSPACE_GUARD_SESSION`: forging
+  them grants nothing.
+
 ## Never hand-edit policy YAMLs
 
 Root-owned policy files (`config/*.yaml`, exemption manifests) are

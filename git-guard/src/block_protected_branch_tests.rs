@@ -181,6 +181,95 @@ fn protected_branch_merge_ff_only_allowed() {
 }
 
 #[test]
+fn protected_branch_pull_rebase_allowed() {
+    let Some(git) = find_git() else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    if !init_main_repo(dir.path(), &git) {
+        return;
+    }
+    let cwd = dir.path().to_string_lossy().to_string();
+    let result = evaluate(&["git", "pull", "--rebase"], &git, &cwd);
+    assert!(
+        result.is_ok(),
+        "pull --rebase on main should be allowed: {:?}",
+        result
+    );
+}
+
+#[test]
+fn protected_branch_pull_rebase_false_blocked() {
+    // REQ-GGUARD-061: `--rebase=false` disables rebase and is not safe.
+    let Some(git) = find_git() else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    if !init_main_repo(dir.path(), &git) {
+        return;
+    }
+    let cwd = dir.path().to_string_lossy().to_string();
+    let result = evaluate(&["git", "pull", "--rebase=false"], &git, &cwd);
+    assert!(
+        matches!(result, Err(GuardError::Blocked { .. })),
+        "pull --rebase=false on main should block: {:?}",
+        result
+    );
+}
+
+#[test]
+fn protected_branch_pull_ordered_override_blocked() {
+    // REQ-GGUARD-061: a later `--no-ff`/`--ff` overrides `--ff-only`.
+    let Some(git) = find_git() else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    if !init_main_repo(dir.path(), &git) {
+        return;
+    }
+    let cwd = dir.path().to_string_lossy().to_string();
+    for argv in [
+        &["git", "pull", "--ff-only", "--no-ff"][..],
+        &["git", "pull", "--ff-only", "--ff"][..],
+        &["git", "pull", "--rebase", "--no-rebase"][..],
+    ] {
+        let result = evaluate(argv, &git, &cwd);
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "{argv:?} on main should block: {:?}",
+            result
+        );
+    }
+}
+
+#[test]
+fn protected_branch_merge_ordered_override_blocked_for_non_root() {
+    if crate::is_config_privileged() {
+        return;
+    }
+    // REQ-GGUARD-062: a later `--ff`/`--no-ff` overrides `--ff-only`.
+    let Some(git) = find_git() else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    if !init_main_repo(dir.path(), &git) {
+        return;
+    }
+    let cwd = dir.path().to_string_lossy().to_string();
+    for argv in [
+        &["git", "merge", "--ff-only", "--ff", "topic"][..],
+        &["git", "merge", "--ff-only", "--no-ff", "topic"][..],
+    ] {
+        let result = evaluate(argv, &git, &cwd);
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "{argv:?} on main should block for non-root: {:?}",
+            result
+        );
+    }
+}
+
+#[test]
 fn protected_branch_release_prefix_pull_blocked() {
     let Some(git) = find_git() else {
         return;

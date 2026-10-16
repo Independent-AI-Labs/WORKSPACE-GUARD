@@ -12,15 +12,59 @@ use crate::args;
 use crate::block::check_blocked;
 use crate::GuardError;
 
+/// noyalib (unlike serde_yaml) rejects an unquoted scalar such as `-5`
+/// when a `String` is expected. The matrix legitimately carries
+/// scalar-looking argv and env values, so scalars are decoded through
+/// `Value` and stringified here, preserving serde_yaml's leniency.
+mod lenient {
+    use std::collections::HashMap;
+
+    use noyalib::compat::serde_yaml::Value;
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer};
+
+    fn scalar_to_string(v: &Value) -> String {
+        match v {
+            Value::String(s) => s.clone(),
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => n.to_string(),
+            Value::Null => String::new(),
+            other => format!("{other:?}"),
+        }
+    }
+
+    pub fn string_vec<'de, D>(d: D) -> Result<Vec<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vals = Vec::<Value>::deserialize(d)?;
+        Ok(vals.iter().map(scalar_to_string).collect())
+    }
+
+    pub fn string_map<'de, D>(d: D) -> Result<HashMap<String, String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v = Value::deserialize(d)?;
+        let Value::Mapping(m) = v else {
+            return Err(D::Error::custom("env must be a mapping"));
+        };
+        Ok(m.into_iter()
+            .map(|(k, v)| (k, scalar_to_string(&v)))
+            .collect())
+    }
+}
+
 #[derive(Deserialize)]
 struct AttackSurfaceCase {
     id: String,
+    #[serde(deserialize_with = "lenient::string_vec")]
     argv: Vec<String>,
     expect: String,
     reason_contains: Option<String>,
     #[serde(default)]
     sudo_only: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string_map")]
     env: HashMap<String, String>,
 }
 
@@ -35,7 +79,7 @@ fn load_matrix() -> AttackSurfaceConfig {
         env!("CARGO_MANIFEST_DIR")
     );
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {path}: {e}"))
+    noyalib::compat::serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {path}: {e}"))
 }
 
 /// Repo root (the git-guard package's parent). Matrix fixture paths such as

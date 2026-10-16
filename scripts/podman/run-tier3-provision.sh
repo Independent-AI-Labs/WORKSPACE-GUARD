@@ -30,21 +30,13 @@ echo "==> Host provision E2E in $_IMAGE"
 "$PODMAN" run --rm --privileged \
     -v "${_PROJECTS_ROOT}:/projects:ro" \
     "$_IMAGE" \
-    bash -c 'set -euo pipefail
-bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
-export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
-cd "$GUARD_ROOT"
-bash scripts/podman/e2e-host-provision.sh'
+    bash /projects/WORKSPACE-GUARD/scripts/podman/run-tier3-provision-in-container.sh e2e-host-provision.sh
 
 echo "==> Host provision safety E2E in $_IMAGE"
 
 "$PODMAN" run --rm --privileged \
     -v "${_PROJECTS_ROOT}:/projects:ro" \
     "$_IMAGE" \
-    bash -c 'set -euo pipefail
-bash /projects/WORKSPACE-GUARD/scripts/podman/lib/prepare-isolated-workspace.sh
-export GUARD_ROOT=/tmp/WORKSPACE-GUARD _GUARD_ROOT=/tmp/WORKSPACE-GUARD CI_ROOT=/tmp/WORKSPACE-CI
-cd "$GUARD_ROOT"
-bash scripts/podman/e2e-host-provision-safety.sh'
+    bash /projects/WORKSPACE-GUARD/scripts/podman/run-tier3-provision-in-container.sh e2e-host-provision-safety.sh
 
 echo "==> Host provision E2E complete"

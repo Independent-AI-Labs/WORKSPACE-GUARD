@@ -188,6 +188,31 @@ fn check_arg_validate_non_root_always_rejected() {
         "test-arg-flag",
         &argv(&["-l"]),
         false,
+        true,
+    );
+    assert!(r.is_some());
+}
+
+#[test]
+fn check_arg_validate_all_users_non_root_clean_passes() {
+    let r = check_arg_validate(
+        &POLICY_ARG_VALIDATE_FLAG,
+        "test-arg-flag",
+        &argv(&["-l"]),
+        false,
+        false,
+    );
+    assert!(r.is_none());
+}
+
+#[test]
+fn check_arg_validate_all_users_non_root_rejected_flag() {
+    let r = check_arg_validate(
+        &POLICY_ARG_VALIDATE_FLAG,
+        "test-arg-flag",
+        &argv(&["-R"]),
+        false,
+        false,
     );
     assert!(r.is_some());
 }
@@ -199,6 +224,7 @@ fn check_arg_validate_root_clean_args_passes() {
         "test-arg-flag",
         &argv(&["-l"]),
         true,
+        true,
     );
     assert!(r.is_none());
 }
@@ -209,6 +235,7 @@ fn check_arg_validate_flag_rejected() {
         &POLICY_ARG_VALIDATE_FLAG,
         "test-arg-flag",
         &argv(&["-R"]),
+        true,
         true,
     );
     assert!(r.is_some());
@@ -222,6 +249,7 @@ fn check_arg_validate_flag_not_rejected_when_absent() {
         "test-arg-flag",
         &argv(&["-l", "-s"]),
         true,
+        true,
     );
     assert!(r.is_none());
 }
@@ -232,6 +260,7 @@ fn check_arg_validate_regex_rejected_with_subcommand_and_flags() {
         &POLICY_ARG_VALIDATE_REGEX,
         "test-arg-regex",
         &argv(&["testsub", "-s", "foo\\"]),
+        true,
         true,
     );
     assert!(r.is_some());
@@ -245,6 +274,7 @@ fn check_arg_validate_regex_not_rejected_wrong_subcommand() {
         "test-arg-regex",
         &argv(&["othersub", "-s", "foo\\"]),
         true,
+        true,
     );
     assert!(r.is_none());
 }
@@ -256,6 +286,7 @@ fn check_arg_validate_regex_not_rejected_missing_required_flag() {
         "test-arg-regex",
         &argv(&["testsub", "foo\\"]),
         true,
+        true,
     );
     assert!(r.is_none());
 }
@@ -266,6 +297,7 @@ fn check_arg_validate_regex_not_rejected_no_pattern_match() {
         &POLICY_ARG_VALIDATE_REGEX,
         "test-arg-regex",
         &argv(&["testsub", "-s", "foo"]),
+        true,
         true,
     );
     assert!(r.is_none());
@@ -280,6 +312,7 @@ fn check_arg_validate_regex_rejected_when_invoked_name_matches_subcommand() {
         &POLICY_ARG_VALIDATE_REGEX,
         "testsub",
         &argv(&["testsub", "-s", "foo\\"]),
+        true,
         true,
     );
     assert!(r.is_some());

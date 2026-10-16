@@ -1,10 +1,10 @@
 # WORKSPACE-GUARD Makefile: Capability guard framework (git PoC).
 #
-# This repo consumes the immutable WORKSPACE-CI artifact. The actual
-# installation of the guard binary (setcap, dpkg-divert, chattr, apt hook)
-# is owned by WORKSPACE-CI's bootstrap-workspace-guard script, invoked
-# from this repo's Makefile via the build-guard/install-guard/check-guard
-# targets that delegate to its protected bootstrap script.
+# This repo owns the installation of every host guard (git, shell, binary
+# lock). The git guard install logic lives in scripts/install-git-guard and
+# scripts/lib/guard-*.sh; root modes run through scripts/guard-root-exec.
+# WORKSPACE-CI is consumed only as the immutable artifact that supplies the
+# Rust toolchain and the contract checks the git guard calls.
 #
 # IMPORTANT: In capability mode, gitdir::lock() claims the entire .git/
 # tree as root:root. Hook files under .git/hooks/ are kept at 0o755
@@ -307,7 +307,7 @@ test-podman-provision: init-check ## Podman host-provision E2E only (phases 0-4,
 # Git Guard
 # =============================================================================
 
-build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (ROOT)
+build-guard: ## Build git-guard binary (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: build-guard needs root (install consumes target/ artifacts): sudo make build-guard" >&2; \
 		exit 1; \
@@ -316,7 +316,7 @@ build-guard: ## Build git-guard binary (delegates to WORKSPACE-CI bootstrap) (RO
 		"$(_GG_DIR)/target/release/workspace-guard.mode" \
 		"$(_GG_DIR)/target/x86_64-unknown-linux-musl/release/workspace-guard" \
 		"$(_GG_DIR)/target/x86_64-unknown-linux-musl/release/workspace-guard.mode"
-	WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" CARGO_TARGET_DIR="$(_GG_DIR)/target" RUSTUP_HOME="$(RUSTUP_HOME)" CARGO_HOME="$(CARGO_HOME)" PATH="$(_CARGO_BOOT):$$PATH" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" build-only
+	WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" CI_DIR="$(CI_DIR)" CARGO_TARGET_DIR="$(_GG_DIR)/target" RUSTUP_HOME="$(RUSTUP_HOME)" CARGO_HOME="$(CARGO_HOME)" PATH="$(_CARGO_BOOT):$$PATH" $(SCRIPT_BASH) scripts/guard-root-exec scripts/install-git-guard build-only
 	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(REPO_ROOT)/target/agent"
 	install -d -o "$${SUDO_USER:-root}" -m 0755 "$(_GG_DIR)/target/agent"
 
@@ -350,7 +350,7 @@ install-guard: ## REMOVED - use install-guard-host-exec
 
 _INSTALL_GUARD_DEPS := $(if $(filter 1,$(GUARD_SKIP_BUILD)),,build-guard)
 install-guard-host-exec: $(_INSTALL_GUARD_DEPS) ## Install git-guard (host-exec class; requires root)
-	$(SUDO) WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" install-host-exec
+	$(SUDO) CI_DIR="$(CI_DIR)" $(SCRIPT_BASH) scripts/guard-root-exec scripts/install-git-guard install-host-exec
 	$(SUDO) $(SCRIPT_BASH) scripts/install-exempt-registry
 	$(SCRIPT_BASH) scripts/check-guard-host-exec-readonly
 
@@ -363,7 +363,7 @@ install-exempt-registry: ## Provision/re-verify the host CI-contract exemption r
 	$(SCRIPT_BASH) scripts/install-exempt-registry
 
 uninstall-guard: ## Uninstall git-guard, restore stock git; preserve provision state (requires root)
-	$(SUDO) WORKSPACE_GUARD_ROOT="$(REPO_ROOT)" $(SCRIPT_BASH) "$(CI_DIR)/scripts/bootstrap-workspace-guard" uninstall
+	$(SUDO) CI_DIR="$(CI_DIR)" $(SCRIPT_BASH) scripts/guard-root-exec scripts/install-git-guard uninstall
 
 reconcile-guard-host-exec: build-guard ## Force rebuild + reinstall git guard and aux artifacts (requires root)
 	GUARD_FORCE_RECONCILE=1 GUARD_SKIP_BUILD=1 $(MAKE) install-guard-host-exec
@@ -380,13 +380,13 @@ install-shell-guard: build-shell-guard ## Install shell guard at /bin/bash + /bi
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: install-shell-guard needs root: sudo make install-shell-guard" >&2; exit 1; \
 	fi
-	$(SCRIPT_BASH) scripts/install-shell-guard
+	$(SCRIPT_BASH) scripts/guard-root-exec scripts/install-shell-guard
 
 uninstall-shell-guard: ## Uninstall shell guard, restore stock bash/sh (ROOT)
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-shell-guard needs root: sudo make uninstall-shell-guard" >&2; exit 1; \
 	fi
-	$(SCRIPT_BASH) scripts/uninstall-shell-guard
+	$(SCRIPT_BASH) scripts/guard-root-exec scripts/uninstall-shell-guard
 
 shell-guard-check: ## Read-only shell guard health check (modes, caps, divert, +i, hash)
 	$(SCRIPT_BASH) scripts/shell-guard-check "$(REPO_ROOT)"
@@ -503,7 +503,7 @@ install-lock: $(_INSTALL_LOCK_DEPS) ## Contain-via-guard every SUID binary per r
 	# Mirrors docs/specifications/SPEC-BINARY-LOCK.md section 4.2
 	# (copy -> chown root:root -> chmod 0700 .real ->
 	# chattr +i -> stage guard -> dpkg-divert --rename -> mv guard -> <path>).
-	test -x scripts/install-lock-runtime && $(SCRIPT_BASH) scripts/install-lock-runtime \
+	test -x scripts/install-lock-runtime && $(SCRIPT_BASH) scripts/guard-root-exec scripts/install-lock-runtime \
 		|| { echo "NOTICE: scripts/install-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.2 documents the procedure." >&2; exit 1; }
 
 .PHONY: uninstall-lock
@@ -511,7 +511,7 @@ uninstall-lock: ## Rollback contain-via-guard: restore .real -> original SUID pa
 	if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: uninstall-lock needs root: sudo make uninstall-lock" >&2; exit 1; \
 	fi
-	test -x scripts/uninstall-lock-runtime && $(SCRIPT_BASH) scripts/uninstall-lock-runtime \
+	test -x scripts/uninstall-lock-runtime && $(SCRIPT_BASH) scripts/guard-root-exec scripts/uninstall-lock-runtime \
 		|| { echo "NOTICE: scripts/uninstall-lock-runtime not yet implemented; SPEC-BINARY-LOCK.md section 4.3 documents the rollback." >&2; exit 1; }
 
 .PHONY: guard-%
@@ -531,7 +531,7 @@ guard-%: ## Canonical guard operator intents (see docs/OPERATOR.md)
 # ';' so values may contain spaces; list fields use brackets (paths=[a,b]).
 
 YAML_EDIT := /usr/bin/workspace-yaml-edit
-export FILE KEY NEW_KEY FIELDS VALUE EXPECT_SHA256
+export FILE KEY NEW_KEY FIELDS VALUE EXPECT_SHA256 BLOCK
 
 .PHONY: build-yaml-edit install-yaml-edit
 build-yaml-edit: ## Build workspace-yaml-edit release binary (ROOT)
@@ -552,13 +552,19 @@ install-yaml-edit: build-yaml-edit ## Install workspace-yaml-edit to /usr/bin (R
 # YAML recipes use the same guarded interpreter as all other automation.
 YAML_SH := $(SCRIPT_BASH)
 
-.PHONY: yaml-add yaml-map-add yaml-remove yaml-set yaml-bootstrap yaml-unset yaml-remove-comment yaml-delete yaml-get yaml-list yaml-validate yaml-check yaml-format
+.PHONY: yaml-add yaml-add-block yaml-map-add yaml-remove yaml-set yaml-bootstrap yaml-unset yaml-remove-comment yaml-delete yaml-get yaml-list yaml-validate yaml-check yaml-format
 yaml-add: ## Append a list entry: make yaml-add FILE=.. KEY=.. FIELDS="hook=x;paths=[a]" (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
 		echo "ERROR: yaml-add needs root: sudo make yaml-add" >&2; exit 1; \
 	fi'
 	"$(YAML_SH)" -c 'IFS=";" read -ra _ye_fields <<< "$$FIELDS"; \
 	"$(YAML_EDIT)" add "$$FILE" "$$KEY" "$${_ye_fields[@]}" $(YAML_FLAGS)'
+
+yaml-add-block: ## Append a raw YAML block item: make yaml-add-block FILE=.. KEY=.. BLOCK=block.yaml (ROOT)
+	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \
+		echo "ERROR: yaml-add-block needs root: sudo make yaml-add-block" >&2; exit 1; \
+	fi'
+	"$(YAML_SH)" -c '"$(YAML_EDIT)" add-block "$$FILE" "$$KEY" "$$BLOCK" $(YAML_FLAGS)'
 
 yaml-map-add: ## Insert a map entry: make yaml-map-add FILE=.. KEY=.. NEW_KEY=.. FIELDS="class=..;owner=.." (ROOT)
 	"$(YAML_SH)" -c 'if [ "$$(id -u)" != "0" ]; then \

@@ -15,6 +15,11 @@ pub enum PolicyKind {
     DenyNonRoot,
     DenyAllNonRoot,
     ArgValidate,
+    /// Same reject-pattern validation as `ArgValidate`, but non-root
+    /// invocations are allowed (after validation). Used for guards on
+    /// binaries agents must run themselves, e.g. podman.
+    #[allow(dead_code)]
+    ArgValidateAllUsers,
     #[allow(dead_code)]
     PassThrough,
 }

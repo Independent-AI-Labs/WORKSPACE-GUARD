@@ -3,15 +3,14 @@
 #
 # Implements docs/specifications/SPEC-SHELL-GUARD.md section 12.2:
 # relaxes +i on the sealed original, removes the dpkg diversion with
-# --rename (atomically restoring bash.distrib over the guard path),
-# removes /bin/bash.real and the apt hook, and verifies the restored
-# shell. /bin/sh is restored the same way when it was covered.
+# --rename (atomically restoring the diverted shell over the guard path),
+# removes the sealed tree and the apt hook, and verifies the restored
+# shell. /bin/sh is restored the same way when it was covered. An older
+# /bin/bash.real install is also restored.
 #
-# Self-staging matches install-shell-guard: root execution re-execs
-# through a root-owned copy under /run so an active guard treats the
-# body as trusted tier. The chattr flag is quoted so the policy
-# pattern (which matches the unquoted form) never matches this
-# script's own text; stripping +i stays a root-only operation.
+# Must run from the trusted tier (scripts/guard-root-exec): the uninstall
+# strips an immutable flag, which the guard refuses to scan for an
+# untrusted body.
 #
 # Usage:
 #   scripts/uninstall-shell-guard            # remove the guard (ROOT)
@@ -67,38 +66,33 @@ BASH_PATH="$(readlink -f "$BASH_LINK" 2>"$DEVNULL")"
 if [ -z "$BASH_PATH" ]; then
     BASH_PATH="$BASH_LINK"
 fi
-REAL_PATH="$SHG_ROOT/bin/bash.real"
-DISTRIB_PATH="$BASH_PATH.distrib"
+SEALED_DIR="$SHG_ROOT/usr/lib/workspace-guard/sealed"
+SEALED_PKG_DIR="$SEALED_DIR/pkg"
+REAL_PATH="$SEALED_DIR/bash"
+DISTRIB_PATH="$SEALED_PKG_DIR/bash"
+LEGACY_REAL="$SHG_ROOT/bin/bash.real"
+LEGACY_DISTRIB="$BASH_PATH.distrib"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
 APT_CHECK="$SHG_ROOT/usr/lib/workspace-guard/apt-shell-check"
+
+divert_target() {
+    dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" \
+        | sed -n 's/.*diversion of .* to \([^ ]*\).*/\1/p'
+}
 
 if [ "$DRY_RUN" -eq 0 ]; then
     if [ "$(id -u)" != "0" ] && [ -z "$SHG_ROOT" ]; then
         echo "ERROR: uninstall-shell-guard needs root: sudo make uninstall-shell-guard" >&2
         exit 2
     fi
-    if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && [ "${SHG_STAGED:-0}" != "1" ] && ! is_trusted_tier "$0"; then
-        STAGE_DIR="$SHG_ROOT/var/lib/workspace-guard"
-        install -d -m 0700 "$STAGE_DIR"
-        STAGE="$STAGE_DIR/uninstall-shell-guard.$$"
-        install -m 0700 -o root -g root "$0" "$STAGE"
-        log "re-exec via root-owned staging copy (trusted tier): $STAGE"
-        # The staged copy lives in a root-owned 0700 tree, so the guard
-        # classifies it trusted and execs the backing shell for it without
-        # scanning the body. No direct /bin/bash.real invocation is needed.
-        SHG_STAGED=1 exec "$STAGE" "$@"
+    if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && ! is_trusted_tier "$0"; then
+        echo "ERROR: uninstall-shell-guard must run from the trusted tier; use: sudo make uninstall-shell-guard" >&2
+        exit 2
     fi
 fi
 
-cleanup_stage() {
-    if [ "${SHG_STAGED:-0}" = "1" ]; then
-        rm -f "$0"
-    fi
-}
-trap cleanup_stage EXIT
-
 guard_present() {
-    [ -f "$REAL_PATH" ] || [ -f "$DISTRIB_PATH" ] \
+    [ -f "$REAL_PATH" ] || [ -f "$DISTRIB_PATH" ] || [ -f "$LEGACY_REAL" ] \
         || getcap "$BASH_PATH" 2>"$DEVNULL" | grep -q 'cap_dac_override=ep'
 }
 
@@ -111,24 +105,24 @@ if [ "$DRY_RUN" -eq 1 ]; then
     have_real=no
     have_divert=no
     [ -f "$REAL_PATH" ] && have_real=yes
-    [ -f "$DISTRIB_PATH" ] && have_divert=yes
+    [ -n "$(divert_target)" ] && have_divert=yes
     log "dry-run: would remove guard from $BASH_PATH (real=$have_real, divert=$have_divert)"
     exit 0
 fi
 
-# 1. Relax the immutable flag on the sealed original (quoted flag:
-#    the policy pattern matches only the unquoted form).
+# 1. Relax the immutable flag on the sealed original.
 if [ -f "$REAL_PATH" ]; then
     if lsattr -d "$REAL_PATH" 2>"$DEVNULL" | awk '{print $1}' | grep -q 'i'; then
-        chattr "-i" "$REAL_PATH"
+        chattr -i "$REAL_PATH"
     fi
 fi
 
-# 2. Remove the diversion with --rename: bash.distrib moves back over
-#    the guard path in a single rename. Fall back to copying .real
-#    when the diversion is already gone (drift).
-if dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
-    log "removing diversion (restores $DISTRIB_PATH -> $BASH_PATH)"
+# 2. Remove the diversion with --rename: the diverted shell moves back over
+#    the guard path in a single rename. Fall back to the sealed (or older)
+#    copy when the diversion is already gone (drift).
+current="$(divert_target)"
+if [ -n "$current" ]; then
+    log "removing diversion (restores $current -> $BASH_PATH)"
     # dpkg-divert --rename refuses to overwrite a file that differs
     # from the diverted original; remove the guard binary first.
     rm -f "$BASH_PATH" || die "cannot remove guard binary at $BASH_PATH"
@@ -141,19 +135,32 @@ elif [ -f "$REAL_PATH" ]; then
     chown root:root "$rb"
     chmod 0755 "$rb"
     mv -T "$rb" "$BASH_PATH"
+elif [ -f "$LEGACY_REAL" ]; then
+    log "no diversion found; restoring $BASH_PATH from older $LEGACY_REAL"
+    if ! chattr -i "$LEGACY_REAL" 2>"$DEVNULL"; then
+        log "older original had no immutable flag to clear"
+    fi
+    rb="$BASH_PATH.restore.$$"
+    cp "$LEGACY_REAL" "$rb"
+    chown root:root "$rb"
+    chmod 0755 "$rb"
+    mv -T "$rb" "$BASH_PATH"
 else
-    die "cannot restore stock bash: no diversion and no $REAL_PATH"
+    die "cannot restore stock bash: no diversion and no sealed or older original"
 fi
 
-# 3. Remove the sealed original and the apt hook.
-rm -f "$REAL_PATH"
+# 3. Remove the sealed tree and the apt hook.
+rm -f "$REAL_PATH" "$DISTRIB_PATH" "$LEGACY_REAL" "$LEGACY_DISTRIB"
+rmdir "$SEALED_PKG_DIR" 2>"$DEVNULL" || log "sealed package dir not empty (left in place)"
+rmdir "$SEALED_DIR" 2>"$DEVNULL" || log "sealed dir not empty (left in place)"
 [ ! -e "$APT_HOOK" ] || { rm -f "$APT_HOOK"; log "removed apt hook"; }
 [ ! -e "$APT_CHECK" ] || { rm -f "$APT_CHECK"; log "removed apt hook checker"; }
 
 # 4. /bin/sh coverage.
-if [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
-    log "restoring /bin/sh from sh.distrib"
+if [ -e "$SEALED_PKG_DIR/sh" ] || [ -e "$SHG_ROOT/bin/sh.distrib" ]; then
+    log "restoring /bin/sh"
     dpkg-divert --remove --rename "$SHG_ROOT/bin/sh" 2>"$DEVNULL" \
+        || mv -T "$SEALED_PKG_DIR/sh" "$SHG_ROOT/bin/sh" 2>"$DEVNULL" \
         || mv -T "$SHG_ROOT/bin/sh.distrib" "$SHG_ROOT/bin/sh"
 fi
 

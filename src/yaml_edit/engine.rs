@@ -2,7 +2,7 @@
 //
 // Semantic core of workspace-yaml-edit (SPEC-YAML-EDIT section 3):
 // field-spec parsing, entry construction, matching, and dotted-key
-// resolution. Everything here operates on serde_yaml::Value, never on
+// resolution. Everything here operates on noyalib::compat::serde_yaml::Value, never on
 // raw text: meaning comes from the real parser (REQ-YE-006). Line
 // scanning lives in yaml_edit_splice.rs and only locates byte ranges.
 //
@@ -16,7 +16,7 @@
 // mappings/sequences, values containing newlines, and field names
 // outside [A-Za-z0-9_.-]+.
 
-use serde_yaml::{Mapping, Value};
+use noyalib::compat::serde_yaml::{Mapping, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Spec {
@@ -90,7 +90,10 @@ pub fn parse_unset_path(path: &str) -> Result<Vec<PathSegment>, String> {
 /// classification manifest entries named after file paths). Splits that
 /// reconstruct an existing key win over single-segment interpretation,
 /// mirroring resolve_segments (REQ-YE-204). Returns (key, take).
-fn resolve_join(map: &serde_yaml::Mapping, segments: &[PathSegment]) -> (String, usize) {
+fn resolve_join(
+    map: &noyalib::compat::serde_yaml::Mapping,
+    segments: &[PathSegment],
+) -> (String, usize) {
     let mut max_len = 0;
     while max_len < segments.len() && !segments[max_len].wildcard {
         max_len += 1;
@@ -212,7 +215,7 @@ fn typed_scalar(raw: &str, what: &str) -> Result<Value, String> {
     if raw.contains('\n') {
         return Err(format!("{what}: newlines in values are unsupported"));
     }
-    let v: Value = serde_yaml::from_str(raw)
+    let v: Value = noyalib::compat::serde_yaml::from_str(raw)
         .map_err(|e| format!("{what}: value does not parse as a YAML scalar: {e}"))?;
     let kind = if v.is_mapping() {
         Some("mapping")
@@ -326,10 +329,10 @@ pub fn entry_from_specs(specs: &[Spec]) -> Result<Value, String> {
     for s in specs {
         match s {
             Spec::Scalar { name, value } => {
-                m.insert(Value::String(name.clone()), value.clone());
+                m.insert(name.clone(), value.clone());
             }
             Spec::List { name, items } => {
-                m.insert(Value::String(name.clone()), Value::Sequence(items.clone()));
+                m.insert(name.clone(), Value::Sequence(items.clone()));
             }
             Spec::Bare { .. } => unreachable!(),
         }

@@ -1,0 +1,71 @@
+# BLOCK file for: sudo make yaml-add-block KEY=rules BLOCK=<this file>
+#
+# Appended to the `rules:` list of config/binary_guard_policy_rules.yaml.
+# This is a single bare YAML mapping (not a "- " list item), as add-block
+# requires. Policy `arg-validate-all` allows non-root podman (agents run it)
+# after the reject patterns are checked; patterns port res/podman-guard
+# (bulk/destructive only; `podman ps -a` is unaffected). The generator gives
+# an explicit name rule precedence over the "*" catch-all regardless of
+# position, so append order is safe.
+name: podman
+tags: []
+policy: arg-validate-all
+allow_subcommands: [podman]
+reject_patterns:
+  - kind: regex
+    subcommand: rm
+    requires_flags: ["-a"]
+    pattern: '^rm( |$)'
+    reason: "bulk container removal (podman rm -a)"
+  - kind: regex
+    subcommand: rm
+    requires_flags: ["--all"]
+    pattern: '^rm( |$)'
+    reason: "bulk container removal (podman rm --all)"
+  - kind: regex
+    subcommand: rmi
+    requires_flags: ["-a"]
+    pattern: '^rmi( |$)'
+    reason: "bulk image removal (podman rmi -a)"
+  - kind: regex
+    subcommand: rmi
+    requires_flags: ["--all"]
+    pattern: '^rmi( |$)'
+    reason: "bulk image removal (podman rmi --all)"
+  - kind: regex
+    subcommand: system
+    pattern: '^system (prune|migrate|reset)( |$)'
+    reason: "destructive podman system operation"
+  - kind: regex
+    subcommand: volume
+    pattern: '^volume prune( |$)'
+    reason: "bulk volume prune"
+  - kind: regex
+    subcommand: volume
+    requires_flags: ["-a"]
+    pattern: '^volume rm( |$)'
+    reason: "bulk volume removal"
+  - kind: regex
+    subcommand: volume
+    requires_flags: ["--all"]
+    pattern: '^volume rm( |$)'
+    reason: "bulk volume removal"
+  - kind: regex
+    subcommand: image
+    requires_flags: ["-a"]
+    pattern: '^image prune( |$)'
+    reason: "bulk image prune"
+  - kind: regex
+    subcommand: image
+    requires_flags: ["--all"]
+    pattern: '^image prune( |$)'
+    reason: "bulk image prune"
+  - kind: regex
+    subcommand: container
+    pattern: '^container prune( |$)'
+    reason: "bulk container prune"
+  - kind: regex
+    subcommand: network
+    pattern: '^network prune( |$)'
+    reason: "bulk network prune"
+env_sanitise: [LD_PRELOAD, LD_LIBRARY_PATH]

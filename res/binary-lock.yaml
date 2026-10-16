@@ -26,7 +26,7 @@ binaries:
     reject_patterns: []
 
   - name: "acr"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -56,7 +56,7 @@ binaries:
     reject_patterns: []
 
   - name: "apache2"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -166,7 +166,7 @@ binaries:
     reject_patterns: []
 
   - name: "asterisk"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -247,7 +247,7 @@ binaries:
 
   - name: "bash"
     tags: ["suid", "sudo"]
-    path: null
+    path: "/usr/bin/bash"
     contained: false
     policy: deny-non-root
     allow_subcommands: []
@@ -286,7 +286,7 @@ binaries:
     reject_patterns: []
 
   - name: "bee"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -366,7 +366,7 @@ binaries:
     reject_patterns: []
 
   - name: "chattr"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -416,7 +416,7 @@ binaries:
     reject_patterns: []
 
   - name: "chrt"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -436,7 +436,7 @@ binaries:
     reject_patterns: []
 
   - name: "clisp"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -556,7 +556,7 @@ binaries:
     reject_patterns: []
 
   - name: "ctr"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -706,7 +706,7 @@ binaries:
     reject_patterns: []
 
   - name: "dnsmasq"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -766,7 +766,7 @@ binaries:
     reject_patterns: []
 
   - name: "easyrsa"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -796,7 +796,7 @@ binaries:
     reject_patterns: []
 
   - name: "egrep"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -886,7 +886,7 @@ binaries:
     reject_patterns: []
 
   - name: "fastfetch"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -896,7 +896,7 @@ binaries:
     reject_patterns: []
 
   - name: "ffmpeg"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -906,7 +906,7 @@ binaries:
     reject_patterns: []
 
   - name: "fgrep"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -986,7 +986,7 @@ binaries:
     reject_patterns: []
 
   - name: "forge"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1016,7 +1016,7 @@ binaries:
     reject_patterns: []
 
   - name: "fzf"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1056,7 +1056,7 @@ binaries:
     reject_patterns: []
 
   - name: "gdb"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1086,7 +1086,7 @@ binaries:
     reject_patterns: []
 
   - name: "getent"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1116,7 +1116,7 @@ binaries:
     reject_patterns: []
 
   - name: "gnuplot"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1146,7 +1146,7 @@ binaries:
     reject_patterns: []
 
   - name: "guile"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1156,7 +1156,7 @@ binaries:
     reject_patterns: []
 
   - name: "gzip"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1196,7 +1196,7 @@ binaries:
     reject_patterns: []
 
   - name: "hg"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1366,7 +1366,7 @@ binaries:
     reject_patterns: []
 
   - name: "last"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1376,7 +1376,7 @@ binaries:
     reject_patterns: []
 
   - name: "lastb"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1436,7 +1436,7 @@ binaries:
     reject_patterns: []
 
   - name: "logrotate"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1516,7 +1516,7 @@ binaries:
     reject_patterns: []
 
   - name: "lxd"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1526,7 +1526,7 @@ binaries:
     reject_patterns: []
 
   - name: "m4"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1756,7 +1756,7 @@ binaries:
     reject_patterns: []
 
   - name: "nginx"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1806,7 +1806,7 @@ binaries:
     reject_patterns: []
 
   - name: "node"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1846,7 +1846,7 @@ binaries:
     reject_patterns: []
 
   - name: "nvim"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1876,7 +1876,7 @@ binaries:
     reject_patterns: []
 
   - name: "opencode"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1966,7 +1966,7 @@ binaries:
     reject_patterns: []
 
   - name: "perl"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -1996,7 +1996,7 @@ binaries:
     reject_patterns: []
 
   - name: "php"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2036,7 +2036,7 @@ binaries:
     reject_patterns: []
 
   - name: "plymouth"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2086,7 +2086,7 @@ binaries:
     reject_patterns: []
 
   - name: "python"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2096,7 +2096,7 @@ binaries:
     reject_patterns: []
 
   - name: "qpdf"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2346,7 +2346,7 @@ binaries:
     reject_patterns: []
 
   - name: "setcap"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2386,7 +2386,7 @@ binaries:
     reject_patterns: []
 
   - name: "shred"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2666,7 +2666,7 @@ binaries:
     reject_patterns: []
 
   - name: "tclsh"
-    tags: ["caps", "sudo", "suid"]
+    tags: ["suid", "sudo", "caps"]
     path: null
     contained: false
     policy: deny-non-root
@@ -2886,7 +2886,7 @@ binaries:
     reject_patterns: []
 
   - name: "urlget"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3156,7 +3156,7 @@ binaries:
     reject_patterns: []
 
   - name: "zic"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3176,7 +3176,7 @@ binaries:
     reject_patterns: []
 
   - name: "zless"
-    tags: ["sudo", "suid"]
+    tags: ["suid", "sudo"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3206,7 +3206,7 @@ binaries:
     reject_patterns: []
 
   - name: "ansible-playbook"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3216,7 +3216,7 @@ binaries:
     reject_patterns: []
 
   - name: "ansible-test"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3226,7 +3226,7 @@ binaries:
     reject_patterns: []
 
   - name: "aoss"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3236,7 +3236,7 @@ binaries:
     reject_patterns: []
 
   - name: "apache2ctl"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3266,7 +3266,7 @@ binaries:
     reject_patterns: []
 
   - name: "ascii85"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3276,7 +3276,7 @@ binaries:
     reject_patterns: []
 
   - name: "at"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3316,7 +3316,7 @@ binaries:
     reject_patterns: []
 
   - name: "base58"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3356,7 +3356,7 @@ binaries:
     reject_patterns: []
 
   - name: "bpftrace"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3366,7 +3366,7 @@ binaries:
     reject_patterns: []
 
   - name: "bundle"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3376,7 +3376,7 @@ binaries:
     reject_patterns: []
 
   - name: "bundler"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3386,7 +3386,7 @@ binaries:
     reject_patterns: []
 
   - name: "busybox"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3396,7 +3396,7 @@ binaries:
     reject_patterns: []
 
   - name: "byebug"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3406,7 +3406,7 @@ binaries:
     reject_patterns: []
 
   - name: "c89"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3416,7 +3416,7 @@ binaries:
     reject_patterns: []
 
   - name: "c99"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3446,7 +3446,7 @@ binaries:
     reject_patterns: []
 
   - name: "cdist"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3456,7 +3456,7 @@ binaries:
     reject_patterns: []
 
   - name: "certbot"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3466,7 +3466,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_by_ssh"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3476,7 +3476,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_cups"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3486,7 +3486,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_log"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3496,7 +3496,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_memory"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3506,7 +3506,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_raid"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3516,7 +3516,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_ssl_cert"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3526,7 +3526,7 @@ binaries:
     reject_patterns: []
 
   - name: "check_statusfile"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3566,7 +3566,7 @@ binaries:
     reject_patterns: []
 
   - name: "composer"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3576,7 +3576,7 @@ binaries:
     reject_patterns: []
 
   - name: "cowsay"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3586,7 +3586,7 @@ binaries:
     reject_patterns: []
 
   - name: "cowthink"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3596,7 +3596,7 @@ binaries:
     reject_patterns: []
 
   - name: "cpan"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3606,7 +3606,7 @@ binaries:
     reject_patterns: []
 
   - name: "crontab"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3626,7 +3626,7 @@ binaries:
     reject_patterns: []
 
   - name: "dnf"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3646,7 +3646,7 @@ binaries:
     reject_patterns: []
 
   - name: "dotnet"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3656,7 +3656,7 @@ binaries:
     reject_patterns: []
 
   - name: "dstat"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3666,7 +3666,7 @@ binaries:
     reject_patterns: []
 
   - name: "easy_install"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3676,7 +3676,7 @@ binaries:
     reject_patterns: []
 
   - name: "eb"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3686,7 +3686,7 @@ binaries:
     reject_patterns: []
 
   - name: "emacs"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3696,7 +3696,7 @@ binaries:
     reject_patterns: []
 
   - name: "exiftool"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3706,7 +3706,7 @@ binaries:
     reject_patterns: []
 
   - name: "facter"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3736,7 +3736,7 @@ binaries:
     reject_patterns: []
 
   - name: "gcc"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3746,7 +3746,7 @@ binaries:
     reject_patterns: []
 
   - name: "gem"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3756,7 +3756,7 @@ binaries:
     reject_patterns: []
 
   - name: "ghc"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3766,7 +3766,7 @@ binaries:
     reject_patterns: []
 
   - name: "ghci"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3776,7 +3776,7 @@ binaries:
     reject_patterns: []
 
   - name: "gimp"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3796,7 +3796,7 @@ binaries:
     reject_patterns: []
 
   - name: "grc"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3826,7 +3826,7 @@ binaries:
     reject_patterns: []
 
   - name: "irb"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3846,7 +3846,7 @@ binaries:
     reject_patterns: []
 
   - name: "jjs"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3856,7 +3856,7 @@ binaries:
     reject_patterns: []
 
   - name: "journalctl"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3876,7 +3876,7 @@ binaries:
     reject_patterns: []
 
   - name: "jtag"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3886,7 +3886,7 @@ binaries:
     reject_patterns: []
 
   - name: "knife"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3896,7 +3896,7 @@ binaries:
     reject_patterns: []
 
   - name: "ksu"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3906,7 +3906,7 @@ binaries:
     reject_patterns: []
 
   - name: "latexmk"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3916,7 +3916,7 @@ binaries:
     reject_patterns: []
 
   - name: "ln"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3926,7 +3926,7 @@ binaries:
     reject_patterns: []
 
   - name: "loginctl"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3936,7 +3936,7 @@ binaries:
     reject_patterns: []
 
   - name: "lwp-download"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3946,7 +3946,7 @@ binaries:
     reject_patterns: []
 
   - name: "lwp-request"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3966,7 +3966,7 @@ binaries:
     reject_patterns: []
 
   - name: "mount"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3976,7 +3976,7 @@ binaries:
     reject_patterns: []
 
   - name: "msfconsole"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -3986,7 +3986,7 @@ binaries:
     reject_patterns: []
 
   - name: "mtr"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4026,7 +4026,7 @@ binaries:
     reject_patterns: []
 
   - name: "neofetch"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4036,7 +4036,7 @@ binaries:
     reject_patterns: []
 
   - name: "nft"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4046,7 +4046,7 @@ binaries:
     reject_patterns: []
 
   - name: "npm"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4056,7 +4056,7 @@ binaries:
     reject_patterns: []
 
   - name: "nroff"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4066,7 +4066,7 @@ binaries:
     reject_patterns: []
 
   - name: "openvt"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4076,7 +4076,7 @@ binaries:
     reject_patterns: []
 
   - name: "opkg"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4093,10 +4093,13 @@ binaries:
     allow_subcommands: ["passwd"]
     allow_self_username: true
     env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
-    reject_patterns: []
+    reject_patterns:
+      - kind: flag
+        flag: "-S"
+        reason: "status query requires root"
 
   - name: "pdb"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4106,7 +4109,7 @@ binaries:
     reject_patterns: []
 
   - name: "perlbug"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4116,7 +4119,7 @@ binaries:
     reject_patterns: []
 
   - name: "pip"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4136,7 +4139,7 @@ binaries:
     reject_patterns: []
 
   - name: "pkexec"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: "/usr/bin/pkexec"
     contained: false
     policy: deny-all-non-root
@@ -4146,7 +4149,7 @@ binaries:
     reject_patterns: []
 
   - name: "pkg"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4157,13 +4160,77 @@ binaries:
 
   - name: "podman"
     tags: ["sudo"]
-    path: null
+    path: "/opt/workspace-ci/.boot-linux/bin/podman"
     contained: false
-    policy: deny-non-root
+    policy: arg-validate-all
     allow_subcommands: []
     allow_self_username: false
     env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH"]
-    reject_patterns: []
+    reject_patterns:
+      - kind: regex
+        subcommand: rm
+        requires_flags:
+          - '-a'
+        pattern: ^rm( |$)
+        reason: bulk container removal (podman rm -a)
+      - kind: regex
+        subcommand: rm
+        requires_flags:
+          - '--all'
+        pattern: ^rm( |$)
+        reason: bulk container removal (podman rm --all)
+      - kind: regex
+        subcommand: rmi
+        requires_flags:
+          - '-a'
+        pattern: ^rmi( |$)
+        reason: bulk image removal (podman rmi -a)
+      - kind: regex
+        subcommand: rmi
+        requires_flags:
+          - '--all'
+        pattern: ^rmi( |$)
+        reason: bulk image removal (podman rmi --all)
+      - kind: regex
+        subcommand: system
+        pattern: ^system (prune|migrate|reset)( |$)
+        reason: destructive podman system operation
+      - kind: regex
+        subcommand: volume
+        pattern: ^volume prune( |$)
+        reason: bulk volume prune
+      - kind: regex
+        subcommand: volume
+        requires_flags:
+          - '-a'
+        pattern: ^volume rm( |$)
+        reason: bulk volume removal
+      - kind: regex
+        subcommand: volume
+        requires_flags:
+          - '--all'
+        pattern: ^volume rm( |$)
+        reason: bulk volume removal
+      - kind: regex
+        subcommand: image
+        requires_flags:
+          - '-a'
+        pattern: ^image prune( |$)
+        reason: bulk image prune
+      - kind: regex
+        subcommand: image
+        requires_flags:
+          - '--all'
+        pattern: ^image prune( |$)
+        reason: bulk image prune
+      - kind: regex
+        subcommand: container
+        pattern: ^container prune( |$)
+        reason: bulk container prune
+      - kind: regex
+        subcommand: network
+        pattern: ^network prune( |$)
+        reason: bulk network prune
 
   - name: "poetry"
     tags: ["sudo"]
@@ -4176,7 +4243,7 @@ binaries:
     reject_patterns: []
 
   - name: "posh"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4196,7 +4263,7 @@ binaries:
     reject_patterns: []
 
   - name: "pry"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4206,7 +4273,7 @@ binaries:
     reject_patterns: []
 
   - name: "puppet"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4216,7 +4283,7 @@ binaries:
     reject_patterns: []
 
   - name: "pwsh"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4246,7 +4313,7 @@ binaries:
     reject_patterns: []
 
   - name: "rake"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4266,7 +4333,7 @@ binaries:
     reject_patterns: []
 
   - name: "redcarpet"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4286,7 +4353,7 @@ binaries:
     reject_patterns: []
 
   - name: "ruby"
-    tags: ["suid", "caps", "sudo"]
+    tags: ["sudo", "caps", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4296,7 +4363,7 @@ binaries:
     reject_patterns: []
 
   - name: "run-mailcap"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4346,7 +4413,7 @@ binaries:
     reject_patterns: []
 
   - name: "screen"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4356,7 +4423,7 @@ binaries:
     reject_patterns: []
 
   - name: "service"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4366,7 +4433,7 @@ binaries:
     reject_patterns: []
 
   - name: "sg"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4376,7 +4443,7 @@ binaries:
     reject_patterns: []
 
   - name: "smbclient"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4386,7 +4453,7 @@ binaries:
     reject_patterns: []
 
   - name: "snap"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4396,7 +4463,7 @@ binaries:
     reject_patterns: []
 
   - name: "sqlmap"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4436,7 +4503,7 @@ binaries:
     reject_patterns: []
 
   - name: "su"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4453,10 +4520,24 @@ binaries:
     allow_subcommands: ["sudo", "sudoedit"]
     allow_self_username: false
     env_sanitise: ["LD_PRELOAD", "LD_LIBRARY_PATH", "GCONV_PATH", "GLIBC_TUNABLES", "SUDO_ASKPASS"]
-    reject_patterns: []
+    reject_patterns:
+      - kind: regex
+        subcommand: sudoedit
+        requires_flags: ["-s"]
+        pattern: '\\$'              # any arg ending with backslash, in sudoedit -s
+        reason: "Baron Samedit CVE-2021-3156"
+      - kind: flag
+        flag: "-R"
+        reason: "chroot LPE CVE-2025-32463"
+      - kind: flag
+        flag: "--chroot"
+        reason: "chroot LPE CVE-2025-32463"
+      - kind: flag
+        flag: "--host"
+        reason: "host confusion CVE-2025-32462"
 
   - name: "systemd-resolve"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4486,7 +4567,7 @@ binaries:
     reject_patterns: []
 
   - name: "taskset"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4496,7 +4577,7 @@ binaries:
     reject_patterns: []
 
   - name: "timedatectl"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4506,7 +4587,7 @@ binaries:
     reject_patterns: []
 
   - name: "top"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4516,7 +4597,7 @@ binaries:
     reject_patterns: []
 
   - name: "torify"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4526,7 +4607,7 @@ binaries:
     reject_patterns: []
 
   - name: "torsocks"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4546,7 +4627,7 @@ binaries:
     reject_patterns: []
 
   - name: "tshark"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4566,7 +4647,7 @@ binaries:
     reject_patterns: []
 
   - name: "vagrant"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4576,7 +4657,7 @@ binaries:
     reject_patterns: []
 
   - name: "valgrind"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4586,7 +4667,7 @@ binaries:
     reject_patterns: []
 
   - name: "virsh"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4596,7 +4677,7 @@ binaries:
     reject_patterns: []
 
   - name: "wall"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4616,7 +4697,7 @@ binaries:
     reject_patterns: []
 
   - name: "wireshark"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4626,7 +4707,7 @@ binaries:
     reject_patterns: []
 
   - name: "xdg-user-dir"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4636,7 +4717,7 @@ binaries:
     reject_patterns: []
 
   - name: "yarn"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4646,7 +4727,7 @@ binaries:
     reject_patterns: []
 
   - name: "yelp"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4666,7 +4747,7 @@ binaries:
     reject_patterns: []
 
   - name: "yum"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4676,7 +4757,7 @@ binaries:
     reject_patterns: []
 
   - name: "zathura"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root
@@ -4706,7 +4787,7 @@ binaries:
     reject_patterns: []
 
   - name: "zypper"
-    tags: ["suid", "sudo"]
+    tags: ["sudo", "suid"]
     path: null
     contained: false
     policy: deny-non-root

@@ -16,7 +16,7 @@ mod shell_config {
 mod fd;
 mod report;
 
-const REAL_SHELL: &str = "/bin/bash.real";
+include!("../../sealed_paths.rs");
 const MAX_TEXT: usize = 1 << 20;
 const LOG_FILE_NAME: &str = ".workspace-guard.log";
 const REMOVED_EXACT: &[&str] = &[
@@ -369,17 +369,17 @@ fn set_rlimits() {
 
 fn verify_real_shell() {
     use std::os::unix::fs::MetadataExt;
-    let meta = match fs::metadata(REAL_SHELL) {
+    let meta = match fs::metadata(SEALED_BASH) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("shell guard: cannot stat {}: {}", REAL_SHELL, e);
+            eprintln!("shell guard: cannot stat {}: {}", SEALED_BASH, e);
             process::exit(3);
         }
     };
     if !meta.is_file() || meta.uid() != 0 || (meta.mode() & 0o7777) != 0o700 {
         eprintln!(
             "shell guard: {} failed verification (regular file, uid 0, mode 0700)",
-            REAL_SHELL
+            SEALED_BASH
         );
         process::exit(3);
     }
@@ -403,7 +403,7 @@ fn exec_real(args: &[OsString], staged: Option<(usize, String, PathBuf)>) -> ! {
             }
         }
     }
-    let path = CString::new(REAL_SHELL).unwrap();
+    let path = CString::new(SEALED_BASH).unwrap();
     match execve(&path, &argv, &envp) {
         Ok(inf) => match inf {},
         Err(errno) => {
@@ -437,7 +437,7 @@ fn at_secure() -> u64 {
 }
 
 fn main() {
-    // Root already has an unconditional escape hatch (/bin/bash.real),
+    // Root already has an unconditional escape hatch (the sealed bash),
     // so failing closed for euid 0 only breaks every root make target
     // and package-manager lifecycle script without adding any security.
     // Keep the AT_SECURE gate for everyone else.

@@ -75,12 +75,20 @@ pub(crate) fn option_takes_operand(sub: &str, token: &str) -> bool {
         // name operand, which may itself begin with `-` (REQ-GGUARD-030).
         "-m" | "--move" | "-c" | "--copy" if sub == "branch" => true,
         "-m" | "--message" | "-F" | "--file" => message_sub,
-        "--author" | "--date" | "--cleanup" | "--template" | "--trailer" | "--fixup"
-        | "--squash" | "--reuse-message" | "--reedit-message" | "-C" | "-c" => sub == "commit",
-        "--strategy" | "--strategy-option" | "-s" | "-X" => sub == "merge",
+        "--author" | "--date" | "--template" | "--trailer" | "--fixup" | "--squash"
+        | "--reuse-message" | "--reedit-message" | "-C" | "-c" => sub == "commit",
+        "--cleanup" => matches!(sub, "commit" | "pull"),
+        "--strategy" | "--strategy-option" | "-s" | "-X" => matches!(sub, "merge" | "pull"),
         "--mainline" => matches!(sub, "cherry-pick" | "revert"),
-        "--push-option" | "-o" => sub == "push",
+        "--push-option" => sub == "push",
+        "-o" => matches!(sub, "push" | "pull"),
         "--onto" | "--exec" | "-x" => sub == "rebase",
+        // `git pull` value-taking options whose separate operand must never be
+        // re-classified as a policy flag (REQ-GGUARD-061). All are required-arg
+        // forms; optional-arg options (`-j`, `--log`, `-S`) are attached-only
+        // and consume no following token.
+        "--depth" | "--shallow-since" | "--shallow-exclude" | "--deepen" | "--negotiation-tip"
+        | "--refmap" | "--upload-pack" | "--receive-pack" | "--server-option" => sub == "pull",
         _ => {
             // Bundled short options whose value-taker is the final character,
             // e.g. `-am` (commit -a -m <msg>). A value-taker followed by more
@@ -118,6 +126,64 @@ pub(crate) fn scan_tokens<'a>(sub: &str, tokens: &'a [&'a [u8]]) -> Vec<&'a [u8]
         out.push(token);
     }
     out
+}
+
+/// Git's `git_parse_maybe_bool` false set (case-insensitive) plus the single
+/// character "0": a `--rebase=<value>` in this set disables rebase, matching
+/// `parse_config_rebase`/`rebase_parse_value` in the pinned Git parser.
+fn rebase_value_is_false(value: &str) -> bool {
+    value.eq_ignore_ascii_case("false")
+        || value.eq_ignore_ascii_case("no")
+        || value.eq_ignore_ascii_case("off")
+        || value == "0"
+}
+
+/// REQ-GGUARD-061: reduce `git pull`'s options to two ordered, explicit-argv
+/// effective modes. Last-wins for each: `--ff`/`--no-ff` clear `--ff-only`
+/// and a later `--ff-only` restores it; `--no-rebase`/`--rebase=<false>`
+/// clear `-r`/`--rebase`, and a later enabling form restores it. Config
+/// (`pull.ff`, `pull.rebase`) never feeds these fields. Value operands and
+/// tokens after `--` are removed by `scan_tokens`, so they cannot set state.
+pub(crate) fn scan_pull_args(tokens: &[&[u8]], state: &mut ArgState) {
+    for &token in &scan_tokens("pull", tokens) {
+        let s = std::str::from_utf8(token).unwrap_or("");
+        match s {
+            "--ff-only" => state.pull_ff_only = true,
+            "--ff" | "--no-ff" => state.pull_ff_only = false,
+            "-r" | "--rebase" => state.pull_rebase = true,
+            "--no-rebase" => state.pull_rebase = false,
+            _ => {
+                if let Some(v) = s.strip_prefix("--rebase=") {
+                    state.pull_rebase = !rebase_value_is_false(v);
+                } else if let Some(v) = s.strip_prefix("-r") {
+                    // Attached short value (`-rfalse`). A leading `-` means a
+                    // bundled flag or a near-miss long option (`--rebase-other`),
+                    // never a rebase value: leave state unchanged.
+                    if !v.is_empty() && !v.starts_with('-') {
+                        state.pull_rebase = !rebase_value_is_false(v);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// REQ-GGUARD-062: reduce `git merge`'s options to the ordered effective
+/// fast-forward mode plus the no-merge-commit recovery modes. `--ff`/
+/// `--no-ff` clear an earlier `--ff-only`; a later `--ff-only` restores it.
+/// `--abort`/`--quit` are recovery and create no merge commit. `--continue`
+/// is deliberately not safe (it can create the merge commit). Value operands
+/// and post-`--` tokens are removed by `scan_tokens`.
+pub(crate) fn scan_merge_args(tokens: &[&[u8]], state: &mut ArgState) {
+    for &token in &scan_tokens("merge", tokens) {
+        let s = std::str::from_utf8(token).unwrap_or("");
+        match s {
+            "--ff-only" => state.merge_ff_only = true,
+            "--ff" | "--no-ff" => state.merge_ff_only = false,
+            "--abort" | "--quit" => state.merge_abort = true,
+            _ => {}
+        }
+    }
 }
 
 /// Classification of a leading (pre-subcommand) global option (REQ-GGUARD-011).

@@ -2,10 +2,11 @@
 # 21-shell-guard.bats: runtime integration for workspace-shell-guard.
 #
 # The guard only operates in a capability context (AT_SECURE=1, exit 3
-# otherwise) and verifies /bin/bash.real as root:root 0700, so the
+# otherwise) and verifies the sealed original
+# (/usr/lib/workspace-guard/sealed/bash) as root:root 0700, so the
 # runtime tests require root: they copy the built binary, grant it
-# cap_dac_override=ep, and create a throwaway /bin/bash.real when the
-# host has none. On non-root hosts every runtime test skips; only the
+# cap_dac_override=ep, and require the sealed original to be present.
+# On non-root hosts every runtime test skips; only the
 # AT_SECURE gate test runs everywhere.
 
 load lib/harness
@@ -25,6 +26,7 @@ AUDIT_LOG=""
 CAP_CTX_OK=0
 SHG=""
 PUBLIC_SHG=""
+SEALED_BASH="${SHG_SEALED_BASH:-/usr/lib/workspace-guard/sealed/bash}"
 
 setup_file() {
     [ -n "$SHG_BIN" ] || return 0
@@ -34,7 +36,7 @@ setup_file() {
     chmod 755 "$BATS_FILE_TMPDIR" "$BATS_FILE_TMPDIR/shg"
     SHG="$BATS_FILE_TMPDIR/shg"
     /usr/sbin/setcap cap_dac_override=ep "$SHG" || return 0
-    [ -f /bin/bash.real ] || return 0
+    [ -f "$SEALED_BASH" ] || return 0
     # Rootless podman maps file capabilities to user.overlay xattrs that
     # the kernel never honors, so exec never sets AT_SECURE. Probe once;
     # tests skip with a clear reason instead of failing everywhere.
@@ -67,7 +69,7 @@ teardown() { guard_teardown; }
 
 require_root_guard() {
     [ -n "$SHG_BIN" ] || skip "shell-guard binary not built (run: cargo build)"
-    [ "$(id -u)" = "0" ] || skip "shell-guard runtime tests need root (setcap + /bin/bash.real)"
+    [ "$(id -u)" = "0" ] || skip "shell-guard runtime tests need root (setcap + sealed bash)"
     [ -x "$BATS_FILE_TMPDIR/shg" ] || skip "capability copy missing (setup_file did not run as root)"
     local ok=0
     [ -f "$BATS_FILE_TMPDIR/.cap-ctx" ] && ok="$(cat "$BATS_FILE_TMPDIR/.cap-ctx")"

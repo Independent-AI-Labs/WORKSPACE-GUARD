@@ -85,11 +85,11 @@ EOS
 chmod 755 "$_agent_script"
 
 # Seed alternate git path for bypass test (copy of real git, then lock down).
-if [[ -x /usr/bin/git.original ]]; then
+if [[ -x /usr/lib/workspace-guard/sealed/git ]]; then
     _install_rc=0
-    install -m 000 /usr/bin/git.original /usr/local/bin/git || _install_rc=$?
+    install -m 000 /usr/lib/workspace-guard/sealed/git /usr/local/bin/git || _install_rc=$?
     if [[ $_install_rc -ne 0 ]]; then
-        cp /usr/bin/git.original /usr/local/bin/git
+        cp /usr/lib/workspace-guard/sealed/git /usr/local/bin/git
         chmod 000 /usr/local/bin/git
     fi
     echo "Seeded /usr/local/bin/git (mode 000) for bypass test"

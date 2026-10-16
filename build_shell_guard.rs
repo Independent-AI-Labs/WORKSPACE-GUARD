@@ -68,11 +68,11 @@ pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
     let config_dir = manifest.join("config");
     let policy_text = fs::read_to_string(config_dir.join("shell_guard_policy.yaml"))
         .expect("build.rs: failed to read shell_guard_policy.yaml");
-    let policy: ShellPolicyFile = serde_yaml::from_str(&policy_text)
+    let policy: ShellPolicyFile = noyalib::compat::serde_yaml::from_str(&policy_text)
         .expect("build.rs: failed to parse shell_guard_policy.yaml");
     let matrix_text = fs::read_to_string(config_dir.join("shell_guard_policy_matrix.yaml"))
         .expect("build.rs: failed to read shell_guard_policy_matrix.yaml");
-    let matrix: ShellMatrixFile = serde_yaml::from_str(&matrix_text)
+    let matrix: ShellMatrixFile = noyalib::compat::serde_yaml::from_str(&matrix_text)
         .expect("build.rs: failed to parse shell_guard_policy_matrix.yaml");
 
     assert!(

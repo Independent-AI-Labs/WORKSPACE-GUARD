@@ -30,7 +30,7 @@ fn load_matrix() -> PolicyMatrixConfig {
         env!("CARGO_MANIFEST_DIR")
     );
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {path}: {e}"))
+    noyalib::compat::serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("parse {path}: {e}"))
 }
 
 fn argv_bytes(argv: &[String]) -> Vec<&[u8]> {

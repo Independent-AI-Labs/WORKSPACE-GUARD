@@ -323,7 +323,7 @@ reads.
 
 ## 6. build.rs Integration
 
-`build.rs` parses `config/shared_locked_paths.yaml` (via serde_yaml)
+`build.rs` parses `config/shared_locked_paths.yaml` (via noyalib)
 and emits a `LOCKED_ABSOLUTE_FILE_PATHS` const table alongside the
 existing `LOCKED_RECURSIVE_TREE_PATHS`, `LOCKED_INDIVIDUAL_FILE_PATHS`,
 and `LOCKED_GLOB_PATTERNS` consts. The `LockedPathsConfig` struct

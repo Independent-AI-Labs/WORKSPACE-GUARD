@@ -2,28 +2,28 @@
 # install-shell-guard: root-only installer for workspace-shell-guard.
 #
 # Implements docs/specifications/SPEC-SHELL-GUARD.md section 12.1:
-# seals stock bash as /bin/bash.real (0700 root:root, chattr +i),
-# dpkg-diverts the resolved bash path to <path>.distrib, installs the
-# guard (root:root 0755, cap_dac_override=ep) via atomic rename, and
-# registers the apt post-invoke hook. On usrmerge hosts /bin is a
-# symlink to usr/bin, so the divert targets the RESOLVED path while
-# the guard still finds /bin/bash.real through the symlink.
+# seals stock bash as /usr/lib/workspace-guard/sealed/bash (0700 root:root,
+# chattr +i), dpkg-diverts the resolved bash path to
+# /usr/lib/workspace-guard/sealed/pkg/bash, installs the guard (root:root
+# 0755, cap_dac_override=ep) via atomic rename, and registers the apt
+# post-invoke hook. On usrmerge hosts /bin is a symlink to usr/bin, so the
+# divert targets the RESOLVED path while the guard resolves the sealed copy
+# by basename.
 #
 # /bin/sh is only covered when it resolves to the bash being replaced
 # (Debian/Ubuntu normally point it at another POSIX shell, which stays
 # untouched).
 #
 # Idempotent and reconciling (REQ-SHG-603): stale guard hash, wrong
-# caps, missing divert/hook, missing +i, or relaxed .real mode are
-# repaired; a fully healthy install is a no-op.
+# caps, missing divert/hook, missing +i, or relaxed sealed mode are
+# repaired; an older /bin/bash.real install is migrated into the sealed
+# tree; a fully healthy install is a no-op.
 #
-# Self-staging: when invoked as root from an agent-owned tree on a
-# host where the guard is already active, the script's own body
-# (sanity probes, chattr calls) would be pattern-scanned as an
-# untrusted script. Root execution is re-exec'd through a root-owned
-# copy under /var/lib/workspace-guard (trusted tier, so the guard execs
-# it without scanning the body). The probe string is built by concat so
-# the policy pattern never matches this script's own text.
+# Self-staging: the migration strips an immutable flag and probes
+# destructively, so the script must run from the trusted tier. The Makefile
+# routes it through scripts/guard-root-exec, which stages it under
+# /var/lib/workspace-guard; invoked directly from the agent-owned checkout
+# the body is pattern-scanned and refused.
 #
 # Usage:
 #   scripts/install-shell-guard            # apply / reconcile (ROOT)
@@ -34,7 +34,7 @@
 #   0  install healthy (or successfully applied)
 #   1  failure (rolled back where possible)
 #   2  not root, missing guard binary, bad arguments
-#   3  immutable flag could not be applied to /bin/bash.real
+#   3  immutable flag could not be applied to the sealed original
 #
 # Test hooks (not for production use):
 #   SHG_ROOT       prefix every absolute path (fake-root fixtures)
@@ -107,8 +107,12 @@ is_trusted_tier() {
 BASH_LINK="$SHG_ROOT/bin/bash"
 [ -e "$BASH_LINK" ] || die "no bash at $BASH_LINK"
 BASH_PATH="$(readlink -f "$BASH_LINK")"
-REAL_PATH="$SHG_ROOT/bin/bash.real"
-DISTRIB_PATH="$BASH_PATH.distrib"
+SEALED_DIR="$SHG_ROOT/usr/lib/workspace-guard/sealed"
+SEALED_PKG_DIR="$SEALED_DIR/pkg"
+REAL_PATH="$SEALED_DIR/bash"
+DISTRIB_PATH="$SEALED_PKG_DIR/bash"
+LEGACY_REAL="$SHG_ROOT/bin/bash.real"
+LEGACY_DISTRIB="$BASH_PATH.distrib"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
 APT_CHECK="$SHG_ROOT/usr/lib/workspace-guard/apt-shell-check"
 
@@ -118,22 +122,15 @@ sh_covered() {
     [ "$(readlink -f "$shlink")" = "$BASH_PATH" ]
 }
 
-# --- root gate + self-staging ------------------------------------------------
+# --- root gate ---------------------------------------------------------------
 if [ "$DRY_RUN" -eq 0 ]; then
     if [ "$(id -u)" != "0" ] && [ -z "$SHG_ROOT" ]; then
         echo "ERROR: install-shell-guard needs root: sudo make install-shell-guard" >&2
         exit 2
     fi
-    if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && [ "${SHG_STAGED:-0}" != "1" ] && ! is_trusted_tier "$0"; then
-        STAGE_DIR="$SHG_ROOT/var/lib/workspace-guard"
-        install -d -m 0700 "$STAGE_DIR"
-        STAGE="$STAGE_DIR/install-shell-guard.$$"
-        install -m 0700 -o root -g root "$0" "$STAGE"
-        log "re-exec via root-owned staging copy (trusted tier): $STAGE"
-        # The staged copy lives in a root-owned 0700 tree, so the guard
-        # classifies it trusted and execs the backing shell for it without
-        # scanning the body. No direct /bin/bash.real invocation is needed.
-        SHG_STAGED=1 SHG_GUARD_BIN="$GUARD_BIN" exec "$STAGE" "$@"
+    if [ -z "$SHG_ROOT" ] && [ "$(id -u)" = "0" ] && ! is_trusted_tier "$0"; then
+        echo "ERROR: install-shell-guard must run from the trusted tier; use: sudo make install-shell-guard" >&2
+        exit 2
     fi
 fi
 
@@ -159,16 +156,13 @@ rollback() {
         chmod 0755 "$rb"
         mv -T "$rb" "$BASH_PATH"
     fi
-    if [ "${SHG_STAGED:-0}" = "1" ]; then
-        rm -f "$0"
-    fi
     return $status_code
 }
 trap rollback EXIT
 
 # --- sanity probes on a scratch copy (REQ-SHG-606) ---------------------------
 # Runs only against the real root: with SHG_ROOT set the guard's
-# compiled-in /bin/bash.real path does not exist inside the fixture.
+# compiled-in sealed path does not exist inside the fixture.
 sanity_probes() {
     [ -z "$SHG_ROOT" ] || { log "SHG_ROOT set: skipping runtime sanity probes"; return 0; }
     local scratch status_code
@@ -176,8 +170,7 @@ sanity_probes() {
     cp "$GUARD_BIN" "$scratch"
     chmod 0755 "$scratch"
     "$SETCAP" cap_dac_override=ep "$scratch"
-    # Built by concat so the policy pattern never matches this script.
-    local probe="pk"; probe="${probe}ill x"
+    local probe='chattr -i /tmp/x'
     status_code=0
     "$scratch" -c 'echo shg-sanity' >"$DEVNULL" 2>&1 || status_code=$?
     [ "$status_code" -eq 0 ] || { rm -f "$scratch"; die "sanity: benign -c status=$status_code (want 0)"; }
@@ -199,7 +192,7 @@ write_apt_hook() {
 #!/bin/bash
 set -euo pipefail
 
-for path in /bin/bash.distrib /usr/bin/bash.distrib; do
+for path in /usr/lib/workspace-guard/sealed/pkg/bash /usr/lib/workspace-guard/sealed/pkg/sh; do
     if [[ -e "$path" ]]; then
         mode="$(/usr/bin/stat -c %a "$path")"
         if [[ "$mode" != "700" ]]; then
@@ -238,21 +231,29 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
-# 1. Seal the original as .real. On reconcile, prefer the diverted
-#    original; refuse when neither source exists (cannot reconstruct
-#    stock bash).
+# 1. Seal stock bash into the sealed tree. Prefer an existing sealed copy,
+#    then migrate the older copy, then the diverted original; refuse when no
+#    source exists (cannot reconstruct stock bash).
 if [ ! -f "$REAL_PATH" ]; then
-    if [ -f "$DISTRIB_PATH" ]; then
+    install -d -m 0700 -o root -g root "$SEALED_DIR"
+    if [ -f "$LEGACY_REAL" ]; then
+        log "migrating $LEGACY_REAL -> $REAL_PATH"
+        cp "$LEGACY_REAL" "$REAL_PATH"
+    elif [ -f "$LEGACY_DISTRIB" ]; then
+        log "migrating $LEGACY_DISTRIB -> $REAL_PATH"
+        cp "$LEGACY_DISTRIB" "$REAL_PATH"
+    elif [ -f "$DISTRIB_PATH" ]; then
         log "restoring $REAL_PATH from diverted original"
         cp "$DISTRIB_PATH" "$REAL_PATH"
     elif ! guard_installed; then
         log "sealing stock bash as $REAL_PATH"
         cp "$BASH_PATH" "$REAL_PATH"
     else
-        die "guard installed but $REAL_PATH and $DISTRIB_PATH are both missing; cannot reconstruct stock bash"
+        die "guard installed but no stock bash source (sealed, older, or diverted) exists"
     fi
 fi
-# chown/chmod on an already-sealed (+i) bash.real fail with EPERM; the
+install -d -m 0700 -o root -g root "$SEALED_PKG_DIR"
+# chown/chmod on an already-sealed (+i) copy fail with EPERM; the
 # immutable flag itself proves ownership and mode are locked in.
 if ! is_immutable "$REAL_PATH"; then
     chown root:root "$REAL_PATH"
@@ -260,19 +261,49 @@ if ! is_immutable "$REAL_PATH"; then
     elf_magic "$REAL_PATH" || die "sealed original $REAL_PATH is not a valid ELF"
 fi
 
-# 2. Sanity probes now that /bin/bash.real exists (first install) or
+# 2. Sanity probes now that the sealed original exists (first install) or
 #    against the existing one (reconcile).
 sanity_probes
 
-# 3. Divert the resolved bash path (idempotent).
-if ! dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" | grep -q "diversion of $BASH_PATH"; then
-    log "dpkg-divert $BASH_PATH -> $DISTRIB_PATH"
-    dpkg-divert --add --rename --divert "$DISTRIB_PATH" "$BASH_PATH"
+# 3. Repoint the package diversion at the sealed package slot (idempotent).
+divert_target() {
+    dpkg-divert --list "$BASH_PATH" 2>"$DEVNULL" \
+        | sed -n 's/.*diversion of .* to \([^ ]*\).*/\1/p'
+}
+current="$(divert_target)"
+if [ -z "$current" ]; then
+    if guard_installed; then
+        log "recording dpkg-divert $BASH_PATH -> $DISTRIB_PATH"
+        dpkg-divert --add --divert "$DISTRIB_PATH" "$BASH_PATH"
+    else
+        log "dpkg-divert $BASH_PATH -> $DISTRIB_PATH"
+        dpkg-divert --add --rename --divert "$DISTRIB_PATH" "$BASH_PATH"
+    fi
+elif [ "$current" != "$DISTRIB_PATH" ]; then
+    log "repointing dpkg-divert: $current -> $DISTRIB_PATH"
+    dpkg-divert --remove "$BASH_PATH"
+    if [ -f "$current" ] && [ ! -e "$DISTRIB_PATH" ]; then
+        mv -T "$current" "$DISTRIB_PATH"
+    fi
+    dpkg-divert --add --divert "$DISTRIB_PATH" "$BASH_PATH"
 fi
 # The diverted package copy is recovery state, never a user-facing shell.
 # Keep it root-executable only so it cannot bypass the guard for agents.
-chown root:root "$DISTRIB_PATH"
-chmod 0700 "$DISTRIB_PATH"
+if [ -e "$DISTRIB_PATH" ]; then
+    chown root:root "$DISTRIB_PATH"
+    chmod 0700 "$DISTRIB_PATH"
+fi
+
+# 3b. Drop the older sealed copy and divert slot once the sealed copy exists.
+if [ -f "$LEGACY_REAL" ] && [ -f "$REAL_PATH" ]; then
+    log "removing older $LEGACY_REAL"
+    chattr -i "$LEGACY_REAL" 2>"$DEVNULL" || warn "could not clear immutable on $LEGACY_REAL"
+    rm -f "$LEGACY_REAL"
+fi
+if [ -f "$LEGACY_DISTRIB" ] && [ "$LEGACY_DISTRIB" != "$DISTRIB_PATH" ] && [ -f "$REAL_PATH" ]; then
+    log "removing older $LEGACY_DISTRIB"
+    rm -f "$LEGACY_DISTRIB"
+fi
 
 # 4. Install the guard atomically when absent or stale.
 if ! guard_installed || ! has_guard_cap "$BASH_PATH"; then
@@ -296,7 +327,7 @@ fi
 # 6. /bin/sh coverage (only when it resolves to the replaced bash).
 if sh_covered; then
     log "/bin/sh resolves to bash: covering $SHG_ROOT/bin/sh"
-    SH_DISTRIB="$SHG_ROOT/bin/sh.distrib"
+    SH_DISTRIB="$SEALED_PKG_DIR/sh"
     if ! dpkg-divert --list "$SHG_ROOT/bin/sh" 2>"$DEVNULL" | grep -q "diversion of $SHG_ROOT/bin/sh"; then
         dpkg-divert --add --rename --divert "$SH_DISTRIB" "$SHG_ROOT/bin/sh"
     fi

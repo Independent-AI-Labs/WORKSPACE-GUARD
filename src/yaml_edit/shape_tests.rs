@@ -103,8 +103,10 @@ fn reindent_is_idempotent() {
 #[test]
 fn reindent_preserves_semantics() {
     let once = reindent(INDENTLESS).expect("pass").expect("changed");
-    let before: serde_yaml::Value = serde_yaml::from_str(INDENTLESS).expect("parse");
-    let after: serde_yaml::Value = serde_yaml::from_str(&once).expect("reparse");
+    let before: noyalib::compat::serde_yaml::Value =
+        noyalib::compat::serde_yaml::from_str(INDENTLESS).expect("parse");
+    let after: noyalib::compat::serde_yaml::Value =
+        noyalib::compat::serde_yaml::from_str(&once).expect("reparse");
     assert_eq!(before, after);
 }
 

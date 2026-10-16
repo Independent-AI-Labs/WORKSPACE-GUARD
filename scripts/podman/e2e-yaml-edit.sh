@@ -77,6 +77,32 @@ if [[ "$CHATTR_OK" -eq 1 ]]; then
 fi
 pass "add installs atomically and preserves ownership and flags"
 
+echo "==> Tier 2b: add-block nested policy item (immutable flag must survive)"
+RULES="$TMP/rules.yaml"
+cat > "$RULES" <<'EOF'
+rules: []
+EOF
+chmod 0644 "$RULES"
+[[ "$CHATTR_OK" -eq 1 ]] && chattr +i "$RULES"
+cat > "$TMP/reject_block.yaml" <<'EOF'
+kind: reject
+subcommand: run
+requires_flags: [--privileged]
+reject_patterns:
+  - kind: substring
+    pattern: "--privileged"
+    reason: container escape vector
+EOF
+expect_rc 0 "$YE" add-block "$RULES" rules "$TMP/reject_block.yaml"
+grep -q "reject_patterns:" "$RULES" || die "nested block missing after add-block"
+grep -q -- "- kind: substring" "$RULES" || die "nested list item missing"
+[[ "$(stat -c '%U:%G' "$RULES")" == "root:root" ]] || die "ownership changed"
+if [[ "$CHATTR_OK" -eq 1 ]]; then
+    lsattr -d "$RULES" | awk '{print $1}' | grep -q 'i' \
+        || die "immutable flag lost after add-block"
+fi
+pass "add-block installs a nested policy item and preserves metadata"
+
 echo "==> Tier 2b: duplicate add exits 4"
 expect_rc 4 "$YE" add "$Q" exceptions hook=quality added_by=tier2 \
     "reason=podman root-tier coverage, safe to remove" "paths=[src/x.py]"

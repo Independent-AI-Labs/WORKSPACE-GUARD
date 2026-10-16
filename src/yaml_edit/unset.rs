@@ -178,12 +178,12 @@ mod tests {
     use super::splice_unset;
     use crate::engine;
     use crate::target::normalize_terminal;
-    use serde_yaml::Value;
+    use noyalib::compat::serde_yaml::Value;
 
     #[test]
     fn wildcard_splice_preserves_unrelated_bytes_and_valid_yaml() {
         let raw = "# header\nhooks:\n  - id: one # keep\n    safety: true\n    mandatory: true\n\n  - id: two\n    safety: false\n    mandatory: false\nother: 1\n\n";
-        let doc: Value = serde_yaml::from_str(raw).expect("parse");
+        let doc: Value = noyalib::compat::serde_yaml::from_str(raw).expect("parse");
         let (expected, concrete) =
             engine::unset_fields(&doc, "hooks[].safety").expect("semantic unset");
         let out = normalize_terminal(&splice_unset(raw, &concrete).expect("splice"));
@@ -192,7 +192,7 @@ mod tests {
         assert!(out.contains("    mandatory: true\n"));
         assert!(!out.contains("safety:"));
         assert_eq!(
-            serde_yaml::from_str::<Value>(&out).expect("valid"),
+            noyalib::compat::serde_yaml::from_str::<Value>(&out).expect("valid"),
             expected
         );
         assert!(out.ends_with("other: 1\n"));
@@ -201,12 +201,12 @@ mod tests {
     #[test]
     fn dotted_map_splice_removes_only_the_field() {
         let raw = "outer:\n  remove: true\n  keep: 1\n";
-        let doc: Value = serde_yaml::from_str(raw).expect("parse");
+        let doc: Value = noyalib::compat::serde_yaml::from_str(raw).expect("parse");
         let (expected, concrete) = engine::unset_fields(&doc, "outer.remove").expect("unset");
         let out = normalize_terminal(&splice_unset(raw, &concrete).expect("splice"));
         assert_eq!(out, "outer:\n  keep: 1\n");
         assert_eq!(
-            serde_yaml::from_str::<Value>(&out).expect("valid"),
+            noyalib::compat::serde_yaml::from_str::<Value>(&out).expect("valid"),
             expected
         );
     }

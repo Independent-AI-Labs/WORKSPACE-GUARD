@@ -1,8 +1,8 @@
 //! Real-Git binary verification (REQ-GGUARD-006, REQ-GGUARD-103).
 //!
-//! `/usr/bin/git.original` is the trusted real Git the guard execs after a
-//! policy pass. It must be inspected without following symlinks and must be
-//! exactly `root:root` mode `0700` with no special bits, and must not be the
+//! `sealed/git` (the frozen real Git) is the trusted binary the guard execs
+//! after a policy pass. It must be inspected without following symlinks and
+//! must be exactly `root:root` mode `0700` with no special bits, and must not be the
 //! running guard itself. Any failure is a guard-unavailable condition (the
 //! caller maps `GitOriginalMissing` / `GitOriginalBadPerms` to exit 3).
 
@@ -59,7 +59,7 @@ pub(crate) fn verify_git_original_at(path: &Path) -> Result<(), GuardError> {
         GitOriginalCheck::Ok => {
             if is_guard_binary(path) {
                 eprintln!(
-                    "FATAL: /usr/bin/git.original is the guard itself, not real git. \
+                    "FATAL: sealed/git is the guard itself, not real git. \
                      Restore: apt install --reinstall git"
                 );
                 return Err(GuardError::GitOriginalMissing);

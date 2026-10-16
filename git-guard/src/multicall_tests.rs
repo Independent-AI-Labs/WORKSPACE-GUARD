@@ -33,7 +33,7 @@ fn relative_multicall_name_is_normalised() {
 
 #[test]
 fn real_git_original_is_not_multicall() {
-    let input = os(&["/usr/bin/git.original", "status"]);
+    let input = os(&["/usr/lib/workspace-guard/sealed/git", "status"]);
     assert_eq!(normalize_multicall(&input), input);
 }
 

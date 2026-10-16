@@ -94,10 +94,11 @@ pub fn is_config_privileged() -> bool {
     geteuid().as_raw() == 0
 }
 
-pub const GIT_ORIGINAL: &str = "/usr/bin/git.original\0";
-pub const GIT_ORIGINAL_PATH: &str = "/usr/bin/git.original";
+include!("../../sealed_paths.rs");
+pub const GIT_ORIGINAL: &str = SEALED_GIT_NUL;
+pub const GIT_ORIGINAL_PATH: &str = SEALED_GIT;
 
-/// Guard-owned session marker injected into every `git.original` child
+/// Guard-owned session marker injected into every `sealed/git` child
 /// (REQ-GGUARD-070 canonical guard value). A guard invocation that inherits
 /// this marker is nested inside a guard-managed git operation, e.g. a `git`
 /// call made by one of git's own hooks. Git exports identity and editor names
@@ -105,6 +106,11 @@ pub const GIT_ORIGINAL_PATH: &str = "/usr/bin/git.original";
 /// guard's own canonical identity; the marker routes that evidence to the
 /// audit sink instead of the caller's stderr and `/dev/tty`.
 pub const SESSION_ENV: &str = "WORKSPACE_GUARD_SESSION";
+
+// REQ-GGUARD-064: the rebase Git forks for an allowed `git pull --rebase` is
+// authorized structurally - by its parent being the sealed real Git running
+// that pull - not by any caller-settable marker (see
+// `block::parent_is_pull_rebase`).
 
 pub fn apply_safe_directory(cmd: &mut std::process::Command) {
     agent_identity::apply_agent_hardened_git_env(cmd, false);
@@ -400,7 +406,7 @@ fn run(argv_os: &[OsString]) -> Result<(), GuardError> {
         // Capability-mode ownership lock: claim all paths declared in
         // config/shared_locked_paths.yaml (e.g. .git/ minus object
         // stores, .gitmodules, *_exceptions.yaml) as root:root before
-        // any further git.original subprocess can fire a payload
+        // any further sealed/git subprocess can fire a payload
         // planted inside them. Best-effort; never blocks a pass.
         // Root-only builds are no-ops (user is already root).
         // The git dir is resolved ONCE here; the post-exec relock in

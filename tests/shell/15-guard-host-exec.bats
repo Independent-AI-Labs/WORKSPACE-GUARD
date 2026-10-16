@@ -12,7 +12,7 @@ teardown() { guard_teardown; }
     profiles="$GUARD_ROOT/config/shared_host_profiles.yaml"
     run bash -c "
         _guard_dir='$GUARD_ROOT'
-        source \"$ci_root/lib/guard-host-exec.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-host-exec.sh\"
         guard_host_profile_class vm-ws
     "
     [ "$status" -eq 0 ]
@@ -35,7 +35,7 @@ teardown() { guard_teardown; }
     local ci_root
     ci_root="${CI_ROOT:-/opt/workspace-ci}"
     run bash -c "
-        source \"$ci_root/lib/guard-drift.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-drift.sh\"
         a=\$(guard_file_cap_normalize 'cap_chown,cap_setpcap=ep')
         b=\$(guard_file_cap_normalize 'cap_setpcap,cap_chown=ep')
         [[ \"\$a\" == \"\$b\" ]]
@@ -47,7 +47,7 @@ teardown() { guard_teardown; }
     local ci_root
     ci_root="${CI_ROOT:-/opt/workspace-ci}"
     run bash -c "
-        source \"$ci_root/lib/guard-drift.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-drift.sh\"
         guard_workload_file_cap_string
     "
     [ "$status" -eq 0 ]

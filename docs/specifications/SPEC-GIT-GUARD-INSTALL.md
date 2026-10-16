@@ -186,24 +186,27 @@ Under `PR_SET_NO_NEW_PRIVS`, file capabilities on `/usr/bin/git` are ignored. Th
 
 First-time install still prompts `[y/N]`; reconcile skips the prompt when `/usr/bin/git.original` already exists.
 
-### 5.2 Configure dpkg-divert
+### 5.2 Freeze the real git and configure dpkg-divert
 
-Before relocating the real git, the script configures a dpkg diversion to prevent the `git` apt package from overwriting `/usr/bin/git` during `apt install git`, `apt upgrade`, or `apt dist-upgrade`:
+The real apt git is frozen into the root-only sealed tree, and a dpkg diversion keeps the `git` package from overwriting the guarded `/usr/bin/git` during `apt install git`, `apt upgrade`, or `apt dist-upgrade`:
 
 ```bash
-# Step 1: Copy real git to git.original (our restricted copy)
-cp /usr/bin/git /usr/bin/git.original
-chown root:root /usr/bin/git.original
-chmod 0700 /usr/bin/git.original
+# Sealed tree (0700 root:root)
+install -d -m 0700 -o root -g root /usr/lib/workspace-guard/sealed
+install -d -m 0700 -o root -g root /usr/lib/workspace-guard/sealed/pkg
 
-# Step 2: Configure dpkg-divert (prevents future apt overwrites)
-dpkg-divert --local --divert /usr/bin/git.distrib --rename --add /usr/bin/git
+# Freeze the real git (0700 root:root)
+cp /usr/bin/git /usr/lib/workspace-guard/sealed/git
+chown root:root /usr/lib/workspace-guard/sealed/git
+chmod 0700 /usr/lib/workspace-guard/sealed/git
 
-# Step 3: Verify the diversion is in place
-dpkg-divert --list /usr/bin/git | grep -q "git.distrib"
+# Divert the apt slot to the sealed tree (prevents future apt overwrites)
+dpkg-divert --local --divert /usr/lib/workspace-guard/sealed/pkg/git --rename --add /usr/bin/git
+chmod 0700 /usr/lib/workspace-guard/sealed/pkg/git
+chown root:root /usr/lib/workspace-guard/sealed/pkg/git
 ```
 
-After this, any future `apt install git` will place the real git at `/usr/bin/git.distrib` (which is already mode 0700 root:root as a safeguard, though dpkg will try to set its own permissions).
+Any future `apt install git` writes through the diversion to `/usr/lib/workspace-guard/sealed/pkg/git`. Guard-placement correctness is checked against the guard's own sha256 (`is_real_git()`), so a reinstall never freezes a previous guard as the "real git" (that would cause an infinite fork loop).
 
 ### 5.2.1 Configure the exec-path diversion
 
@@ -211,36 +214,39 @@ Git prefixes its exec path (`/usr/lib/git-core`) to `PATH` when spawning hooks a
 
 ```bash
 # Relocate the real exec-path binary and point the name at the guard
-dpkg-divert --local --divert /usr/lib/git-core/git.distrib --rename --add /usr/lib/git-core/git
-chmod 0700 /usr/lib/git-core/git.distrib
-chown root:root /usr/lib/git-core/git.distrib
-setcap -r /usr/lib/git-core/git.distrib
+dpkg-divert --local --divert /usr/lib/workspace-guard/sealed/pkg/git-core/git \
+    --rename --add /usr/lib/git-core/git
+chmod 0700 /usr/lib/workspace-guard/sealed/pkg/git-core/git
+chown root:root /usr/lib/workspace-guard/sealed/pkg/git-core/git
+setcap -r /usr/lib/workspace-guard/sealed/pkg/git-core/git
 ln -sfn /usr/bin/git /usr/lib/git-core/git
 ```
 
 The `git-*` multi-call symlinks in `/usr/lib/git-core` continue to point at `git` and therefore route through the guard, which normalises `git-<cmd>` to the `git <cmd>` dispatcher form before policy evaluation (REQ-GGUARD-159).
 
-### 5.3 Verify the Copy
+### 5.3 Install the guard: atomic swap
+
+`dpkg-divert --rename` moves the real git out of `/usr/bin/git`, so the guard must be staged and swapped in with a single atomic rename. A plain `cp` leaves a window where `/usr/bin/git` is missing or partially written; a caller in a root-locked repo (`.git` is `root:root` after `gitdir::lock`) then loses the guard's `safe.directory` injection and fails with `dubious ownership`.
+
+This is the deliberate operational coupling: **removing or half-installing the guard breaks agent git**, because the guard's injection is the only thing suppressing git's ownership refusal on a `root:root` `.git`. There is no secondary safety net (no `safe.directory` written into system/global git config); keeping agents working is what the guard is for.
 
 ```bash
-ORIG_HASH=$(sha256sum /usr/bin/git | awk '{print $1}')
-COPY_HASH=$(sha256sum /usr/bin/git.original | awk '{print $1}')
-if [[ "$ORIG_HASH" != "$COPY_HASH" ]]; then
-    echo "[ERROR] Checksum mismatch: git.original does not match system git"
-    rm -f /usr/bin/git.original
-    dpkg-divert --remove /usr/bin/git 2>/dev/null || true
-    exit 1
-fi
+# Stage next to the target, then swap atomically
+cp "$GUARD_BIN" /usr/bin/git.guard
+chown root:root /usr/bin/git.guard
+chmod 0755 /usr/bin/git.guard
+mv -f /usr/bin/git.guard /usr/bin/git   # single rename: no missing/partial window
 ```
 
-### 5.4 Install the Guard
+### 5.4 File capabilities and the post-install injection check (host-exec)
+
+The guard is delivered as a file-capability binary, not SUID:
 
 ```bash
-# Copy built binary to /usr/bin/git
-cp "$GUARD_BIN" /usr/bin/git
-chown root:root /usr/bin/git
-chmod 4555 /usr/bin/git
+setcap cap_chown,cap_dac_override,cap_fowner,cap_setpcap=ep /usr/bin/git
 ```
+
+`git --version` does not exercise the `safe.directory` injection: a stock or missing `/usr/bin/git` still prints a version. The install therefore also runs, as the agent user via `runuser`, `git -C <workspace-root> rev-parse --show-toplevel` inside a root-locked repo, and rolls back if it reports `dubious ownership`. `scripts/check-guard-host-exec-readonly` repeats the same probe as a read-only drift check.
 
 ### 5.5 Remove Older Bash Wrapper (PATH Bypass Mitigation)
 

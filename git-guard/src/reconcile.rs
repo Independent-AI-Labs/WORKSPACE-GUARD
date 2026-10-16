@@ -2,7 +2,7 @@
 //! SPEC-GIT-GUARD section 8).
 //!
 //! Git operations and tampering are the same syscalls; only the actor
-//! differs. When git.original exits after a mutating porcelain, every
+//! differs. When sealed/git exits after a mutating porcelain, every
 //! worktree path it recreated (unlink+create on pull, merge, checkout,
 //! switch, restore, rebase, cherry-pick, revert, apply, am, submodule
 //! update, plus the root-only reset/clean paths) is owned by the
@@ -10,7 +10,7 @@
 //! pre-exec (gitdir.rs) no longer holds. This module is the
 //! post-flight that restores it in the SAME guard invocation, using
 //! the guard's own cap_chown/cap_fowner (never loaned onward; the
-//! ambient loan to git.original carries only CAP_DAC_OVERRIDE).
+//! ambient loan to sealed/git carries only CAP_DAC_OVERRIDE).
 //!
 //! Two enforcement classes:
 //!

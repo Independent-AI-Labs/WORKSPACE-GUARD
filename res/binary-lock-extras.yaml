@@ -1,0 +1,15 @@
+# res/binary-lock-extras.yaml: managed guarded binaries outside the
+# GTFOBins universe and outside the live SUID/capability surface.
+#
+# sync-gtfobins folds each name here into res/binary-lock.yaml so a policy
+# baked from config/binary_guard_policy_rules.yaml covers it. Each name MUST
+# have an explicit `- name: <name>` rule in the catalog; a name without one
+# would fall through to the deny-all catch-all and lock agents out, so it is
+# skipped with a warning instead.
+#
+# The guarded binary's own installer supplies the host path and sealed copy
+# at install time (these are host-specific and never recorded here). Entries
+# therefore land with `path: null` / `contained: false`.
+version: 1
+binaries:
+  - podman

@@ -30,9 +30,9 @@ directly, generically, atomically, and fail-closed:
       |  0. flock /var/lib/workspace-guard/yaml-edit.lock
       |  1. preflight: regular, no-follow, canonical, root:root, outside /opt;
       |     capture parent fd + target device/inode/metadata
-      |  2. serde_yaml parse (fail-closed) of the whole document
+      |  2. noyalib parse (fail-closed) of the whole document
       |  3. locate splice region by indentation; transform
-      |  4. emit entry via serde_yaml emitter (valid by construction)
+      |  4. emit entry via noyalib emitter (valid by construction)
       |  5. re-parse temp + assert exact semantic delta (real parser)
       |  6. schema registry validation by basename
       |  7. chattr +i detected -> transient clear inside flock
@@ -42,13 +42,13 @@ directly, generically, atomically, and fail-closed:
    file stays root:root with its original mode (+ immutable if present)
 ```
 
-Design rule (REQ-YE-006): **serde_yaml decides meaning; line scanning
+Design rule (REQ-YE-006): **noyalib decides meaning; line scanning
 only locates byte ranges.** Entry matching, duplicate detection,
 typing, and verification all come from parsing. The splice step
 touches only the target key's block so comments and unrelated
 formatting survive byte-for-byte (REQ-YE-103).
 
-Tooling: `serde`/`serde_yaml` move from build/dev-dependencies to
+Tooling: `serde`/`noyalib` move from build/dev-dependencies to
 `[dependencies]`. No new runtime dependency, no external CLI (no yq,
 no python) is introduced on the security boundary.
 
@@ -68,7 +68,7 @@ Attacks closed by design:
    YAML emitter and all verification through a real parser.
 3. **Circular verification**: the old tool verified output with the
    same parser that produced it. Verification here re-parses the temp
-   file with serde_yaml and asserts the exact semantic delta against
+   file with noyalib and asserts the exact semantic delta against
    the pre-edit parse.
 4. **Lost updates**: concurrent root invocations interleaved
    read-transform-install. A global flock serializes mutations.
@@ -90,6 +90,7 @@ authoritative change record.
 
 ```
 workspace-yaml-edit add      <file> <list-key> <field-spec>...   (ROOT)
+workspace-yaml-edit add-block <file> <list-key> <block-file>     (ROOT)
 workspace-yaml-edit map-add  <file> <map-key> <new-key> <field-spec>... (ROOT)
 workspace-yaml-edit remove   <file> <list-key> <field-spec>...   (ROOT)
 workspace-yaml-edit set      <file> <dotted.key> <value>         (ROOT)
@@ -104,8 +105,8 @@ workspace-yaml-edit check    <file>
 workspace-yaml-edit format   <file> [--dry-run]                   (ROOT)
 ```
 
-Flags: `--dry-run` (mutations and format only; print unified diff, no
-install, not root-gated), `--allow-no-match` (remove only; no-match
+Flags: `--dry-run` (mutations, add-block, and format; print unified
+diff, no install, not root-gated), `--allow-no-match` (remove only; no-match
 exits 0 instead of 3), `--string` (set only; force string typing),
 `--create` (set only; insert an absent leaf key under an existing
 block-mapping parent, REQ-YE-205), and `--expected-sha256` (delete
@@ -244,13 +245,13 @@ its submodules, which live beside it under `src/yaml_edit/`):
 
 ### 4.1 add
 
-1. Parse the document with serde_yaml (fail closed on any parse
+1. Parse the document with noyalib (fail closed on any parse
    error: tabs, BOM, multi-document, anchors the emitter cannot
    round-trip).
 2. Locate `<list-key>` at top level in the parsed value; it must be a
    sequence (distinct errors for missing vs wrong kind).
-3. Build the new entry as a `serde_yaml::Value` from the field specs;
-   serialize it with `serde_yaml::to_string` and re-indent under the
+3. Build the new entry as a `noyalib::Value` from the field specs;
+   serialize it with `noyalib::to_string` and re-indent under the
    key (entry indent = key indent + 2).
 4. Duplicate check against the parsed sequence (deep equality on spec
    fields); duplicate -> exit 4.
@@ -289,10 +290,12 @@ node line range) with `<indent><key>: <emitted>`.
 
 ### 4.4 Verification (REQ-YE-300)
 
-After writing the temp file, re-parse it with serde_yaml and assert
+After writing the temp file, re-parse it with noyalib and assert
 exactly one semantic delta against the pre-edit parse:
 
 - add: sequence length +1 and the new item deep-equals the spec entry
+- add-block: sequence length +1 and the new item deep-equals the parsed
+  block mapping
 - map-add: the parent mapping gained exactly the new key and its value
   deep-equals the spec entry mapping
 - remove: no item matches the spec and length decreased by the number
@@ -338,13 +341,37 @@ terminal line reconstruction produced a new blank line at EOF.
 
 1. Parse; resolve `<map-key>` with literal-first dotted resolution; the
    resolved node must be a block mapping (exit 1 otherwise).
-2. Build the entry as a `serde_yaml::Value` mapping from the field specs
+2. Build the entry as a `noyalib::Value` mapping from the field specs
    (same grammar as `add`, section 3.1).
 3. Duplicate check: if `<new-key>` already exists in the mapping, exit 4
    with the file untouched.
 4. Insert the key at the end of the parent's block region at child
    indent via `splice_insert_map_key`; the value renders as a nested
    block mapping. Verify, schema-validate, install (sections 4.4-4.5).
+
+### 4.10 add-block
+
+The field-spec grammar of `add` (section 3.1) types every value as a
+YAML scalar, so a list item whose field is itself a collection (e.g. a
+`reject_patterns: [{kind, subcommand, requires_flags, pattern, reason},
+...]` rule) cannot be expressed. `add-block <file> <list-key>
+<block-file>` reads one item as raw YAML text:
+
+1. Read `<block-file>` and parse it with noyalib; it must be exactly
+   one YAML mapping (scalar, sequence, multi-document, and parse errors
+   all fail closed with exit 1 before the target is touched). An
+   unreadable block file exits 2.
+2. `<list-key>` must resolve to a top-level sequence (distinct
+   missing/not-a-list errors, exit 2).
+3. Duplicate check: an existing item deep-equal to the block exits 4.
+4. Splice the block as the next item via the same `splice_add` path as
+   `add` (indent computed from the document; nested maps and sequences
+   are emitted by the shared type-aware emitter), then verify, schema-
+   validate, and install exactly like `add`.
+
+Only `--dry-run` is accepted. Audit records the block file path in the
+`value=` slot with intent `add-block`; the immutable-flag handling is
+the shared install path (section 6 step 8).
 
 ---
 
@@ -409,9 +436,9 @@ Mutation flow (`yaml_edit_ops.rs` / `yaml_edit_install.rs`):
    (LOCK_EX; directory created root:root 0700 if missing).
 5. Open the parent directory and target with no-follow descriptor-relative
    operations, capture device/inode/uid/gid/mode/timestamps, read the already
-   open target, and parse with serde_yaml (exit 1 on parse error).
+   open target, and parse with noyalib (exit 1 on parse error).
 6. Transform in memory (splice), then verify: the result re-parses
-   with serde_yaml to exactly the expected semantic document
+   with noyalib to exactly the expected semantic document
    (REQ-YE-006), then schema validation against the registry.
 7. Audit line (section 7). Write failure aborts before install
    (REQ-YE-601).
@@ -466,6 +493,7 @@ digest.) Audit write failure aborts before install or unlink (REQ-YE-601).
 
 ```makefile
 yaml-add:      ## (ROOT) FIELDS="hook=x;reason=...;paths=[a,b];added_by=.."
+yaml-add-block: ## (ROOT) KEY=rules BLOCK=<file of one raw YAML mapping>
 yaml-map-add:  ## (ROOT) KEY=files NEW_KEY=path FIELDS="class=..;owner=.."
 yaml-remove:   ## (ROOT) FIELDS="hook=x;paths=[a]"
 yaml-set:      ## (ROOT) FILE=.. KEY=unit.threshold VALUE=80
@@ -513,7 +541,7 @@ root-owned CI repo.
 | 4 | comma in scalar reclassifies as list | list syntax is bracketed only (3.1) |
 | 5 | awk -v backslash escapes | Rust strings; no escape layer (3.2) |
 | 6 | Makefile word-split FIELDS | `;` separator via IFS (8) |
-| 7 | YAML type confusion on emission | serde_yaml emitter quotes correctly (3.4/REQ-YE-203) |
+| 7 | YAML type confusion on emission | noyalib emitter quotes correctly (3.4/REQ-YE-203) |
 | 36 | timestamp strings emitted plain, PyYAML (YAML 1.1) re-reads them as `datetime.date` | `needs_quotes` in `yaml_edit_emit.rs` quotes YAML 1.1 timestamp shapes (`YYYY-M-D` with optional `[T ]hh:mm:ss` suffix) alongside booleans/nulls/numbers (2026-09-07 activation fix) |
 | 8 | chattr +i invariant mismatch with CI | lsattr detect / chattr -i / install / chattr +i restore (6 step 8) |
 | 9/13 | no mutual exclusion | global flock (6 step 2) |
@@ -522,7 +550,7 @@ root-owned CI repo.
 | 12 | S-spec truncation drops fields | entry built as one Value, emitted whole (4.1) |
 | 14 | duplicate list values round-trip asymmetry | duplicate spec items rejected (3.1) |
 | 15 | empty-list entries unremovable | `name=[]` spec (3.1) |
-| 16 | tabs/CRLF mis-parse | serde_yaml parse fails closed (4.1 step 1) |
+| 16 | tabs/CRLF mis-parse | noyalib parse fails closed (4.1 step 1) |
 | 17 | inline comments parsed into values | semantics from parse, not line text (REQ-YE-006) |
 | 18 | multi-line flow lists | handled by the parser |
 | 19 | cannot add to inline flow list | `key: [a]` region spliced like block form |

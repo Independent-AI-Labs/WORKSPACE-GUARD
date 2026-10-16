@@ -344,6 +344,54 @@ EOF
     assert_output --partial "+      - src/a.py"
 }
 
+@test "dry-run add-block inserts a raw nested-policy item" {
+    local f="$TEST_TMPDIR/rules.yaml"
+    printf 'rules: []\n' > "$f"
+    local b="$TEST_TMPDIR/reject_block.yaml"
+    cat > "$b" <<'EOF'
+kind: reject
+subcommand: run
+reject_patterns:
+  - kind: substring
+    pattern: "--privileged"
+    reason: container escape vector
+EOF
+    run "$(_ye)" add-block "$f" rules "$b" --dry-run
+    assert_success
+    assert_output --partial "+  - kind: reject"
+    assert_output --partial "+      - kind: substring"
+}
+
+@test "add-block rejects a non-mapping block with exit 1" {
+    local f="$TEST_TMPDIR/rules.yaml"
+    printf 'rules: []\n' > "$f"
+    local b="$TEST_TMPDIR/seq_block.yaml"
+    printf -- '- a\n- b\n' > "$b"
+    run "$(_ye)" add-block "$f" rules "$b" --dry-run
+    assert_equal "$status" 1
+    assert_output --partial "must be a single YAML mapping"
+}
+
+@test "add-block on a missing list key exits 2" {
+    local f="$TEST_TMPDIR/rules.yaml"
+    printf 'rules: []\n' > "$f"
+    local b="$TEST_TMPDIR/block.yaml"
+    printf 'kind: reject\n' > "$b"
+    run "$(_ye)" add-block "$f" nope "$b" --dry-run
+    assert_equal "$status" 2
+    assert_output --partial "key not found"
+}
+
+@test "dry-run add-block duplicate exits 4" {
+    local f="$TEST_TMPDIR/rules.yaml"
+    printf 'rules:\n  - kind: reject\n' > "$f"
+    local b="$TEST_TMPDIR/block.yaml"
+    printf 'kind: reject\n' > "$b"
+    run "$(_ye)" add-block "$f" rules "$b" --dry-run
+    assert_equal "$status" 4
+    assert_output --partial "duplicate entry"
+}
+
 @test "map-add inserts a nested map entry in dry-run" {
     local f="$TEST_TMPDIR/classify.yaml"
     printf 'files:\n  existing.yaml:\n    class: lock\n' > "$f"

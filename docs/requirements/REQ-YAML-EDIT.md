@@ -30,10 +30,10 @@ splitting). The replacement:
 1. Is **generic**: it edits any guard-locked YAML policy file, not
    just exemption lists. Quality gates, content filters, thresholds,
    allowlists, and nested guard configs are all in scope.
-2. Is **Rust-native** (`workspace-yaml-edit`, `serde_yaml`): all
+2. Is **Rust-native** (`workspace-yaml-edit`, `noyalib`): all
    semantic decisions come from a real YAML parser; line scanning is
    used only to locate splice regions. No new runtime dependency is
-   introduced (serde_yaml is already vendored for build/dev).
+   introduced (noyalib is already vendored for build/dev).
 3. Keeps the "root edits directly; files are never released" model
    (REQ-HL-106 precedent): no unseal window, no timer, no state file,
    no skip list in the guard.
@@ -51,6 +51,11 @@ splitting). The replacement:
 - **REQ-YE-002**: The tool shall support these intents:
   - `add <file> <list-key> <field-spec>...`: append one map entry to
     a list-of-maps key, or one item to a scalar-list key.
+  - `add-block <file> <list-key> <block-file>`: append one list item
+    read as raw YAML text, for an item whose field is itself a
+    collection (e.g. a sequence of mappings) that the scalar
+    field-spec grammar of `add` cannot express. The block file must
+    parse as exactly one YAML mapping, or the mutation fails closed.
   - `map-add <file> <map-key> <new-key> <field-spec>...`: insert one
     previously absent entry into a mapping key, with the entry value
     built from the field specs (a nested mapping).
@@ -264,13 +269,14 @@ splitting). The replacement:
 
 ## 5. Sudo Gating (REQ-YE-400 series)
 
-- **REQ-YE-400**: `add`, `map-add`, `remove`, `set`, `bootstrap`,
+- **REQ-YE-400**: `add`, `add-block`, `map-add`, `remove`, `set`, `bootstrap`,
   `unset`, `remove-comment`, and `delete` shall refuse to mutate as
   non-root (exit 2). `list`, `get`, `validate`, and supported
   `--dry-run` transforms shall run as any user.
 
 - **REQ-YE-401**: Make targets shall be provided:
   `yaml-add FILE=.. KEY=.. FIELDS="a=b;c=[x,y]"`,
+  `yaml-add-block FILE=.. KEY=.. BLOCK=<block-file>`,
   `yaml-map-add FILE=.. KEY=.. NEW_KEY=.. FIELDS="class=..;owner=.."`,
   `yaml-remove`, `yaml-set`, `yaml-unset`, `yaml-remove-comment`,
   `yaml-delete`, `yaml-get`, `yaml-list`, `yaml-validate`. `FIELDS`
@@ -280,7 +286,7 @@ splitting). The replacement:
   exit 1.
 
 - **REQ-YE-403** *(payload isolation, REQ-YE-900)*: The mutating recipes
-  shall read `FILE`, `KEY`, `NEW_KEY`, `VALUE`, `FIELDS`, and
+  shall read `FILE`, `KEY`, `NEW_KEY`, `VALUE`, `FIELDS`, `BLOCK`, and
   `EXPECT_SHA256` from
   the exported environment at runtime and shall not interpolate their
   values into the scanned shell command text. A field or value that

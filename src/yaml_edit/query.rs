@@ -1,4 +1,4 @@
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 use std::process;
 
 use crate::diff;
@@ -26,7 +26,7 @@ pub fn run_get(cli: &Cli) {
         Value::Number(_) | Value::Bool(_) => {
             println!(
                 "{}",
-                serde_yaml::to_string(node)
+                noyalib::compat::serde_yaml::to_string(node)
                     .unwrap_or_else(|e| fail(1, &format!("cannot render value: {e}")))
                     .trim()
             )

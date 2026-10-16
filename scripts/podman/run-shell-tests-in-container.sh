@@ -7,8 +7,8 @@ done
 rm -f /tmp/WORKSPACE-GUARD/target/release/workspace-binary-guard
 rm -rf /tmp/WORKSPACE-CI /tmp/workspace-guard.tar /tmp/ci.tar
 mkdir -p /tmp/WORKSPACE-GUARD /tmp/WORKSPACE-CI
-cp /bin/bash /bin/bash.real
-chmod 700 /bin/bash.real
+install -d -m 0700 /usr/lib/workspace-guard/sealed && cp /bin/bash /usr/lib/workspace-guard/sealed/bash
+chmod 700 /usr/lib/workspace-guard/sealed/bash
 tar --exclude=target -cf /tmp/workspace-guard.tar -C /projects/WORKSPACE-GUARD .
 tar --no-same-owner -xf /tmp/workspace-guard.tar -C /tmp/WORKSPACE-GUARD
 tar --exclude=.git --exclude=.venv --exclude=node_modules --exclude=.boot-linux --exclude=target -cf /tmp/ci.tar -C /projects/WORKSPACE-CI .

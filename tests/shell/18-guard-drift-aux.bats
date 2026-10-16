@@ -21,7 +21,7 @@ teardown() { guard_teardown; }
         export WORKSPACE_GUARD_STATE_DIR='$tmp_state'
         _guard_dir='$GUARD_ROOT'
         GUARD_GIT_SSH_BIN='$ref_ssh'
-        source \"$ci_root/lib/guard-drift.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-drift.sh\"
         guard_host_exec_aux_drift_reasons
     "
     assert_success
@@ -42,7 +42,7 @@ teardown() { guard_teardown; }
         export WORKSPACE_GUARD_STATE_DIR='$tmp_state'
         _guard_dir='$GUARD_ROOT'
         GUARD_GIT_SSH_BIN='$ref_ssh'
-        source \"$ci_root/lib/guard-drift.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-drift.sh\"
         guard_host_exec_aux_drift_reasons
     "
     assert_success
@@ -61,8 +61,8 @@ teardown() { guard_teardown; }
     run bash -c "
         export WORKSPACE_GUARD_STATE_DIR='$tmp_state'
         _guard_dir='$GUARD_ROOT'
-        source \"$ci_root/lib/guard-drift.sh\"
-        source \"$ci_root/lib/guard-host-exec.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-drift.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-host-exec.sh\"
         guard_remove_git_install_artifacts
         [[ -f '$tmp_state/host-provision.ok' ]]
         [[ -d '$tmp_state/ssh-keys' ]]
@@ -101,8 +101,8 @@ EOF
         log_error() { printf 'ERR:%s\n' \"\$*\"; }
         log_warn() { printf 'WARN:%s\n' \"\$*\"; }
         log_info() { :; }
-        source \"$ci_root/lib/guard-drift.sh\"
-        source \"$ci_root/lib/guard-host-exec.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-drift.sh\"
+        source \"$GUARD_ROOT/scripts/lib/guard-host-exec.sh\"
         guard_host_provision_fleet_in_sudo() { printf 'agent\n'; return 0; }
         guard_assert_host_provision_complete
     "

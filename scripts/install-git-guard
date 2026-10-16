@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+# install-git-guard: build/install/uninstall/check the WORKSPACE-GUARD git guard.
+# Owned by WORKSPACE-GUARD (not WORKSPACE-CI). The deployed CI artifact is
+# used only for the Rust toolchain (bootstrap-rust / boot cargo); the install
+# logic lives here.
+#
+# Modes: install-host-exec | check-host-exec | uninstall | build-only
+# Root modes run through scripts/guard-root-exec when invoked from the
+# Makefile. The sealed tree, dpkg-divert slots, and /usr/lib/git-core
+# exec-path guard follow the same scheme as install-shell-guard.
+set -euo pipefail
+
+_SELF="${BASH_SOURCE[0]:-$0}"
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+_SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
+_REPO_ROOT="$(cd "$_SCRIPT_DIR/.." && pwd)"
+# The CI artifact provides the Rust toolchain only. Never the guard checkout.
+_CI_ROOT="${CI_DIR:-/opt/workspace-ci}"
+
+_guard_dir="${WORKSPACE_GUARD_ROOT:-$_REPO_ROOT}"
+# Workspace root derives from the GUARD checkout, not the CI copy: the
+# deployed bootstrap lives under /opt, where ../.. resolves to "/".
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(cd "${_guard_dir}/../.." && pwd)}"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+
+MODE="${1:-install-host-exec}"  # install-host-exec | check-host-exec | uninstall | build-only
+
+_guard_removed_target_error() {
+    local removed_target="$1" replacement="$2"
+    log_error "make $removed_target is removed. Use: make $replacement"
+    exit 1
+}
+
+divert_is_active() {
+    dpkg-divert --list /usr/bin/git | grep -q 'sealed/pkg/git$'
+}
+
+_git_core_divert_is_active() {
+    dpkg-divert --list /usr/lib/git-core/git | grep -q 'sealed/pkg/git-core/git$'
+}
+
+# Undo the exec-path guard: drop the guard symlink and restore the real
+# git binary behind a still-active dpkg-divert (or from git.distrib).
+_restore_git_core() {
+    local core=/usr/lib/git-core/git distrib=/usr/lib/workspace-guard/sealed/pkg/git-core/git
+    [[ -e "$core" || -e "$distrib" ]] || return 0
+    if _has_chattr && [[ -e "$core" ]]; then
+        _guard_attempt chattr -i "$core"
+    fi
+    if [[ -L "$core" ]]; then
+        rm -f "$core"
+    fi
+    if _git_core_divert_is_active; then
+        _guard_attempt dpkg-divert --rename --remove /usr/lib/git-core/git
+    elif [[ -f "$distrib" && ! -e "$core" ]]; then
+        mv -f "$distrib" "$core"
+    fi
+    if [[ -e "$core" ]]; then
+        chown root:root "$core"
+        chmod 0755 "$core"
+        _guard_attempt setcap -r "$core"
+    fi
+    _guard_attempt setcap -r "$distrib"
+    log_info "Restored /usr/lib/git-core/git"
+}
+
+_has_chattr() {
+    local _path=""
+    _path="$(command -v chattr 2>&1)" && return 0
+    return 1
+}
+
+_has_func() {
+    local _func="$1" _out=""
+    _out="$(declare -F "$_func" 2>&1)" && return 0
+    return 1
+}
+
+guard_is_installed() {
+    [[ -f /usr/lib/workspace-guard/sealed/git ]] \
+        || divert_is_active \
+        || _git_core_divert_is_active \
+        || [[ -f /usr/lib/workspace-guard/deployment-class ]]
+}
+
+_restore_stock_git() {
+    if _has_chattr; then
+        test -f /usr/bin/git       && chattr -i /usr/bin/git
+        test -f /usr/lib/workspace-guard/sealed/git && chattr -i /usr/lib/workspace-guard/sealed/git
+    fi
+    rm -f /usr/bin/git
+    if divert_is_active; then
+        dpkg-divert --rename --remove /usr/bin/git
+        log_info "Removed dpkg-divert"
+    fi
+    if [[ -f /usr/lib/workspace-guard/sealed/git ]]; then
+        mv /usr/lib/workspace-guard/sealed/git /usr/bin/git
+        chown root:root /usr/bin/git
+        chmod 0755 /usr/bin/git
+        _guard_attempt setcap -r /usr/bin/git
+        log_info "Restored /usr/bin/git from git.original"
+    elif [[ -f /usr/lib/workspace-guard/sealed/pkg/git ]]; then
+        mv /usr/lib/workspace-guard/sealed/pkg/git /usr/bin/git
+        chown root:root /usr/bin/git
+        chmod 0755 /usr/bin/git
+        _guard_attempt setcap -r /usr/bin/git
+        log_info "Restored /usr/bin/git from git.distrib"
+    else
+        log_error "No git backup found: cannot restore"
+        log_error "Reinstall git: sudo apt install --reinstall git"
+        return 1
+    fi
+    _restore_git_core
+    return 0
+}
+
+_cleanup_git_guard_sidecars() {
+    if _has_func guard_scrub_pam_artifacts; then
+        guard_scrub_pam_artifacts || {
+            local _scrub_rc=$?
+            printf 'guard optional scrub failed (status=%s)\n' "$_scrub_rc" >&2
+        }
+    fi
+    rm -f /etc/apt/apt.conf.d/99workspace-guard
+    rm -f /etc/apt/apt.conf.d/99git-guard
+    if _has_func guard_remove_git_install_artifacts; then
+        guard_remove_git_install_artifacts
+    fi
+    rm -rf /usr/lib/ami-git-guard
+    rm -rf /var/log/workspace-guard
+    rm -rf /var/log/ami-git-guard
+}
+
+uninstall_guard() {
+    local state_dir="/usr/lib/workspace-guard"
+    if _has_func guard_state_dir; then
+        state_dir="$(guard_state_dir)"
+    fi
+    log_info "Uninstalling git guard (preserving host provision state under $state_dir)..."
+    if ! guard_is_installed; then
+        log_info "Git guard not installed; removing git-install artifacts only"
+        if _has_chattr; then
+            [[ -f /usr/bin/git ]] && _guard_attempt chattr -i /usr/bin/git
+            [[ -f /usr/lib/workspace-guard/sealed/git ]] && _guard_attempt chattr -i /usr/lib/workspace-guard/sealed/git
+        fi
+        _cleanup_git_guard_sidecars
+        if [[ -x /usr/bin/git ]]; then
+            _guard_attempt setcap -r /usr/bin/git
+        fi
+        _restore_git_core
+        log_info "Cleanup complete (provision state preserved)"
+        git --version
+        return 0
+    fi
+    _restore_stock_git || return 1
+    _cleanup_git_guard_sidecars
+    log_info "Git guard uninstalled: stock /usr/bin/git restored; provision state preserved"
+    git --version
+}
+
+rollback_guard() {
+    log_warn "Installation failed: rolling back..."
+    if _has_chattr; then
+        if [[ -f /usr/bin/git ]]; then
+            status=0; chattr -i /usr/bin/git || status=$?
+            if [ $status -ne 0 ]; then
+                echo "chattr -i /usr/bin/git: no-op or failed (status=$status)" >&2
+            fi
+        fi
+        if [[ -f /usr/lib/workspace-guard/sealed/git ]]; then
+            status=0; chattr -i /usr/lib/workspace-guard/sealed/git || status=$?
+            if [ $status -ne 0 ]; then
+                echo "chattr -i /usr/lib/workspace-guard/sealed/git: no-op or failed (status=$status)" >&2
+            fi
+        fi
+    fi
+    rm -f /usr/bin/git
+    if divert_is_active; then
+        status=0; dpkg-divert --rename --remove /usr/bin/git || status=$?
+        if [ $status -ne 0 ]; then
+            echo "dpkg-divert --remove /usr/bin/git: no-op or failed (status=$status)" >&2
+        fi
+    fi
+    if [[ -f /usr/lib/workspace-guard/sealed/git ]]; then
+        if _has_chattr; then
+            status=0; chattr -i /usr/lib/workspace-guard/sealed/git || status=$?
+            if [ $status -ne 0 ]; then
+                echo "chattr -i /usr/lib/workspace-guard/sealed/git: no-op or failed (status=$status)" >&2
+            fi
+        fi
+        mv /usr/lib/workspace-guard/sealed/git /usr/bin/git
+        chown root:root /usr/bin/git
+        chmod 0755 /usr/bin/git
+        _guard_attempt setcap -r /usr/bin/git
+        log_info "Restored /usr/bin/git from git.original"
+    elif [[ -f /usr/lib/workspace-guard/sealed/pkg/git ]]; then
+        mv /usr/lib/workspace-guard/sealed/pkg/git /usr/bin/git
+        chown root:root /usr/bin/git
+        chmod 0755 /usr/bin/git
+        _guard_attempt setcap -r /usr/bin/git
+        log_info "Restored /usr/bin/git from git.distrib"
+    fi
+    rm -f /etc/apt/apt.conf.d/99workspace-guard
+    if _has_func guard_remove_git_install_artifacts; then
+        guard_remove_git_install_artifacts
+    else
+        rm -rf /usr/lib/workspace-guard
+    fi
+    _restore_git_core
+}
+
+_run_guard_install_with_drift_check() {
+    local guard_bin="${1:-}"
+    if [[ -z "$guard_bin" ]]; then
+        guard_bin="$(_resolve_guard_bin)" || {
+            log_error "Guard binary not found; run make build-guard first"
+            return 1
+        }
+    fi
+    local -a _drift=()
+    if [[ "${GUARD_FORCE_RECONCILE:-}" == "1" ]]; then
+        log_info "GUARD_FORCE_RECONCILE=1: reconciling regardless of drift status"
+        export GUARD_RECONCILE=1
+    else
+        _guard_read_lines _drift guard_install_drift_reasons "$guard_bin"
+        if [[ ${#_drift[@]} -eq 0 ]]; then
+            log_info "Git guard healthy; nothing to do."
+            return 0
+        fi
+        log_warn "Git guard drift detected; reconciling:"
+        printf '  - %s\n' "${_drift[@]}"
+        export GUARD_RECONCILE=1
+    fi
+    install_guard_binary "$guard_bin" || return 1
+}
+
+# Source the build and install helpers from scripts/lib/. These depend
+# on globals defined above (WORKSPACE_ROOT, _CI_ROOT, _guard_dir, CYAN,
+# BOLD, RED, NC, log_*, divert_is_active, rollback_guard) and inherit
+# `set -euo pipefail`.
+# Use `source ... || exit 1` per AGENTS.md Rule 14 (no bare source).
+# shellcheck source=lib/guard-build.sh
+source "$_SCRIPT_DIR/lib/guard-build.sh" || exit 1
+# shellcheck source=lib/guard-drift.sh
+source "$_SCRIPT_DIR/lib/guard-drift.sh" || exit 1
+# shellcheck source=lib/guard-host-exec.sh
+source "$_SCRIPT_DIR/lib/guard-host-exec.sh" || exit 1
+# shellcheck source=lib/guard-install.sh
+source "$_SCRIPT_DIR/lib/guard-install.sh" || exit 1
+
+install_guard() {
+    build_guard_binary || return 1
+    _run_guard_install_with_drift_check "$GUARD_BIN" || return 1
+}
+
+check_guard() {
+    local ref_bin=""
+    ref_bin="$(_guard_capture_line _resolve_guard_bin)"
+    local -a _drift=()
+    _guard_read_lines _drift guard_install_drift_reasons "$ref_bin"
+
+    if [[ ${#_drift[@]} -eq 0 ]]; then
+        log_info "Rust guard status: HEALTHY"
+        if [[ -f /usr/bin/git ]]; then
+            log_info "  /usr/bin/git: $(stat -c '%a %U:%G' /usr/bin/git)"
+        fi
+        if [[ -f /usr/lib/workspace-guard/sealed/git ]]; then
+            log_info "  /usr/lib/workspace-guard/sealed/git: $(stat -c '%a %U:%G' /usr/lib/workspace-guard/sealed/git)"
+        fi
+        local _mode _cls
+        _mode="$(_guard_reference_mode "$ref_bin")"
+        _cls="$(_guard_capture_line guard_read_deployment_class)"
+        log_info "  mode: $_mode"
+        [[ -n "$_cls" ]] && log_info "  deployment-class: $_cls"
+        return 0
+    fi
+
+    if [[ "${_drift[0]}" == "guard not installed:"* ]]; then
+        log_info "Rust guard status: NOT INSTALLED"
+    else
+        log_info "Rust guard status: DRIFTED"
+    fi
+    log_warn "Drift items:"
+    printf '  - %s\n' "${_drift[@]}"
+    log_info "Fix: sudo make guard-refresh"
+}
+
+case "$MODE" in
+    uninstall) uninstall_guard ;;
+    check-host-exec) check_guard ;;
+    check) _guard_removed_target_error check-guard check-guard-host-exec ;;
+    build-only) build_guard_binary ;;
+    install-host-exec)
+        GUARD_BIN="$(_resolve_guard_bin)" || {
+            log_error "Guard binary not found; make build-guard should run first"
+            exit 1
+        }
+        _run_guard_install_with_drift_check "$GUARD_BIN"
+        ;;
+    install-only|install|reinstall)
+        _guard_removed_target_error install-guard install-guard-host-exec
+        ;;
+    *) log_error "Unknown mode: $MODE"; exit 1 ;;
+esac

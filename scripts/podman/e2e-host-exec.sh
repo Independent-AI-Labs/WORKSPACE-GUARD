@@ -17,8 +17,8 @@ _CI_ROOT="${CI_ROOT:-/projects/WORKSPACE-CI}"
 _GUARD_ROOT="${GUARD_ROOT:-$(hp_e2e_guard_root)}"
 _TEST_HOST="workspace-guard-test"
 
-if [[ ! -f "$_CI_ROOT/scripts/bootstrap-workspace-guard" ]]; then
-    echo "ERROR: bootstrap-workspace-guard not found at $_CI_ROOT" >&2
+if [[ ! -f "$_GUARD_ROOT/scripts/install-git-guard" ]]; then
+    echo "ERROR: scripts/install-git-guard not found at $_GUARD_ROOT" >&2
     exit 1
 fi
 
@@ -102,13 +102,13 @@ if [[ -f /etc/security/capability.conf ]] \
 fi
 echo "PASS: no pam_cap artifacts in capability.conf"
 
-_orig_mode="$(stat -c '%a' /usr/bin/git.original)"
-_orig_owner="$(stat -c '%U:%G' /usr/bin/git.original)"
+_orig_mode="$(stat -c '%a' /usr/lib/workspace-guard/sealed/git)"
+_orig_owner="$(stat -c '%U:%G' /usr/lib/workspace-guard/sealed/git)"
 if [[ "$_orig_mode" != "700" || "$_orig_owner" != "root:root" ]]; then
-    echo "ERROR: git.original permissions wrong: $_orig_mode $_orig_owner" >&2
+    echo "ERROR: sealed/git permissions wrong: $_orig_mode $_orig_owner" >&2
     exit 1
 fi
-echo "PASS: git.original is 0700 root:root"
+echo "PASS: sealed/git is 0700 root:root"
 
 echo "==> Tier 3: sanity check tests as $HP_E2E_AGENT_USER (runuser)..."
 tmpdir="$(mktemp -d)"
@@ -142,6 +142,15 @@ else
     echo "WARN: .git is $_git_owner (expected root:root); gitdir lock may not apply in Podman"
     echo "PASS: Podman gitdir ownership lock skipped (container limitation)"
 fi
+_rev_rc=0
+_rev_out="$(git rev-parse --show-toplevel 2>&1)" || _rev_rc=$?
+printf '%s\n' "$_rev_out"
+if [[ $_rev_rc -ne 0 ]] || [[ "$_rev_out" == *"dubious ownership"* ]]; then
+    echo "ERROR: git rev-parse failed in a root-locked repo (safe.directory injection missing)" >&2
+    exit 1
+fi
+echo "PASS: agent git rev-parse works in a root-locked repo"
+
 _reset_rc=0
 _reset_out="$(git reset --hard 2>&1)" || _reset_rc=$?
 printf '%s\n' "$_reset_out"
@@ -151,13 +160,13 @@ if [[ $_reset_rc -eq 0 ]]; then
 fi
 echo "PASS: agent git reset --hard blocked"
 _orig_rc=0
-_orig_out="$(/usr/bin/git.original --version 2>&1)" || _orig_rc=$?
+_orig_out="$(/usr/lib/workspace-guard/sealed/git --version 2>&1)" || _orig_rc=$?
 printf '%s\n' "$_orig_out"
 if [[ $_orig_rc -eq 0 ]]; then
-    echo "ERROR: agent could execute /usr/bin/git.original" >&2
+    echo "ERROR: agent could execute /usr/lib/workspace-guard/sealed/git" >&2
     exit 1
 fi
-echo "PASS: agent cannot execute git.original"
+echo "PASS: agent cannot execute sealed/git"
 EOS
 chmod 755 "$_agent_check"
 runuser -u "$HP_E2E_AGENT_USER" -- bash "$_agent_check" "$tmpdir"
@@ -165,11 +174,88 @@ rm -f "$_agent_check"
 rm -rf "$tmpdir"
 cd "$_GUARD_ROOT"
 
+echo "==> Tier 3: upstream pull/rebase E2E (REQ-GGUARD-061/064)..."
+_upstream_base="$(mktemp -d)"
+chmod 755 "$_upstream_base"
+chown -R "$HP_E2E_AGENT_USER:$HP_E2E_AGENT_USER" "$_upstream_base"
+_upstream_check="$(mktemp)"
+cat > "$_upstream_check" <<'EOS'
+set -euo pipefail
+base="$1"
+
+git init -q --bare "$base/remote.git"
+
+git init -q -b main "$base/src"
+cd "$base/src"
+echo one > f.txt
+git add f.txt
+git commit -q -m "one"
+git push -q "$base/remote.git" main
+
+# A diverged clone (local commit) and a clean clone (fast-forwardable).
+git clone -q "$base/remote.git" "$base/clone"
+git clone -q "$base/remote.git" "$base/clone2"
+
+cd "$base/src"
+echo two > g.txt
+git add g.txt
+git commit -q -m "two"
+git push -q "$base/remote.git" main
+
+# REQ-GGUARD-064: pull --rebase on a diverged branch must not deadlock on
+# the rebase child Git forks through the guarded exec-path.
+cd "$base/clone"
+echo local > local.txt
+git add local.txt
+git commit -q -m "local"
+git pull --rebase origin main
+echo "PASS: agent git pull --rebase succeeded on diverged branch"
+
+# REQ-GGUARD-061: pull --ff-only still fast-forwards.
+cd "$base/clone2"
+git pull --ff-only origin main
+echo "PASS: agent git pull --ff-only succeeded"
+
+# A direct rebase stays blocked. Authorization is structural (the parent must
+# be sealed/git running pull --rebase), so no caller-set environment variable
+# can re-enable one (REQ-GGUARD-064).
+cd "$base/clone"
+_rebase_rc=0
+_rebase_out="$(git rebase main 2>&1)" || _rebase_rc=$?
+printf '%s\n' "$_rebase_out"
+if [[ $_rebase_rc -eq 0 ]]; then
+    echo "ERROR: direct git rebase was not blocked" >&2
+    exit 1
+fi
+echo "PASS: direct git rebase blocked"
+_onto_rc=0
+_onto_out="$(git rebase --onto main HEAD~1 2>&1)" || _onto_rc=$?
+printf '%s\n' "$_onto_out"
+if [[ $_onto_rc -eq 0 ]]; then
+    echo "ERROR: direct git rebase --onto was not blocked" >&2
+    exit 1
+fi
+echo "PASS: direct git rebase --onto blocked"
+_forged_rc=0
+_forged_out="$(WORKSPACE_GUARD_APPROVED_REBASE=1 WORKSPACE_GUARD_SESSION=1 git rebase main 2>&1)" || _forged_rc=$?
+printf '%s\n' "$_forged_out"
+if [[ $_forged_rc -eq 0 ]]; then
+    echo "ERROR: forged approval marker allowed a direct rebase" >&2
+    exit 1
+fi
+echo "PASS: forged approval marker rejected"
+EOS
+chmod 755 "$_upstream_check"
+runuser -u "$HP_E2E_AGENT_USER" -- bash "$_upstream_check" "$_upstream_base"
+rm -f "$_upstream_check"
+rm -rf "$_upstream_base"
+cd "$_GUARD_ROOT"
+
 echo "==> Tier 3: policy-matrix E2E..."
 bash scripts/podman/e2e-policy-matrix.sh
 
 echo "==> Tier 3: uninstalling guard..."
-bash "$_CI_ROOT/scripts/bootstrap-workspace-guard" uninstall
+CI_DIR="$_CI_ROOT" WORKSPACE_GUARD_ROOT="$_GUARD_ROOT" bash "$_GUARD_ROOT/scripts/install-git-guard" uninstall
 
 hp_e2e_cleanup
 echo "==> Tier 3 complete"

@@ -523,23 +523,25 @@ requirement decisions.
 
 ## REQ-GGUARD-061: Protected Pull Effective Mode
 
-- [ ] Replace monotonic `safe_pull_flag` and global `starts_with` checks with a
+- [x] Replace monotonic `safe_pull_flag` and global `starts_with` checks with a
   command-specific ordered pull option state parsed after subcommand discovery.
-- [ ] Track final fast-forward mode so later `--ff` or `--no-ff` overrides an
+- [x] Track final fast-forward mode so later `--ff` or `--no-ff` overrides an
   earlier `--ff-only`, and a later `--ff-only` restores safe mode.
-- [ ] Track final rebase mode so `-r`, `--rebase`, and pinned-Git-supported
+- [x] Track final rebase mode so `-r`, `--rebase`, and pinned-Git-supported
   non-false values enable it while `--rebase=false` and `--no-rebase` disable it.
-- [ ] Allow a catalog-protected pull only when either final effective mode is
+- [x] Allow a catalog-protected pull only when either final effective mode is
   safe; keep the rule identical for root and non-root.
 - [ ] Consume pull option values, short clusters, accepted long abbreviations,
   repository/refspec operands, and `--` according to the pinned Git grammar.
+  (Required-arg value consumption is done; long-option abbreviations and
+  arbitrary short clusters remain.)
 - [ ] Keep safe-mode selection explicit in argv; add tests proving
   `pull.ff=only` or `pull.rebase=true` configuration alone does not satisfy the
   policy.
-- [ ] Add ordered blocked cases for `--rebase --no-rebase`,
+- [x] Add ordered blocked cases for `--rebase --no-rebase`,
   `--ff-only --no-ff`, `--ff-only --ff`, `--rebase=false`, no safe option, and
   safe-looking option values or post-`--` operands.
-- [ ] Add ordered allowed cases for `--ff-only`, `-r`, `--rebase`, every
+- [x] Add ordered allowed cases for `--ff-only`, `-r`, `--rebase`, every
   supported non-false rebase value, safe options after earlier negations, and
   combinations where either final mode remains safe.
 - [ ] Add malformed near-match controls such as `--rebase-other` and
@@ -550,23 +552,23 @@ requirement decisions.
 
 ## REQ-GGUARD-062: Protected Merge Effective Mode
 
-- [ ] Replace `has_ff_only` and `has_merge_abort` token scans with one
+- [x] Replace `has_ff_only` and `has_merge_abort` token scans with one
   command-specific ordered merge parser after exact subcommand discovery.
-- [ ] Track final FF mode so later `--ff` or `--no-ff` overrides an earlier
+- [x] Track final FF mode so later `--ff` or `--no-ff` overrides an earlier
   `--ff-only`, and a later `--ff-only` restores safe mode.
-- [ ] Recognize actual `--abort` and `--quit` recovery modes as non-root safe;
+- [x] Recognize actual `--abort` and `--quit` recovery modes as non-root safe;
   keep `--continue` and ordinary non-FF-only merges restricted to verified root.
-- [ ] Consume merge value-taking options before policy classification so
+- [x] Consume merge value-taking options before policy classification so
   `-m --ff-only`, `-m --abort`, strategy values, and strategy-option values
   cannot create safety state.
 - [ ] Parse accepted long abbreviations, option ordering, merge heads, and the
   applicable `--` according to the pinned Git grammar.
 - [ ] Keep FF-only selection explicit in argv; add tests proving
   `merge.ff=only` configuration alone does not authorize a non-root merge.
-- [ ] Add blocked non-root cases for no safe mode, `--ff-only --ff`,
+- [x] Add blocked non-root cases for no safe mode, `--ff-only --ff`,
   `--ff-only --no-ff`, `--continue`, safe-looking option values, and
   post-separator option-like operands.
-- [ ] Add allowed non-root cases for exact/abbreviated `--ff-only`, safe mode
+- [x] Add allowed non-root cases for exact/abbreviated `--ff-only`, safe mode
   after earlier overrides, `--abort`, and `--quit`; run corresponding ordinary
   merge cases through the verified-root path.
 - [ ] Add malformed near-match controls that reach Git's own diagnostic without
@@ -1436,10 +1438,9 @@ requirement decisions.
 - [ ] Remove unused direct `serde_json` from the broad root manifest; if another
   non-Git package still brings it transitively, classify it only in that
   package's closure and prove it is absent from the isolated Git guard.
-- [ ] Keep only `serde`, `serde_yaml`, and `regex` as isolated direct build
+- [ ] Keep only `serde`, `noyalib`, and `regex` as isolated direct build
   dependencies, minimize and pin their reviewed features, and inventory every
-  transitive normal/build/proc-macro edge including `serde_derive` and
-  `unsafe-libyaml`.
+  transitive normal/build/proc-macro edge including `serde_derive`.
 - [ ] Set Cargo resolver 2 and define capability/root-only features so exactly one
   must be selected; capability mode includes exactly one approved locked `caps`
   version and root-only mode has no `caps` edge.

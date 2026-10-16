@@ -51,7 +51,7 @@ fn resolve_toplevel_returns_none_outside_any_repo() {
 
 #[test]
 fn git_dir_env_vars_stay_out_of_allowed_vars() {
-    // execve_real_git only forwards ALLOWED_VARS to git.original, and
+    // execve_real_git only forwards ALLOWED_VARS to sealed/git, and
     // resolve_toplevel spawns with env_clear: both sides agree that
     // GIT_DIR/GIT_WORK_TREE never influence which repo a commit hits.
     // If config ever re-adds them, the resolver and the exec env would
@@ -111,7 +111,7 @@ fn raise_ambient_caps_matches_kernel_inheritable_rule() {
 
 #[test]
 fn verify_git_original_returns_error_when_missing() {
-    if std::path::Path::new("/usr/bin/git.original").exists() {
+    if std::path::Path::new(crate::GIT_ORIGINAL_PATH).exists() {
         return;
     }
     assert!(verify_git_original().is_err());

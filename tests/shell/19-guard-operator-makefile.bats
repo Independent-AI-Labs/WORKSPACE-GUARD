@@ -31,20 +31,20 @@ teardown() { guard_teardown; }
     assert_output --partial "guard-operator.sh 'refresh'"
 }
 
-@test "guard build removes stale binaries before invoking the deployment helper" {
+@test "guard build removes stale binaries before invoking the local git installer" {
     local recipe
     recipe="$(make -n build-guard 2>&1)"
     [[ "$recipe" == *'rm -f '*'/target/release/workspace-guard'* ]]
-    [[ "$recipe" == *'bootstrap-workspace-guard" build-only'* ]]
-    [[ "${recipe%%bootstrap-workspace-guard*}" == *'rm -f '* ]]
+    [[ "$recipe" == *'scripts/install-git-guard build-only'* ]]
+    [[ "${recipe%%install-git-guard build-only*}" == *'rm -f '* ]]
 }
 
-@test "guard install verifies deployed bytes after the deployment helper" {
+@test "guard install runs the local installer via guard-root-exec, then verifies" {
     local recipe
     recipe="$(make -n GUARD_SKIP_BUILD=1 install-guard-host-exec 2>&1)"
-    [[ "$recipe" == *'bootstrap-workspace-guard" install-host-exec'* ]]
+    [[ "$recipe" == *'scripts/guard-root-exec scripts/install-git-guard install-host-exec'* ]]
     [[ "$recipe" == *'scripts/check-guard-host-exec-readonly'* ]]
-    [[ "${recipe#*install-host-exec}" == *'scripts/check-guard-host-exec-readonly'* ]]
+    [[ "${recipe#*install-git-guard install-host-exec}" == *'scripts/check-guard-host-exec-readonly'* ]]
 }
 
 @test "guard-operator does not trigger the alternate rc shell rule" {
@@ -117,8 +117,8 @@ teardown() { guard_teardown; }
     grep -q '^install-shell-guard:' "$mk"
     grep -q '^uninstall-shell-guard:' "$mk"
     grep -q '^shell-guard-check:' "$mk"
-    grep -q 'SCRIPT_BASH) scripts/install-shell-guard' "$mk"
-    grep -q 'SCRIPT_BASH) scripts/uninstall-shell-guard' "$mk"
+    grep -q 'guard-root-exec scripts/install-shell-guard' "$mk"
+    grep -q 'guard-root-exec scripts/uninstall-shell-guard' "$mk"
     grep -q 'SCRIPT_BASH) scripts/shell-guard-check' "$mk"
     grep -q '^build-shell-guard:' "$mk"
 }
@@ -157,4 +157,29 @@ teardown() { guard_teardown; }
     local mk="$GUARD_ROOT/Makefile"
     grep -q 'scripts/podman/run-shell-tests.sh' "$mk"
     ! grep -q '#!/bin/bash.real' "$mk"
+}
+
+@test "guard-root-exec mirrors the repo so a staged script resolves its root" {
+    [ "$(id -u)" = 0 ] || skip "guard-root-exec needs root"
+    local fix="$BATS_TEST_TMPDIR/repo"
+    mkdir -p "$fix/scripts/lib" "$fix/res"
+    printf 'RES_MARKER=x\n' >"$fix/res/marker.yaml"
+    printf 'LIB_OK=1\n' >"$fix/scripts/lib/probe-lib.sh"
+    cat >"$fix/scripts/probe.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+_SELF="${BASH_SOURCE[0]}"
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/lib/probe-lib.sh"
+[ "$LIB_OK" = 1 ]
+echo "ROOT=$REPO_ROOT"
+echo "RES=$(cat "$REPO_ROOT/res/marker.yaml")"
+EOF
+    chmod +x "$fix/scripts/probe.sh"
+    run bash "$GUARD_ROOT/scripts/guard-root-exec" "$fix/scripts/probe.sh"
+    assert_success
+    assert_output --partial "ROOT=/var/lib/workspace-guard"
+    assert_output --partial "RES=RES_MARKER=x"
 }

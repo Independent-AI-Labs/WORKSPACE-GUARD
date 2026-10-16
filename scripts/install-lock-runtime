@@ -2,11 +2,13 @@
 # install-lock-runtime: root-only contain-via-guard installer.
 #
 # Implements docs/specifications/SPEC-BINARY-LOCK.md section 4.2:
-# seals the original SUID binary as <path>.real (0700 root:root,
-# chattr +i), stages the generic guard binary, dpkg-diverts the
-# original to <path>.distrib, then atomic-mv replaces <path> with
-# the pre-staged guard so <path> is never empty for more than one
-# rename operation. Records state for uninstall-lock-runtime.
+# seals the original binary into the shared sealed tree
+# (/usr/lib/workspace-guard/sealed/<basename>, 0700 root:root, chattr +i),
+# stages the generic guard binary, dpkg-diverts the original to the sealed
+# package slot (/usr/lib/workspace-guard/sealed/pkg/<basename>), then
+# atomic-mv replaces <path> with the pre-staged guard so <path> is never
+# empty for more than one rename operation. Records state for
+# uninstall-lock-runtime.
 #
 # Idempotent: re-running on an already-locked host detects completed
 # paths and skips them. State lives under /usr/lib/workspace-binary-guard/.
@@ -24,10 +26,16 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF="${BASH_SOURCE[0]}"
+# When the shell guard stages this script into a memfd, BASH_SOURCE no longer
+# names the real file; the guard publishes the original in SHG_SCRIPT_PATH.
+case "$_SELF" in /proc/self/fd/*) _SELF="${SHG_SCRIPT_PATH:-$_SELF}" ;; esac
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$REPO_ROOT/res/binary-lock.yaml"
 source "$SCRIPT_DIR/lib/runtime_state.sh" || exit 1
+# shellcheck source=lib/sealed-paths.sh
+source "$SCRIPT_DIR/lib/sealed-paths.sh" || exit 1
 init_binary_guard_runtime_state "$REPO_ROOT"
 STATE_FILE="$(binary_lock_state_file)"
 LOG_FILE="/var/log/workspace-binary-guard-install.log"
@@ -63,8 +71,9 @@ while [[ $# -gt 0 ]]; do
             cat <<EOF
 Usage: $0 [--dry-run]
 Apply contain-via-guard per res/binary-lock.yaml (SPEC-BINARY-LOCK 4.2).
-Root-only. Seals <path>.real (0700 root:root, chattr +i) and configures
-dpkg-divert. Per-binary Rust guard install is a separate stage.
+Root-only. Seals the original into /usr/lib/workspace-guard/sealed
+(0700 root:root, chattr +i) and configures dpkg-divert. Per-binary Rust
+guard install is a separate stage.
 Exit: 0 ok, 1 containment failure (rolled back), 2 not root/missing config,
       3 chattr immutable flag could not be applied.
 EOF
@@ -108,7 +117,8 @@ _surface_paths=() _real_paths=()
 while IFS= read -r _p; do
     [[ -z "$_p" ]] && continue
     [[ -f "$_p" ]] && _surface_paths+=("$_p")
-    [[ -f "${_p}.real" ]] && _real_paths+=("${_p}.real")
+    _rp="$(sealed_path "$_p")"
+    [[ -f "$_rp" ]] && _real_paths+=("$_rp")
 done < "$lock_surface_tmp"
 
 # Batch probes capture stdout first (keeping partial output when some
@@ -270,19 +280,28 @@ unseal_divert_target() {
 }
 
 # rollback PATH: undo any partial state for this path. Idempotent.
-# If $path is the guard binary, restore the original from .real.
+# If $path is the guard binary, restore the original from the sealed copy.
 rollback_path() {
-    local p="$1" rc=0
-    if [[ "$HAVE_CHATTR" -eq 1 && -f "${p}.real" ]]; then
-        chattr -i "${p}.real" 2>"$DEVNULL" || rc=$?
+    local p="$1" rc=0 real legacy_real
+    real="$(sealed_path "$p")"
+    legacy_real="${p}.real"
+    if [[ "$HAVE_CHATTR" -eq 1 && -f "$real" ]]; then
+        chattr -i "$real" 2>"$DEVNULL" || rc=$?
     fi
-    # If $path is the guard (contains sentinel), restore original from .real.
-    if [[ -f "${p}.real" && -f "$p" ]] && grep -qa "workspace-guard" "$p" 2>"$DEVNULL"; then
-        cp -a --preserve=all "${p}.real" "$p" 2>"$DEVNULL" || rc=$?
+    if [[ "$HAVE_CHATTR" -eq 1 && -f "$legacy_real" ]]; then
+        chattr -i "$legacy_real" 2>"$DEVNULL" || rc=$?
+    fi
+    # If $path is the guard (contains sentinel), restore the original.
+    if [[ -f "$real" && -f "$p" ]] && grep -qa "workspace-guard" "$p" 2>"$DEVNULL"; then
+        cp -a --preserve=all "$real" "$p" 2>"$DEVNULL" || rc=$?
+        chown root:root "$p" 2>"$DEVNULL" || rc=$?
+        chmod 4755 "$p" 2>"$DEVNULL" || rc=$?
+    elif [[ -f "$legacy_real" && -f "$p" ]] && grep -qa "workspace-guard" "$p" 2>"$DEVNULL"; then
+        cp -a --preserve=all "$legacy_real" "$p" 2>"$DEVNULL" || rc=$?
         chown root:root "$p" 2>"$DEVNULL" || rc=$?
         chmod 4755 "$p" 2>"$DEVNULL" || rc=$?
     fi
-    rm -f "${p}.real" "${p}.guard_new"
+    rm -f "$real" "$legacy_real" "${p}.guard_new"
     if dpkg-divert --list "$p" 2>"$DEVNULL" | grep -q .; then
         unseal_divert_target "$p" || rc=$?
         dpkg-divert --remove --rename "$p" 2>"$DEVNULL" || rc=$?
@@ -304,9 +323,11 @@ while IFS= read -r path; do
         continue
     fi
 
-    real="${path}.real"
+    real="$(sealed_path "$path")"
+    legacy_real="${path}.real"
+    legacy_distrib="${path}.distrib"
 
-    # Idempotency: .real sealed (0700) AND $path is guard AND diverted.
+    # Idempotency: sealed copy (0700) AND $path is guard AND diverted.
     # All probes read the pre-collected batch arrays (no per-binary spawns).
     already=0
     if [[ -f "$real" ]]; then
@@ -346,7 +367,7 @@ while IFS= read -r path; do
     if [[ "$already" -eq 1 ]]; then continue; fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo "  WOULD: seal .real, stage guard, dpkg-divert, mv guard -> $path"
+        echo "  WOULD: seal original into $SEALED_DIR, stage guard, dpkg-divert, mv guard -> $path"
         CONTAINED=$((CONTAINED+1))
         continue
     fi
@@ -354,6 +375,20 @@ while IFS= read -r path; do
     # 3a. Capture pre-copy integrity of <path>.
     src_sha="$(sha256sum "$path" | awk '{print $1}')"
     src_mode="$(stat -c '%a' "$path")"
+
+    install -d -m 0700 -o root -g root "$SEALED_DIR"
+    install -d -m 0700 -o root -g root "$SEALED_PKG_DIR"
+
+    # Migrate an older <path>.real into the sealed tree before re-sealing.
+    if [[ ! -f "$real" && -f "$legacy_real" ]]; then
+        if [[ "$HAVE_CHATTR" -eq 1 ]]; then
+            if ! chattr -i "$legacy_real" 2>"$DEVNULL"; then
+                echo "  INFO: older $legacy_real had no immutable flag" >&2
+            fi
+        fi
+        mv -T "$legacy_real" "$real" 2>"$DEVNULL" || cp -a "$legacy_real" "$real"
+        rm -f "$legacy_real"
+    fi
 
     # 3b. Reset any partial state, then fresh copy.
     rollback_path "$path"
@@ -392,7 +427,7 @@ while IFS= read -r path; do
             imm_flag=true
         fi
     else
-        echo "  INFO: chattr not installed; .real will not be immutable" >&2
+        echo "  INFO: chattr not installed; sealed copy will not be immutable" >&2
     fi
 
     # 3g. Stage guard binary at <path>.guard_new (pre-stage BEFORE divert
@@ -412,7 +447,8 @@ while IFS= read -r path; do
     fi
 
     # 3h. dpkg-divert so apt upgrades leave <path> alone. --rename moves
-#     the original to <path>.distrib (required for package-owned
+# 3h. dpkg-divert so apt upgrades leave <path> alone. --rename moves
+#     the original to the sealed package slot (required for package-owned
 #     files). After this, <path> is briefly empty. The diverted copy
 #     is sealed in 3i'.
     div_flag=false
@@ -420,7 +456,7 @@ while IFS= read -r path; do
         if dpkg-divert --list "$path" 2>"$DEVNULL" | grep -q .; then
             div_flag=true
         else
-            if dpkg-divert --add --rename --divert "${path}.distrib" "$path" 2>"$DEVNULL"; then
+            if dpkg-divert --add --rename --divert "$(sealed_pkg_path "$path")" "$path" 2>"$DEVNULL"; then
                 div_flag=true
             else
                 echo "  WARN: dpkg-divert --add $path failed (apt may overwrite)" >&2
@@ -433,7 +469,7 @@ while IFS= read -r path; do
     # 3i. Atomic mv: <path>.guard_new -> <path>. Fills the brief gap
     #     left by dpkg-divert --rename. If dpkg-divert was skipped (no
     #     dpkg-divert or already diverted), this overwrites the original
-    #     in-place (original is already sealed in .real).
+    #     in-place (original is already sealed in the sealed tree).
     if ! mv "$guard_new" "$path"; then
         echo "  FAIL: mv $guard_new -> $path" >&2
         rollback_path "$path"; FAILED=$((FAILED+1)); continue

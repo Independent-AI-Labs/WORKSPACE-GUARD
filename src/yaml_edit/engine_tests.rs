@@ -4,7 +4,7 @@
 
 use super::engine;
 use super::engine::Spec;
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 
 fn sv(s: &str) -> Value {
     Value::String(s.to_string())
@@ -118,7 +118,9 @@ fn mixing_bare_with_named_fields_rejected() {
 fn matching_is_semantic_not_textual() {
     // Audit 1: the CI consumer iterated a string as chars; matching
     // must compare parsed structures, not substrings.
-    let entry: Value = serde_yaml::from_str("{hook: quality, paths: [b.py, a.py]}").expect("parse");
+    let entry: Value =
+        noyalib::compat::serde_yaml::from_str("{hook: quality, paths: [b.py, a.py]}")
+            .expect("parse");
     let specs = engine::parse_specs(&["hook=quality".to_string(), "paths=[a.py,b.py]".to_string()])
         .expect("specs");
     assert!(engine::specs_match_entry(&entry, &specs));
@@ -127,10 +129,11 @@ fn matching_is_semantic_not_textual() {
 #[test]
 fn matching_rejects_subset_and_type_mismatch() {
     let entry: Value =
-        serde_yaml::from_str("{hook: quality, paths: [a.py, b.py, c.py]}").expect("parse");
+        noyalib::compat::serde_yaml::from_str("{hook: quality, paths: [a.py, b.py, c.py]}")
+            .expect("parse");
     let specs = engine::parse_specs(&["paths=[a.py,b.py]".to_string()]).expect("specs");
     assert!(!engine::specs_match_entry(&entry, &specs));
-    let scalar: Value = serde_yaml::from_str("{paths: a.py}").expect("parse");
+    let scalar: Value = noyalib::compat::serde_yaml::from_str("{paths: a.py}").expect("parse");
     assert!(!engine::specs_match_entry(&scalar, &specs));
 }
 
@@ -143,7 +146,8 @@ fn bare_matching_compares_typed_values() {
 
 #[test]
 fn list_items_distinguishes_errors() {
-    let doc: Value = serde_yaml::from_str("exceptions: []\nscalar: 1\n").expect("parse");
+    let doc: Value =
+        noyalib::compat::serde_yaml::from_str("exceptions: []\nscalar: 1\n").expect("parse");
     assert!(engine::list_items(&doc, "exceptions").is_ok());
     assert_eq!(
         engine::list_items(&doc, "missing"),
@@ -161,7 +165,7 @@ fn list_items_distinguishes_errors() {
 
 #[test]
 fn dotted_keys_resolve_literal_first() {
-    let doc: Value = serde_yaml::from_str("a.b: 1\na:\n  b: 2\n").expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str("a.b: 1\na:\n  b: 2\n").expect("parse");
     let segs = engine::resolve_segments(&doc, "a.b").expect("segments");
     assert_eq!(segs, vec!["a.b".to_string()]);
     let v = engine::scalar_at(&doc, &segs).expect("scalar");
@@ -170,7 +174,7 @@ fn dotted_keys_resolve_literal_first() {
 
 #[test]
 fn dotted_keys_resolve_nested() {
-    let doc: Value = serde_yaml::from_str("outer:\n  inner: 7\n").expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str("outer:\n  inner: 7\n").expect("parse");
     let segs = engine::resolve_segments(&doc, "outer.inner").expect("segments");
     assert_eq!(segs, vec!["outer".to_string(), "inner".to_string()]);
     assert!(engine::resolve_segments(&doc, "outer.nope").is_none());
@@ -191,7 +195,7 @@ fn set_typed_value_rules() {
 
 #[test]
 fn unset_wildcard_removes_every_field() {
-    let doc: Value = serde_yaml::from_str(
+    let doc: Value = noyalib::compat::serde_yaml::from_str(
         "hooks:\n  - id: one\n    safety: true\n  - id: two\n    safety: false\n",
     )
     .expect("parse");
@@ -204,7 +208,8 @@ fn unset_wildcard_removes_every_field() {
 
 #[test]
 fn unset_supports_ordinary_dotted_maps() {
-    let doc: Value = serde_yaml::from_str("outer:\n  remove: true\n  keep: 1\n").expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str("outer:\n  remove: true\n  keep: 1\n")
+        .expect("parse");
     let (expected, concrete) = engine::unset_fields(&doc, "outer.remove").expect("unset");
     assert_eq!(concrete.len(), 1);
     assert!(expected["outer"].get("remove").is_none());
@@ -223,7 +228,7 @@ fn unset_failures_leave_the_input_unchanged() {
         ("outer:\n  keep: 1\n", "outer.missing"),
     ];
     for (raw, path) in cases {
-        let doc: Value = serde_yaml::from_str(raw).expect("parse");
+        let doc: Value = noyalib::compat::serde_yaml::from_str(raw).expect("parse");
         let before = doc.clone();
         assert!(
             engine::unset_fields(&doc, path).is_err(),
@@ -246,7 +251,7 @@ fn unset_resolves_file_path_keys_literal_first() {
     // manifest entries) contain dots and slashes; unset must resolve
     // the longest literal join, not split blindly.
     let raw = "files:\n  config/banned_words.yaml:\n    class: policy-definition\n  keep: 1\n";
-    let doc: Value = serde_yaml::from_str(raw).expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str(raw).expect("parse");
     let keep = doc.get("files").and_then(|f| f.get("keep")).cloned();
     let (expected, concrete) =
         engine::unset_fields(&doc, "files.config/banned_words.yaml").expect("literal-first unset");
@@ -270,7 +275,7 @@ fn unset_resolves_file_path_keys_literal_first() {
 #[test]
 fn unset_prefers_whole_literal_over_split_when_both_exist() {
     let raw = "a:\n  b: 1\na.b: 2\n";
-    let doc: Value = serde_yaml::from_str(raw).expect("parse");
+    let doc: Value = noyalib::compat::serde_yaml::from_str(raw).expect("parse");
     let nested = doc.get("a").and_then(|a| a.get("b")).cloned();
     let (expected, _) = engine::unset_fields(&doc, "a.b").expect("unset");
     // The literal key "a.b" wins (REQ-YE-204); nested a.b remains.

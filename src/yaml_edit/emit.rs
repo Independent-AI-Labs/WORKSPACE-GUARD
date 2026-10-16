@@ -7,7 +7,7 @@
 // a match-everything regex downstream. All output here is produced by
 // explicit type-aware rules, never by passing user text through:
 //
-//   - structural shape comes from the serde_yaml::Value, so a list is
+//   - structural shape comes from the noyalib::compat::serde_yaml::Value, so a list is
 //     always emitted as a list, even with one item;
 //   - scalars are single-quoted whenever a YAML 1.1 consumer (PyYAML,
 //     which the CI gates use) could resolve them as a non-string;
@@ -17,7 +17,7 @@
 // Values containing newlines are rejected upstream at spec parse
 // time, so every emitted line is exactly one output line.
 
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 
 /// True when `s` must be quoted so that a YAML 1.1 parser (PyYAML)
 /// still reads it as a string. Conservative: anything resembling a
@@ -121,7 +121,7 @@ pub fn render_scalar(v: &Value) -> String {
     match v {
         Value::String(s) => render_string(s),
         other => {
-            let raw = serde_yaml::to_string(other).unwrap_or_default();
+            let raw = noyalib::compat::serde_yaml::to_string(other).unwrap_or_default();
             raw.trim_end().to_string()
         }
     }
@@ -153,7 +153,7 @@ pub fn emit_kv(key: &str, value: &Value, indent: usize) -> Vec<String> {
         Value::Mapping(m) if !m.is_empty() => {
             let mut out = vec![format!("{pad}{k}:")];
             for (mk, mv) in m {
-                let mk = mk.as_str().unwrap_or_default();
+                let mk = mk.as_str();
                 out.extend(emit_kv(mk, mv, indent + 2));
             }
             out
@@ -171,7 +171,7 @@ pub fn emit_dash_item(v: &Value, indent: usize) -> Vec<String> {
         Value::Mapping(m) if !m.is_empty() => {
             let mut out = Vec::new();
             for (i, (mk, mv)) in m.iter().enumerate() {
-                let mk = mk.as_str().unwrap_or_default();
+                let mk = mk.as_str();
                 let lines = emit_kv(mk, mv, indent + 2);
                 for (j, line) in lines.into_iter().enumerate() {
                     if i == 0 && j == 0 {

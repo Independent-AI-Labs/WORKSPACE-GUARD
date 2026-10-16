@@ -23,6 +23,8 @@ mod policy_types;
 
 use policy_types::{find_policy, PolicyKind};
 
+include!("../../sealed_paths.rs");
+
 /// Exit codes. 126 = "found but not executable" (matches sh); we use it for
 /// "blocked by policy". 127 = "not found" (matches sh); we use it for "no
 /// policy for this basename" (fail-closed for binaries not in the catalog).
@@ -114,7 +116,21 @@ fn decide(
             }
         }
         PolicyKind::ArgValidate => {
-            if let Some(reason) = check_arg_validate(policy, invoked_name, argv_rest, is_root) {
+            if let Some(reason) = check_arg_validate(policy, invoked_name, argv_rest, is_root, true)
+            {
+                return Decision::Reject(reason);
+            }
+            let real = real_binary_path(invoked_name);
+            let env = build_sanitized_env(policy, is_root);
+            Decision::Allow {
+                real_path: real,
+                sanitized_env: env,
+            }
+        }
+        PolicyKind::ArgValidateAllUsers => {
+            if let Some(reason) =
+                check_arg_validate(policy, invoked_name, argv_rest, is_root, false)
+            {
                 return Decision::Reject(reason);
             }
             let real = real_binary_path(invoked_name);
@@ -140,8 +156,9 @@ fn check_arg_validate(
     invoked_name: &str,
     argv_rest: &[OsString],
     is_root: bool,
+    require_root: bool,
 ) -> Option<String> {
-    if !is_root {
+    if require_root && !is_root {
         return Some("arg-validate: invocation blocked (not root)".into());
     }
     let joined = join_argv(argv_rest);
@@ -227,24 +244,19 @@ fn join_argv(argv_rest: &[OsString]) -> String {
 }
 
 fn real_binary_path(invoked_name: &str) -> String {
-    let exe = env::current_exe()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| format!("/usr/bin/{}", invoked_name));
-    let candidate = format!("{}.real", exe);
+    let candidate = sealed_path(invoked_name);
     if Path::new(&candidate).exists() {
         return candidate;
     }
-    for dir in ["/usr/bin", "/usr/sbin", "/bin", "/sbin"] {
-        let p = format!("{}/{}", dir, invoked_name);
-        let real = format!("{}.real", p);
-        if Path::new(&real).exists() {
-            return real;
-        }
-        if Path::new(&p).exists() {
-            return p;
+    if let Ok(exe) = env::current_exe() {
+        if let Some(base) = exe.file_name().and_then(|b| b.to_str()) {
+            let alt = sealed_path(base);
+            if Path::new(&alt).exists() {
+                return alt;
+            }
         }
     }
-    exe
+    candidate
 }
 
 fn build_sanitized_env(

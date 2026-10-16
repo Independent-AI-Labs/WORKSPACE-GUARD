@@ -11,7 +11,7 @@
 //! Tests read files relative to CARGO_MANIFEST_DIR/.. (the repo root) so
 //! they are stable regardless of the cargo invocation cwd.
 
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 use std::collections::HashSet;
 use std::fs;
 
@@ -25,7 +25,8 @@ fn repo_path(rel: &str) -> String {
 fn load_yaml(rel: &str) -> Value {
     let raw =
         fs::read_to_string(repo_path(rel)).unwrap_or_else(|e| panic!("failed to read {rel}: {e}"));
-    serde_yaml::from_str(&raw).unwrap_or_else(|e| panic!("failed to parse {rel} as YAML: {e}"))
+    noyalib::compat::serde_yaml::from_str(&raw)
+        .unwrap_or_else(|e| panic!("failed to parse {rel} as YAML: {e}"))
 }
 
 /// Collect the top-level keys of a mapping at the given dotted path.
@@ -35,7 +36,7 @@ fn mapping_keys<'a>(root: &'a Value, key: &str) -> Vec<&'a str> {
         .unwrap_or_else(|| panic!("missing top-level key: {key}"))
         .as_mapping()
         .unwrap_or_else(|| panic!("`{key}` is not a mapping"));
-    map.keys().filter_map(|k| k.as_str()).collect()
+    map.keys().map(|k| k.as_str()).collect()
 }
 
 /// Pull the string list under each entry of a YAML sequence.
@@ -54,6 +55,7 @@ const VALID_POLICIES: &[&str] = &[
     "deny-non-root",
     "deny-all-non-root",
     "arg-validate",
+    "arg-validate-all",
     "pass-through",
 ];
 
@@ -298,10 +300,23 @@ fn binary_lock_non_null_paths_are_subset_of_suid_or_cap_baseline() {
     let cap_paths: HashSet<&str> = seq_strings(&fcap, "file_capabilities", "path")
         .into_iter()
         .collect();
+    // res/binary-lock-extras.yaml names guarded binaries that sit outside the
+    // live SUID/capability surface (e.g. podman). Their host path is supplied
+    // at sync time via BINARY_LOCK_EXTRA_PATHS, so it lands in the lock with no
+    // matching baseline row; the committed extras file is the allowlist that
+    // reviews it. This keeps the invariant strict for surface binaries while
+    // covering the declared extras.
+    let extras = load_yaml("res/binary-lock-extras.yaml");
+    let extra_names: HashSet<&str> = extras
+        .get("binaries")
+        .and_then(|b| b.as_sequence())
+        .map(|seq| seq.iter().filter_map(|n| n.as_str()).collect())
+        .unwrap_or_default();
     for p in &lock_paths {
+        let base = p.rsplit('/').next().unwrap_or(p);
         assert!(
-            suid_paths.contains(p) || cap_paths.contains(p),
-            "binary-lock path `{p}` is in neither suid nor fcap baseline",
+            suid_paths.contains(p) || cap_paths.contains(p) || extra_names.contains(base),
+            "binary-lock path `{p}` is in neither suid nor fcap baseline nor the extras allowlist",
         );
     }
 }
@@ -456,7 +471,7 @@ fn home_lock_paths_are_absolute_or_tilde_prefixed() {
         .unwrap_or_else(|| panic!("absolute_file_paths is a mapping"));
     assert!(!map.is_empty(), "absolute_file_paths is empty");
     for (k, _v) in map {
-        let p = k.as_str().expect("key is a string");
+        let p = k.as_str();
         assert!(
             p.starts_with('/') || p.starts_with('~'),
             "home-lock path is neither absolute nor ~ -prefixed: {p}"

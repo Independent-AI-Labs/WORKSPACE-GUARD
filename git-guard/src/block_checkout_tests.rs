@@ -1,4 +1,5 @@
 use super::*;
+use crate::child::{parent_argv_subcommand_in, stash_verb};
 
 #[test]
 fn checkout_dotless_existing_file_blocked() {
@@ -162,5 +163,253 @@ fn sudo_gated_restore_allowed_for_root() {
         assert!(result.is_ok(), "root should be allowed: {:?}", result);
     } else {
         assert!(matches!(result, Err(GuardError::Blocked { .. })));
+    }
+}
+
+#[test]
+fn rebase_without_safe_flag_blocked() {
+    let state = empty_state("rebase");
+    let argv_os = argv(&["git", "rebase", "main"]);
+    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn rebase_onto_direct_blocked() {
+    // REQ-GGUARD-064: the pull-generated `--onto` shape alone is not enough;
+    // a direct rebase's parent is not a running `pull --rebase`, so it stays
+    // blocked even when the caller forges the old session env vars.
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
+    std::env::set_var(crate::SESSION_ENV, "1");
+    let state = empty_state("rebase");
+    let argv_os = argv(&["git", "rebase", "--onto", "aaaa", "bbbb"]);
+    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
+    std::env::remove_var(crate::SESSION_ENV);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+}
+
+#[test]
+fn rebase_approval_requires_onto_and_pull_parent() {
+    assert!(rebase_approval(true, true));
+    assert!(!rebase_approval(false, true), "no --onto");
+    assert!(!rebase_approval(true, false), "parent is not pull --rebase");
+    assert!(!rebase_approval(false, false));
+}
+
+#[test]
+fn parent_argv_pull_detection() {
+    // REQ-GGUARD-064: a `pull` parent authorizes the forked rebase (the
+    // rebase child's own `--onto` signature is checked separately). Plain
+    // pulls qualify because repo config `pull.rebase=true` can make any pull
+    // fork the rebase.
+    let pull = &["pull"];
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"pull", b"--rebase", b"origin", b"main"],
+        pull
+    ));
+    assert!(parent_argv_subcommand_in(&[b"git", b"pull", b"-r"], pull));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"pull", b"--rebase=merges"],
+        pull
+    ));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"pull", b"--ff-only"],
+        pull
+    ));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"pull", b"origin", b"main"],
+        pull
+    ));
+    assert!(!parent_argv_subcommand_in(
+        &[b"git", b"rebase", b"--onto", b"a", b"b"],
+        pull
+    ));
+    assert!(!parent_argv_subcommand_in(
+        &[b"git", b"merge", b"--ff-only", b"origin"],
+        pull
+    ));
+    assert!(!parent_argv_subcommand_in(
+        &[b"git", b"fetch", b"origin"],
+        pull
+    ));
+}
+
+#[test]
+fn parent_argv_internal_stash_parents() {
+    // REQ-GGUARD-183: the porcelains whose internal snapshot forks
+    // `git stash create` are the accepted parents; unrelated subcommands are
+    // not. The `-c merge.autostash=false` shape is the real merge argv.
+    let ops = &["merge", "rebase", "am", "pull"];
+    assert!(parent_argv_subcommand_in(
+        &[
+            b"git",
+            b"-c",
+            b"merge.autostash=false",
+            b"merge",
+            b"--no-autostash",
+            b"upstream/main"
+        ],
+        ops
+    ));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"rebase", b"--continue"],
+        ops
+    ));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"am", b"--autostash"],
+        ops
+    ));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"pull", b"--rebase"],
+        ops
+    ));
+    assert!(!parent_argv_subcommand_in(
+        &[b"git", b"stash", b"create"],
+        ops
+    ));
+    assert!(!parent_argv_subcommand_in(
+        &[b"git", b"commit", b"-m", b"x"],
+        ops
+    ));
+}
+
+#[test]
+fn stash_verb_extraction() {
+    assert_eq!(
+        stash_verb(&argv(&["git", "stash", "create"])).as_deref(),
+        Some("create")
+    );
+    assert_eq!(
+        stash_verb(&argv(&[
+            "git", "stash", "apply", "--index", "--quiet", "abc"
+        ]))
+        .as_deref(),
+        Some("apply")
+    );
+    assert_eq!(stash_verb(&argv(&["git", "stash"])), None);
+    assert_eq!(
+        stash_verb(&argv(&["git", "-c", "x=y", "stash", "create"])).as_deref(),
+        Some("create")
+    );
+}
+
+#[test]
+fn internal_stash_approved_requires_snapshot_verb_and_sealed_parent() {
+    // REQ-GGUARD-183: the verb gate excludes ordinary stash operations even
+    // before the parent check, and the parent check denies under the test
+    // harness (the parent is cargo, not sealed Git).
+    for verb in ["push", "pop", "save", "drop", "clear", "list", "show"] {
+        assert!(
+            !internal_stash_approved("stash", &argv(&["git", "stash", verb])),
+            "git stash {verb} must not be authorized as an internal snapshot"
+        );
+    }
+    assert!(!internal_stash_approved("stash", &argv(&["git", "stash"])));
+    assert!(!internal_stash_approved(
+        "stash",
+        &argv(&["git", "stash", "create"])
+    ));
+    assert!(!internal_stash_approved(
+        "commit",
+        &argv(&["git", "commit", "create"])
+    ));
+}
+
+#[test]
+fn stash_create_blocked_for_non_root_without_sealed_parent() {
+    // REQ-GGUARD-183: create/apply are authorized ONLY when the parent is the
+    // sealed real Git running an approved porcelain. Under the test harness
+    // the parent is cargo, so non-root stays denied for the non-fast-forward
+    // merge's internal snapshot.
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
+    if crate::is_config_privileged() {
+        return;
+    }
+    for case in [["git", "stash", "create"], ["git", "stash", "apply"]] {
+        let state = empty_state("stash");
+        let argv_os = argv(&case);
+        let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
+        assert!(
+            matches!(result, Err(GuardError::Blocked { .. })),
+            "git {} must stay blocked without a sealed-git parent",
+            case.join(" ")
+        );
+    }
+}
+
+#[test]
+fn rebase_continue_allowed() {
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
+    let mut state = empty_state("rebase");
+    state.has_rebase_safe_flag = true;
+    let argv_os = argv(&["git", "rebase", "--continue"]);
+    let result = check_blocked(&state, "rebase", &argv_os, "/nonexistent-git", None);
+    assert!(
+        result.is_ok(),
+        "rebase --continue should be allowed: {:?}",
+        result
+    );
+}
+
+#[test]
+fn stash_is_sudo_gated_not_blocked() {
+    // REQ-GGUARD-050: stash moved from the unconditional block to the
+    // sudo-gated category, matching checkout/restore/switch.
+    assert!(!BLOCKED_SUBCOMMANDS.contains(&"stash"));
+    assert!(SUDO_GATED_SUBCOMMANDS.contains(&"stash"));
+}
+
+#[test]
+fn stash_denied_for_non_root_allowed_for_root() {
+    // REQ-GGUARD-050: non-root agents are denied every verb before any
+    // operation parsing; root (operator) may run the whole subcommand.
+    let _env_guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_blocked_bypass_env_vars();
+    let cases: &[&[&str]] = &[
+        &["git", "stash"],
+        &["git", "stash", "create"],
+        &["git", "stash", "push"],
+        &["git", "stash", "save"],
+        &["git", "stash", "pop"],
+        &["git", "stash", "apply"],
+        &["git", "stash", "list"],
+        &["git", "stash", "show"],
+        &["git", "stash", "drop"],
+        &["git", "stash", "clear"],
+        &["git", "stash", "future-op"],
+        &["git", "stash", "--", "drop"],
+    ];
+    let root = crate::is_config_privileged();
+    for case in cases {
+        let state = empty_state("stash");
+        let argv_os = argv(case);
+        let result = check_blocked(&state, "stash", &argv_os, "/nonexistent-git", None);
+        if root {
+            assert!(
+                result.is_ok(),
+                "{case:?} must be allowed for root: {result:?}"
+            );
+        } else {
+            match result {
+                Err(GuardError::Blocked { hint, .. }) => {
+                    assert!(
+                        hint.contains("sudo"),
+                        "non-root hint must name sudo: {hint}"
+                    );
+                }
+                other => panic!("{case:?} must be blocked for non-root: {other:?}"),
+            }
+        }
     }
 }

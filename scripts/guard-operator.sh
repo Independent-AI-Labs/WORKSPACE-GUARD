@@ -6,7 +6,6 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 case "$SCRIPT_SOURCE" in /proc/self/fd/*) SCRIPT_SOURCE="${SHG_SCRIPT_PATH:-$SCRIPT_SOURCE}" ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CI_ROOT=/opt/workspace-ci
 
 MODE="${1:-}"
 MARKER="${WORKSPACE_GUARD_STATE_DIR:-/usr/lib/workspace-guard}/host-provision.ok"

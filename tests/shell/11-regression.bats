@@ -131,8 +131,8 @@ teardown() { guard_teardown; }
     local stub="$GUARD_ROOT/tests/shell/stubs/dpkg-divert"
     [ -f "$stub" ]
     rg -q '\-\-rename' "$stub" 2>"$DEVNULL"
-    rg -q 'mv.*\$path.*distrib' "$stub" 2>"$DEVNULL" \
-        || rg -q 'mv.*path.*dest' "$stub" 2>"$DEVNULL"
+    rg -q 'mv.*\$path.*\$divert' "$stub" 2>"$DEVNULL" \
+        || rg -q 'mv.*path.*divert' "$stub" 2>"$DEVNULL"
 }
 
 # --- Regression 8: banned words banned from new bats files ---

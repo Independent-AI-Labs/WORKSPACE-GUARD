@@ -13,7 +13,7 @@
 // indent; nested content is always deeper, so the minimum dash indent
 // inside a region is exactly the item indent.
 
-use serde_yaml::Value;
+use noyalib::compat::serde_yaml::Value;
 
 use crate::emit::{emit_dash_item, emit_kv};
 

@@ -102,9 +102,9 @@ YEOF
     assert_success
     assert_output --partial "Lock surface: 1 binaries"
     assert_output --partial "DRY RUN"
-    assert_output --partial "WOULD: seal .real"
-    # No .real file should exist.
-    [ ! -f "${p}.real" ]
+    assert_output --partial "WOULD: seal original into"
+    # No sealed copy should exist.
+    [ ! -f "$(sealed_of "$p")" ]
 }
 
 @test "install-lock: dry-run parses multiple non-null paths" {
@@ -150,15 +150,15 @@ YEOF
     assert_output --partial "Lock surface: 1 binaries"
 }
 
-@test "install-lock: creates .real sealed copy (0700 root:root)" {
+@test "install-lock: creates sealed copy (0700 root:root)" {
     _setup_install
     local p="$FAKE_USR/sudo"
     _setup_paths "$p"
     run bash "$FAKE_REPO/scripts/install-lock-runtime"
     assert_success
-    [ -f "${p}.real" ]
+    [ -f "$(sealed_of "$p")" ]
     local mode
-    mode="$(stat -c '%a' "${p}.real")"
+    mode="$(stat -c '%a' "$(sealed_of "$p")")"
     assert_equal "700" "$mode"
 }
 
@@ -172,7 +172,7 @@ YEOF
     grep -qa "workspace-guard" "$p"
 }
 
-@test "install-lock: invokes chattr +i on .real" {
+@test "install-lock: invokes chattr +i on the sealed copy" {
     _setup_install
     local p="$FAKE_USR/sudo"
     _setup_paths "$p"
@@ -180,7 +180,7 @@ YEOF
     assert_success
     # The chattr stub logs to GUARD_STUB_LOG.
     grep -q "+i" "$GUARD_STUB_LOG"
-    grep -q "${p}.real" "$GUARD_STUB_LOG"
+    grep -q "$(sealed_of "$p")" "$GUARD_STUB_LOG"
 }
 
 @test "install-lock: invokes dpkg-divert --add for the path" {
@@ -189,8 +189,8 @@ YEOF
     _setup_paths "$p"
     run bash "$FAKE_REPO/scripts/install-lock-runtime"
     assert_success
-    # The dpkg-divert stub records the path in GUARD_DIVERT_DB.
-    grep -qxF "$p" "$GUARD_DIVERT_DB"
+    # The dpkg-divert stub records the path in column 1 of GUARD_DIVERT_DB.
+    awk -F'\t' -v p="$p" '$1==p{found=1} END{exit !found}' "$GUARD_DIVERT_DB"
 }
 
 @test "install-lock: writes lock-state.yaml with contained entries" {
@@ -263,8 +263,8 @@ YEOF
     assert_success
     # .guard_new temp should NOT persist (it was mv'd to $p).
     [ ! -f "${p}.guard_new" ]
-    # .distrib should exist (dpkg-divert --rename moved the original).
-    [ -f "${p}.distrib" ]
+    # sealed package copy should exist (dpkg-divert --rename moved the original).
+    [ -f "$(sealed_pkg_of "$p")" ]
 }
 
 @test "install-lock: seals the diverted copy (0700, set-ID stripped, +i)" {
@@ -274,8 +274,8 @@ YEOF
     chmod 4755 "$p"
     run bash "$FAKE_REPO/scripts/install-lock-runtime"
     assert_success
-    assert_equal "700" "$(stat -c '%a' "${p}.distrib")"
-    grep -q -- "+i ${p}.distrib" "$GUARD_STUB_LOG"
+    assert_equal "700" "$(stat -c '%a' "$(sealed_pkg_of "$p")")"
+    grep -q -- "+i $(sealed_pkg_of "$p")" "$GUARD_STUB_LOG"
     grep -q 'original_path_mode: "4755"' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
 }
 
@@ -286,12 +286,12 @@ YEOF
     chmod 4755 "$p"
     run bash "$FAKE_REPO/scripts/install-lock-runtime"
     assert_success
-    # Simulate a host contained by the old installer: set-ID .distrib.
-    chmod 4755 "${p}.distrib"
+    # Simulate a host contained by the old installer: set-ID sealed package copy.
+    chmod 4755 "$(sealed_pkg_of "$p")"
     run bash "$FAKE_REPO/scripts/install-lock-runtime"
     assert_success
     assert_output --partial "ALREADY CONTAINED"
-    assert_equal "700" "$(stat -c '%a' "${p}.distrib")"
+    assert_equal "700" "$(stat -c '%a' "$(sealed_pkg_of "$p")")"
     grep -q 'original_path_mode: "4755"' "$WORKSPACE_BINARY_GUARD_STATE_DIR/lock-state.yaml"
     # Third run: sealed copy is 700, mode comes from the prior record.
     run bash "$FAKE_REPO/scripts/install-lock-runtime"

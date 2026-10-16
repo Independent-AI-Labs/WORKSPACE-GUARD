@@ -208,3 +208,113 @@ fn unknown_leading_option_fails_closed_with_exit_2() {
         ));
     }
 }
+
+#[test]
+fn parse_args_safe_pull_ff_only() {
+    let args = bytes(&["git", "pull", "--ff-only"]);
+    let state = parse_args(&args).unwrap();
+    assert!(state.pull_ff_only);
+}
+
+#[test]
+fn parse_args_merge_abort() {
+    let args = bytes(&["git", "merge", "--abort"]);
+    let state = parse_args(&args).unwrap();
+    assert!(state.merge_abort);
+}
+
+#[test]
+fn parse_args_merge_abort_after_dash_is_pathspec() {
+    let args = bytes(&["git", "merge", "--", "--abort"]);
+    let state = parse_args(&args).unwrap();
+    assert!(!state.merge_abort);
+}
+
+#[test]
+fn parse_args_safe_pull_rebase() {
+    let args = bytes(&["git", "pull", "--rebase"]);
+    let state = parse_args(&args).unwrap();
+    assert!(state.pull_rebase);
+}
+
+#[test]
+fn parse_args_pull_ordered_ff_modes() {
+    // REQ-GGUARD-061: last-wins. `--ff`/`--no-ff` clear an earlier
+    // `--ff-only`; a later `--ff-only` restores it.
+    let clear = parse_args(&bytes(&["git", "pull", "--ff-only", "--no-ff"])).unwrap();
+    assert!(!clear.pull_ff_only, "--no-ff must clear --ff-only");
+    let clear_ff = parse_args(&bytes(&["git", "pull", "--ff-only", "--ff"])).unwrap();
+    assert!(!clear_ff.pull_ff_only, "--ff must clear --ff-only");
+    let restore = parse_args(&bytes(&["git", "pull", "--no-ff", "--ff-only"])).unwrap();
+    assert!(
+        restore.pull_ff_only,
+        "later --ff-only must restore safe mode"
+    );
+}
+
+#[test]
+fn parse_args_pull_ordered_rebase_modes() {
+    // REQ-GGUARD-061: `--no-rebase`/`--rebase=false` clear rebase; `-r`,
+    // `--rebase`, and non-false values enable it.
+    assert!(
+        parse_args(&bytes(&["git", "pull", "-r"]))
+            .unwrap()
+            .pull_rebase
+    );
+    assert!(
+        parse_args(&bytes(&["git", "pull", "--rebase=merges"]))
+            .unwrap()
+            .pull_rebase
+    );
+    assert!(
+        parse_args(&bytes(&["git", "pull", "--rebase"]))
+            .unwrap()
+            .pull_rebase
+    );
+    assert!(
+        !parse_args(&bytes(&["git", "pull", "--rebase=false"]))
+            .unwrap()
+            .pull_rebase,
+        "--rebase=false must not be treated as safe"
+    );
+    assert!(
+        !parse_args(&bytes(&["git", "pull", "--rebase", "--no-rebase"]))
+            .unwrap()
+            .pull_rebase,
+        "--no-rebase must clear an earlier --rebase"
+    );
+    assert!(
+        parse_args(&bytes(&["git", "pull", "--no-rebase", "--rebase"]))
+            .unwrap()
+            .pull_rebase,
+        "a later --rebase must restore safe mode"
+    );
+}
+
+#[test]
+fn parse_args_pull_value_operand_not_a_flag() {
+    // REQ-GGUARD-061: an operand of a value-taking option is data. `-X` eats
+    // the following `--rebase`, so the pull must not be marked rebase-safe.
+    let state = parse_args(&bytes(&["git", "pull", "-X", "--rebase", "origin"])).unwrap();
+    assert!(!state.pull_rebase, "-X operand must not set pull_rebase");
+}
+
+#[test]
+fn parse_args_merge_ordered_ff_modes() {
+    // REQ-GGUARD-062: merge tracks the final FF mode, plus --quit recovery.
+    assert!(
+        !parse_args(&bytes(&["git", "merge", "--ff-only", "--ff", "topic"]))
+            .unwrap()
+            .merge_ff_only
+    );
+    assert!(
+        parse_args(&bytes(&["git", "merge", "--ff", "--ff-only", "topic"]))
+            .unwrap()
+            .merge_ff_only
+    );
+    assert!(
+        parse_args(&bytes(&["git", "merge", "--quit"]))
+            .unwrap()
+            .merge_abort
+    );
+}

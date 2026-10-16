@@ -32,6 +32,7 @@ fn usage() -> ! {
     eprintln!(
         "usage:\n  \
          workspace-yaml-edit add      <file> <list-key> <field-spec>... [--dry-run]\n  \
+         workspace-yaml-edit add-block <file> <list-key> <block-file> [--dry-run]\n  \
          workspace-yaml-edit map-add  <file> <map-key> <new-key> <field-spec>... [--dry-run]\n  \
          workspace-yaml-edit remove   <file> <list-key> <field-spec>... [--dry-run] [--allow-no-match]\n  \
          workspace-yaml-edit set      <file> <dotted.key> <value> [--string] [--create] [--dry-run]\n  \
@@ -54,6 +55,7 @@ fn main() {
     let cli = ops::parse_cli(&args).unwrap_or_else(|_| usage());
     match cli.intent {
         ops::Intent::Add => ops::run_add(&cli),
+        ops::Intent::AddBlock => admin::run_add_block(&cli),
         ops::Intent::MapAdd => admin::run_map_add(&cli),
         ops::Intent::Remove => ops::run_remove(&cli),
         ops::Intent::Set => ops::run_set(&cli),
@@ -85,12 +87,13 @@ mod splice_tests;
 #[cfg(test)]
 mod tests {
     use super::ops;
-    use serde_yaml::Value;
+    use noyalib::compat::serde_yaml::Value;
 
     #[test]
     fn audit_log_name_matches_guard_config() {
         let raw = include_str!("../../config/shared_paths.yaml");
-        let doc: Value = serde_yaml::from_str(raw).expect("shared_paths.yaml must parse");
+        let doc: Value =
+            noyalib::compat::serde_yaml::from_str(raw).expect("shared_paths.yaml must parse");
         let configured = doc
             .get("log_file")
             .and_then(Value::as_str)
