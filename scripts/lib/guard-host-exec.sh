@@ -236,6 +236,9 @@ guard_write_deployment_class() {
     local class="${1:?class}" base
     base="$(guard_state_dir)"
     mkdir -p "$base"
+    mkdir -p "$(dirname "$GUARD_DEPLOYMENT_CLASS_FILE")"
+    printf '%s\n' "$class" > "$GUARD_DEPLOYMENT_CLASS_FILE"
+    chmod 0644 "$GUARD_DEPLOYMENT_CLASS_FILE"
     printf '%s\n' "$class" > "$base/deployment-class"
     chmod 0644 "$base/deployment-class"
     rm -f "$base/delivery.mode"
@@ -253,6 +256,7 @@ guard_write_workspace_root() {
 guard_remove_git_install_artifacts() {
     local base
     base="$(guard_state_dir)"
+    rm -f "$GUARD_DEPLOYMENT_CLASS_FILE"
     rm -f "$base/deployment-class" "$base/git-ssh-wrapper" "$base/delivery.mode" "$base/workspace-root"
 }
 
@@ -377,12 +381,7 @@ agent_git_works_runuser() {
     [[ $_rc -eq 0 ]] && ! grep -q 'missing workload capabilities' <<<"$_out"
 }
 
-# Verify the injection reaches a real caller in a root-locked repo, not just
-# `git --version`. .git is root:root after gitdir::lock, so a caller that
-# never receives the guard's GIT_CONFIG safe.directory=* fails here with
-# "dubious ownership" even though `git --version` still succeeds. This is the
-# check that catches a /usr/bin/git that is stock (or missing) rather than the
-# guard -- e.g. a rolled-back or half-applied install.
+# Catches stock git: root-locked .git without safe.directory=* is dubious ownership.
 agent_git_ownership_works_runuser() {
     local user="${1:?user}" repo="${2:?repo}"
     local _out _rc=0
@@ -498,8 +497,10 @@ install_guard_host_exec() {
 
     local verify_repo="${WORKSPACE_GUARD_VERIFY_REPO:-$WORKSPACE_ROOT}"
     if [[ -e "$verify_repo/.git" ]]; then
-        if ! agent_git_ownership_works_runuser "$verify_user" "$verify_repo"; then
-            log_error "runuser 'git -C $verify_repo rev-parse --show-toplevel' failed for $verify_user"
+        local ownership_user
+        ownership_user="$(guard_repo_owner_user "$verify_repo" "$verify_user")"
+        if ! agent_git_ownership_works_runuser "$ownership_user" "$verify_repo"; then
+            log_error "runuser 'git -C $verify_repo rev-parse --show-toplevel' failed for $ownership_user"
             log_error "the guard's safe.directory injection is not reaching callers in a root-locked repo"
             return 1
         fi

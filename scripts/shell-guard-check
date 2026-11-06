@@ -117,9 +117,20 @@ bad()  { echo "DRIFT: $*"; PROBLEMS=$((PROBLEMS + 1)); }
 
 hash_of() { sha256sum "$1" 2>"$DEVNULL" | awk '{print $1}'; }
 
+path_read_denied() {
+    local err
+    if ! err="$(stat -c %a "$1" 2>&1)"; then
+        case "$err" in
+            *"Permission denied"*) return 0 ;;
+        esac
+    fi
+    return 1
+}
+
 # --- presence gate -----------------------------------------------------------
 installed=0
 [ -f "$REAL_PATH" ] && installed=1
+path_read_denied "$REAL_PATH" && installed=1
 [ -f "$DISTRIB_PATH" ] && installed=1
 if have_override_cap "$BASH_PATH"; then
     installed=1
@@ -157,7 +168,11 @@ fi
 
 # --- sealed original ----------------------------------------------------------
 if [ ! -f "$REAL_PATH" ]; then
-    bad "$REAL_PATH missing"
+    if path_read_denied "$REAL_PATH"; then
+        ok "$REAL_PATH present (read-protected; not verifiable as non-root)"
+    else
+        bad "$REAL_PATH missing"
+    fi
 else
     [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$REAL_PATH")" = "root:root" ] || bad "$REAL_PATH not root:root"
     [ "$(stat -c %a "$REAL_PATH")" = "700" ] || bad "$REAL_PATH mode != 0700"

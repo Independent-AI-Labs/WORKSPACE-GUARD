@@ -521,7 +521,14 @@ caller cannot forge authorization; a direct `git rebase`, with or without
 `--onto`, with or without forged session variables, stays blocked. The same
 structural parent check, accepting `merge`, `rebase`, `am`, or `pull` as the
 parent, authorizes Git's internal `stash create`/`stash apply` snapshot
-(REQ-GGUARD-183).
+(REQ-GGUARD-183). The same immediate-parent check, accepting `submodule` or
+`submodule--helper`, authorizes only Git's submodule pin children
+(REQ-GGUARD-184): `checkout` with `-f`/`--force`, optional `-q`, optional
+leading `-C <dir>`, and exactly one full hex object ID; or `fetch` with
+optional leading `-C <dir>` and exactly one full hex object ID refspec
+(optional leading `+`, no `:` destination). A direct `checkout -f` and a
+direct raw-object-ID `fetch` stay blocked for every user, including root.
+No environment variable is consulted.
 
 For every otherwise-allowed push, the guard parses `/proc/self/stat` by finding
 the final `)` of `comm` and then treating the following state token as absolute

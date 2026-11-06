@@ -13,6 +13,12 @@ fn is_hex_oid(s: &str) -> bool {
 }
 
 pub fn check_fetch_refspecs(argv_os: &[OsString]) -> Result<(), GuardError> {
+    // REQ-GGUARD-184: Git fetches a missing submodule commit by raw OID.
+    // That form stays blocked unless the immediate parent is sealed Git
+    // running submodule or submodule--helper and the argv is that exact shape.
+    if crate::child::submodule_pin_fetch_allowed(argv_os) {
+        return Ok(());
+    }
     // Fetch flags that consume the following argv element as a value.
     const VALUE_FLAGS: &[&str] = &[
         "--depth",

@@ -462,6 +462,29 @@ This document specifies the requirements for the Rust binary. The installation/d
   caller-issued `git stash` (whose parent is a shell, not a running porcelain)
   shall stay blocked. This mirrors the structural authorization of
   REQ-GGUARD-064.
+- **REQ-GGUARD-184**: A direct `checkout -f` / `--force` and a direct `fetch`
+  of a raw object ID shall remain blocked for every user, including verified
+  root. The single additional exception shall be the child real Git forks while
+  running an allowed `submodule` update. That child shall be authorized only
+  when its immediate parent process is the sealed real Git running `submodule`
+  or `submodule--helper` (identified by the parent's executable and command
+  line, which only the guard can launch) and its argv is one of the two shapes
+  Git generates for pinning a submodule: `checkout` with `-f` or `--force`,
+  optional `-q` / `--quiet`, an optional leading `-C <dir>`, and exactly one
+  positional that is a full hex object ID (40 or 64 characters); or `fetch`
+  with an optional leading `-C <dir>` and exactly one refspec that is a full
+  hex object ID, optional leading `+`, and no `:` destination. No other
+  checkout form (`checkout -f .`, a pathspec, a second positional, `--`) and no
+  other fetch form (empty side, object-ID destination, non-hex refspec) shall
+  be authorized. No caller-settable environment variable or argument shall
+  authorize a direct checkout or fetch. Recursive `submodule update` is covered
+  because each nested update is itself sealed real Git running `submodule` or
+  `submodule--helper`; only the immediate parent is consulted. This exception
+  exists solely so a root `git submodule update --init --recursive` does not
+  deadlock on the guarded exec-path frontend. It does not widen sudo-gated
+  `checkout`, and it adds no audit event beyond the outer root `submodule`
+  `event=allow` record (REQ-GGUARD-021a). This mirrors the structural
+  authorization of REQ-GGUARD-064.
 - **REQ-GGUARD-063**: Protected-branch classification shall use the same
   effective repository context as the eventual Git command, including every
   validated global repository selector. Repository resolution shall return a

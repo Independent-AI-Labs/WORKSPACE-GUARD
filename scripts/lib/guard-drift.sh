@@ -163,6 +163,25 @@ guard_verify_user_run() {
     guard_verify_user_run_runuser "$user" "$cmd" "$stderr_file"
 }
 
+# Repo owner when that owner is a normal login user; otherwise the given login user.
+# A passwd-first login user may be unable to traverse the repo.
+guard_repo_owner_user() {
+    local repo="$1" login_user="$2" owner uid
+    if ! owner="$(stat -c '%U' "$repo")"; then
+        printf '%s\n' "$login_user"
+        return 0
+    fi
+    if ! uid="$(id -u "$owner")"; then
+        printf '%s\n' "$login_user"
+        return 0
+    fi
+    if [[ -n "$uid" && "$owner" != root && "$uid" -ge 1000 && "$uid" -lt 65534 ]]; then
+        printf '%s\n' "$owner"
+        return 0
+    fi
+    printf '%s\n' "$login_user"
+}
+
 guard_verify_login_user() {
     if [[ -n "${SUDO_USER:-}" ]]; then
         local uid

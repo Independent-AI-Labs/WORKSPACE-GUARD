@@ -35,10 +35,17 @@ pub fn check_categories(
         // Destructive checkout/switch before sudo-gate: agents must see the
         // discard reason, not a generic non-root denial.
         if let Some(kind) = destructive_checkout_or_switch_cwd(subcommand, argv_os, cwd) {
-            return Err(GuardError::Blocked {
-                reason: format!("git {} ({})", subcommand, kind),
-                hint: "Destructive checkout/switch is forbidden for all users".into(),
-            });
+            // REQ-GGUARD-184: Git's submodule pin checkout is `checkout -q -f <oid>`.
+            // That is a force discard for every direct caller. Only the sealed
+            // submodule parent plus that exact shape is exempt.
+            let pin_checkout =
+                kind == "force discard" && crate::child::submodule_pin_checkout_allowed(argv_os);
+            if !pin_checkout {
+                return Err(GuardError::Blocked {
+                    reason: format!("git {} ({})", subcommand, kind),
+                    hint: "Destructive checkout/switch is forbidden for all users".into(),
+                });
+            }
         }
         // REQ-GGUARD-183: the `stash create`/`stash apply` snapshot that an
         // approved porcelain (merge/rebase/am/pull) forks internally is
@@ -46,7 +53,10 @@ pub fn check_categories(
         // not deadlock on the guarded exec-path frontend. A caller-issued
         // stash verb never matches: its parent is a shell, not a running
         // porcelain, so the non-root denial below still applies.
-        if !operator_root && !internal_stash_approved(subcommand, argv_os) {
+        // REQ-GGUARD-184: the same structural parent authorizes the pin checkout
+        // for a non-root child. A shell parent never matches.
+        let pin_checkout = crate::child::submodule_pin_checkout_allowed(argv_os);
+        if !operator_root && !internal_stash_approved(subcommand, argv_os) && !pin_checkout {
             return Err(GuardError::Blocked {
                 reason: format!(
                     "sudo-gated subcommand: git {} (non-root denied)",

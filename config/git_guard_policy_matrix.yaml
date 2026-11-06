@@ -629,3 +629,12 @@ cases:
       - push
     expect: blocked
     reason_contains: stash
+  - id: checkout-force-oid
+    argv:
+      - git
+      - checkout
+      - '-q'
+      - '-f'
+      - 797ccf80825cc035508ba9b599b2a21953e7f835
+    expect: blocked
+    reason_contains: force discard

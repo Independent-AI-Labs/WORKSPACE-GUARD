@@ -69,7 +69,6 @@ assert_blocked "fetch -- --hard" git fetch -- --hard
 # Alternate git bypass vector (seeded by tier3 harness).
 if [[ -e /usr/local/bin/git ]]; then
     rc=0
-    local vout
     vout="$(/usr/local/bin/git --version 2>&1)" || rc=$?
     printf '%s\n' "$vout"
     if [[ $rc -eq 0 ]]; then

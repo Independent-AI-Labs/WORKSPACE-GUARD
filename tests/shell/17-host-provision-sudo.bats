@@ -5,8 +5,13 @@ bats_require_minimum_version 1.5.0
 
 load lib/harness
 
-setup()    { guard_setup; }
-teardown() { guard_teardown; }
+setup()    { _hp_test_user=""; guard_setup; }
+teardown() {
+    if [[ -n "${_hp_test_user:-}" ]]; then
+        userdel -r "$_hp_test_user" 2>/dev/null || userdel "$_hp_test_user" 2>/dev/null || true
+    fi
+    guard_teardown
+}
 
 _hp_sudo_test_env() {
     HP_SUDOERS_DIR="$TEST_TMPDIR/sudoers.d"
@@ -38,7 +43,7 @@ _hp_sudo_test_env() {
     _hp_sudo_test_env
     local _user="hp-none-$$"
     useradd -m -s /bin/bash "$_user" 2>/dev/null || skip "cannot create test user"
-    trap "userdel -r $_user 2>/dev/null || userdel $_user 2>/dev/null || true" EXIT
+    _hp_test_user="$_user"
     run hp_sudo_privilege_state "$_user"
     assert_equal "none" "$output"
 }
@@ -67,7 +72,7 @@ _hp_sudo_test_env() {
     _hp_sudo_test_env
     local _user="hp-yellow-$$"
     useradd -m -s /bin/bash "$_user" 2>/dev/null || skip "cannot create test user"
-    trap "userdel -r $_user 2>/dev/null || userdel $_user 2>/dev/null || true" EXIT
+    _hp_test_user="$_user"
     run bash -c "
         export HP_SUDOERS_DIR='$HP_SUDOERS_DIR' WORKSPACE_SUDOERS_DIR='$HP_SUDOERS_DIR' HP_REPO_ROOT='$GUARD_ROOT'
         source '$GUARD_ROOT/scripts/lib/host-provision-parse.sh'

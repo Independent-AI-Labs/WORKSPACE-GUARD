@@ -182,6 +182,114 @@ pub(crate) fn parent_is_pull_rebase() -> bool {
     parent_is_sealed_git_running(&["pull"])
 }
 
+/// REQ-GGUARD-184: parent of a submodule pin child. Immediate parent only.
+pub(crate) fn parent_is_submodule_update() -> bool {
+    parent_is_sealed_git_running(&["submodule", "submodule--helper"])
+}
+
+fn is_full_hex_oid(s: &str) -> bool {
+    (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Skip a leading run of `-C <dir>` pairs. `None` if a `-C` has no operand.
+fn skip_leading_cd(args: &[String]) -> Option<usize> {
+    let mut i = 0;
+    while i < args.len() && args[i] == "-C" {
+        if i + 1 >= args.len() {
+            return None;
+        }
+        i += 2;
+    }
+    Some(i)
+}
+
+fn argv_tail(argv_os: &[OsString]) -> Vec<String> {
+    argv_os
+        .iter()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Git's submodule pin checkout: `checkout` with `-f`/`--force`, optional
+/// `-q`/`--quiet`, optional leading `-C <dir>`, and exactly one full hex OID.
+/// Any other token denies.
+pub(crate) fn submodule_pin_checkout_shape(argv_os: &[OsString]) -> bool {
+    let args = argv_tail(argv_os);
+    let Some(mut i) = skip_leading_cd(&args) else {
+        return false;
+    };
+    if i >= args.len() || args[i] != "checkout" {
+        return false;
+    }
+    i += 1;
+    let mut saw_force = false;
+    let mut positionals = 0usize;
+    let mut oid_ok = false;
+    while i < args.len() {
+        let s = &args[i];
+        let quiet = s == "-q" || s == "--quiet";
+        let force = s == "-f" || s == "--force";
+        if s == "--" || (s.starts_with('-') && !quiet && !force) {
+            return false;
+        }
+        if force {
+            saw_force = true;
+        } else if !quiet {
+            positionals += 1;
+            oid_ok = is_full_hex_oid(s);
+        }
+        i += 1;
+    }
+    saw_force && positionals == 1 && oid_ok
+}
+
+/// Git's submodule missing-object fetch: optional leading `-C <dir>`, one
+/// remote name, one full hex OID refspec (optional leading `+`, no `:`).
+pub(crate) fn submodule_pin_fetch_shape(argv_os: &[OsString]) -> bool {
+    let args = argv_tail(argv_os);
+    let Some(mut i) = skip_leading_cd(&args) else {
+        return false;
+    };
+    if i >= args.len() || args[i] != "fetch" {
+        return false;
+    }
+    i += 1;
+    let mut words = Vec::new();
+    while i < args.len() {
+        if args[i].starts_with('-') {
+            return false;
+        }
+        words.push(args[i].clone());
+        i += 1;
+    }
+    if words.len() != 2 {
+        return false;
+    }
+    let spec = words[1].strip_prefix('+').unwrap_or(&words[1]);
+    !spec.contains(':') && is_full_hex_oid(spec)
+}
+
+#[cfg(test)]
+pub(crate) fn submodule_pin_checkout_approved(argv_os: &[OsString], parent_ok: bool) -> bool {
+    parent_ok && submodule_pin_checkout_shape(argv_os)
+}
+
+#[cfg(test)]
+pub(crate) fn submodule_pin_fetch_approved(argv_os: &[OsString], parent_ok: bool) -> bool {
+    parent_ok && submodule_pin_fetch_shape(argv_os)
+}
+
+/// Production gate. Shape is checked first so ordinary fetches and checkouts
+/// do not probe `/proc`.
+pub(crate) fn submodule_pin_checkout_allowed(argv_os: &[OsString]) -> bool {
+    submodule_pin_checkout_shape(argv_os) && parent_is_submodule_update()
+}
+
+pub(crate) fn submodule_pin_fetch_allowed(argv_os: &[OsString]) -> bool {
+    submodule_pin_fetch_shape(argv_os) && parent_is_submodule_update()
+}
+
 /// REQ-GGUARD-183: true only for the `stash create`/`stash apply` child that an
 /// approved porcelain (`merge`, `rebase`, `am`, or `pull`) forks to snapshot
 /// and restore the working tree.

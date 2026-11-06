@@ -1,5 +1,8 @@
 use super::*;
-use crate::child::{parent_argv_subcommand_in, stash_verb};
+use crate::child::{
+    parent_argv_subcommand_in, stash_verb, submodule_pin_checkout_approved,
+    submodule_pin_checkout_shape, submodule_pin_fetch_approved, submodule_pin_fetch_shape,
+};
 
 #[test]
 fn checkout_dotless_existing_file_blocked() {
@@ -420,4 +423,89 @@ fn stash_denied_for_non_root_allowed_for_root() {
             }
         }
     }
+}
+
+const OID: &str = "797ccf80825cc035508ba9b599b2a21953e7f835";
+
+#[test]
+fn submodule_pin_checkout_shape_accepts_git_forms() {
+    assert!(submodule_pin_checkout_shape(&argv(&[
+        "git", "checkout", "-q", "-f", OID
+    ])));
+    assert!(submodule_pin_checkout_shape(&argv(&[
+        "git", "-C", "/tmp/sub", "checkout", "-f", "-q", OID
+    ])));
+    assert!(submodule_pin_checkout_shape(&argv(&[
+        "git", "checkout", "--force", "--quiet", OID
+    ])));
+    assert!(!submodule_pin_checkout_shape(&argv(&[
+        "git", "checkout", "-f", "."
+    ])));
+    assert!(!submodule_pin_checkout_shape(&argv(&[
+        "git", "checkout", "-f", OID, "--", "file"
+    ])));
+    assert!(!submodule_pin_checkout_shape(&argv(&[
+        "git", "checkout", "-q", OID
+    ])));
+    assert!(!submodule_pin_checkout_shape(&argv(&[
+        "git", "checkout", "-f", "main"
+    ])));
+}
+
+#[test]
+fn submodule_pin_fetch_shape_accepts_only_single_oid() {
+    assert!(submodule_pin_fetch_shape(&argv(&[
+        "git", "fetch", "origin", OID
+    ])));
+    assert!(submodule_pin_fetch_shape(&argv(&[
+        "git",
+        "-C",
+        "/tmp/sub",
+        "fetch",
+        "origin",
+        &format!("+{OID}")
+    ])));
+    assert!(!submodule_pin_fetch_shape(&argv(&[
+        "git",
+        "fetch",
+        "origin",
+        &format!("{OID}:refs/heads/x")
+    ])));
+    assert!(!submodule_pin_fetch_shape(&argv(&[
+        "git", "fetch", "origin", "main"
+    ])));
+    assert!(!submodule_pin_fetch_shape(&argv(&[
+        "git", "fetch", "--depth", "1", "origin", OID
+    ])));
+}
+
+#[test]
+fn submodule_pin_approval_requires_parent_flag() {
+    let checkout = argv(&["git", "checkout", "-q", "-f", OID]);
+    let fetch = argv(&["git", "fetch", "origin", OID]);
+    assert!(submodule_pin_checkout_approved(&checkout, true));
+    assert!(!submodule_pin_checkout_approved(&checkout, false));
+    assert!(submodule_pin_fetch_approved(&fetch, true));
+    assert!(!submodule_pin_fetch_approved(&fetch, false));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"submodule", b"update", b"--init", b"--recursive"],
+        &["submodule", "submodule--helper"]
+    ));
+    assert!(parent_argv_subcommand_in(
+        &[b"git", b"submodule--helper", b"update-clone"],
+        &["submodule", "submodule--helper"]
+    ));
+}
+
+#[test]
+fn direct_submodule_pin_forms_stay_blocked() {
+    let state = empty_state("checkout");
+    let argv_os = argv(&["git", "checkout", "-q", "-f", OID]);
+    let result = check_blocked(&state, "checkout", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
+
+    let state = empty_state("fetch");
+    let argv_os = argv(&["git", "fetch", "origin", OID]);
+    let result = check_blocked(&state, "fetch", &argv_os, "/nonexistent-git", None);
+    assert!(matches!(result, Err(GuardError::Blocked { .. })));
 }
