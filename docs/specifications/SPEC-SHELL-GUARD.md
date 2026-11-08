@@ -1111,6 +1111,16 @@ It writes one JSON response on standard output:
 Rules are evaluated in declared order. Every finding is returned. The
 consumer applies path exemptions and reporting. A schema mismatch is an error.
 
+Schema 2 returns the shared decode views instead of findings. The request adds
+`decode_depth`. The response carries one entry per file:
+
+- `files`: array of `{path, views}`
+- `views`: array of `{name, text, offsets}`, where `offsets` maps every view
+  byte back to the original file.
+
+The trusted-exec checker matches its own rule table against these views, so the
+decode implementation exists once, in the guard.
+
 Input is strict UTF-8. Invalid UTF-8 or NUL bytes in a selected file fail the
 request. There is no secondary decode path.
 

@@ -39,17 +39,17 @@ struct Construct {
     category: Option<&'static str>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Finding {
     pub path: String,
-    pub rule: &'static str,
-    pub category: &'static str,
+    pub rule: String,
+    pub category: String,
     pub line: usize,
     pub column: usize,
-    pub view: &'static str,
+    pub view: String,
     pub matched: String,
-    pub reason: &'static str,
-    pub hint: &'static str,
+    pub reason: String,
+    pub hint: String,
     pub block: bool,
     pub exemptible: bool,
 }
@@ -216,14 +216,14 @@ fn scan_with_depth(
                     .expect("inline engine: a regex match must fall on UTF-8 boundaries");
                 findings.push(Finding {
                     path: path.to_string(),
-                    rule: rule.id,
-                    category: rule.category,
+                    rule: rule.id.to_string(),
+                    category: rule.category.to_string(),
                     line,
                     column,
-                    view: view.name,
+                    view: view.name.to_string(),
                     matched,
-                    reason: rule.reason,
-                    hint: rule.hint,
+                    reason: rule.reason.to_string(),
+                    hint: rule.hint.to_string(),
                     block: rule.mode != "report",
                     exemptible: rule.exemptible,
                 });
@@ -233,10 +233,25 @@ fn scan_with_depth(
     findings
 }
 
+#[derive(Debug, Serialize)]
+struct ViewOut {
+    name: String,
+    text: String,
+    offsets: Vec<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct FileViews {
+    path: String,
+    views: Vec<ViewOut>,
+}
+
 #[derive(Deserialize)]
 struct Request {
     schema: u32,
     files: Vec<FileEntry>,
+    #[serde(default)]
+    decode_depth: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -245,10 +260,13 @@ struct FileEntry {
     language: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Response {
     schema: u32,
-    findings: Vec<Finding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    findings: Option<Vec<Finding>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    files: Option<Vec<FileViews>>,
 }
 
 pub fn is_scanner_invocation(args: &[OsString]) -> bool {
@@ -271,40 +289,57 @@ fn read_input() -> String {
     raw
 }
 
-pub fn run_scanner() -> ! {
-    let request: Request = match serde_json::from_str(&read_input()) {
-        Ok(request) => request,
-        Err(error) => fail(&format!("invalid request: {}", error)),
-    };
-    if request.schema != 1 {
-        fail(&format!("unsupported request schema {}", request.schema));
+fn process_request(raw: &str) -> Result<Response, String> {
+    let request: Request =
+        serde_json::from_str(raw).map_err(|error| format!("invalid request: {}", error))?;
+    let schema = request.schema;
+    if schema != 1 && schema != 2 {
+        return Err(format!("unsupported request schema {}", schema));
     }
+    let depth = request.decode_depth.unwrap_or(0);
     let mut findings = Vec::new();
+    let mut file_views = Vec::new();
     for entry in &request.files {
-        let bytes = match std::fs::read(Path::new(&entry.path)) {
-            Ok(bytes) => bytes,
-            Err(error) => fail(&format!("cannot read {}: {}", entry.path, error)),
-        };
+        let bytes = std::fs::read(Path::new(&entry.path))
+            .map_err(|error| format!("cannot read {}: {}", entry.path, error))?;
         if bytes.contains(&0) {
-            fail(&format!("{} contains a NUL byte", entry.path));
+            return Err(format!("{} contains a NUL byte", entry.path));
         }
-        let text = match std::str::from_utf8(&bytes) {
-            Ok(text) => text,
-            Err(_) => fail(&format!("{} is not valid UTF-8", entry.path)),
-        };
-        findings.extend(scan_text(&entry.path, text, &entry.language));
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| format!("{} is not valid UTF-8", entry.path))?;
+        if schema == 1 {
+            findings.extend(scan_text(&entry.path, text, &entry.language));
+        } else {
+            let views = views::build_views(text, depth)
+                .into_iter()
+                .map(|view| ViewOut {
+                    name: view.name.to_string(),
+                    text: String::from_utf8(view.data)
+                        .expect("inline scanner: a view must remain valid UTF-8"),
+                    offsets: view.offsets,
+                })
+                .collect();
+            file_views.push(FileViews {
+                path: entry.path.clone(),
+                views,
+            });
+        }
     }
+    Ok(Response {
+        schema,
+        findings: (schema == 1).then_some(findings),
+        files: (schema == 2).then_some(file_views),
+    })
+}
+
+pub fn run_scanner() -> ! {
+    let response = match process_request(&read_input()) {
+        Ok(response) => response,
+        Err(message) => fail(&message),
+    };
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    if serde_json::to_writer(
-        &mut out,
-        &Response {
-            schema: 1,
-            findings,
-        },
-    )
-    .is_err()
-    {
+    if serde_json::to_writer(&mut out, &response).is_err() {
         fail("cannot write response");
     }
     if out.write_all(b"\n").is_err() {
@@ -314,113 +349,5 @@ pub fn run_scanner() -> ! {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const INLINE: &str = concat!("python", " -c");
-
-    fn rule(id: &'static str, pattern: &str, category: &'static str) -> Rule {
-        Rule {
-            id,
-            re: Regex::new(pattern).unwrap(),
-            hint: "hint",
-            category,
-            contexts: "file",
-            mask: true,
-            exemptible: true,
-            mode: "block",
-            reason: "reason",
-        }
-    }
-
-    fn construct(
-        language: &'static str,
-        open: Option<&str>,
-        close: Option<&str>,
-        pattern: Option<&str>,
-        category: Option<&'static str>,
-    ) -> Construct {
-        Construct {
-            language,
-            level: 1,
-            open: open.map(compile_anchor),
-            close: close.map(compile_anchor),
-            pattern: pattern.map(compile_anchor),
-            category,
-        }
-    }
-
-    #[test]
-    fn reports_rule_identity_and_position() {
-        let rules = vec![rule("interp", INLINE, "interp")];
-        let text = format!("first\n{} pass\n", INLINE);
-        let findings = scan_with("a.py", &text, "python", &rules, &[]);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule, "interp");
-        assert_eq!(findings[0].line, 2);
-        assert_eq!(findings[0].column, 1);
-    }
-
-    #[test]
-    fn masks_markdown_region() {
-        let rules = vec![rule("interp", INLINE, "interp")];
-        let constructs = vec![construct(
-            "markdown",
-            Some(r"^[ \t]{0,3}```"),
-            Some(r"^[ \t]{0,3}```"),
-            None,
-            None,
-        )];
-        let text = format!("prose\n```\n{} pass\n```\n", INLINE);
-        let findings = scan_with("a.md", &text, "markdown", &rules, &constructs);
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn masks_markdown_inline_span() {
-        let rules = vec![rule("interp", INLINE, "interp")];
-        let constructs = vec![construct("markdown", None, None, Some(r"`[^`\n]+`"), None)];
-        let text = format!("use `{}` in prose\n", INLINE);
-        let findings = scan_with("a.md", &text, "markdown", &rules, &constructs);
-        assert!(findings.is_empty());
-    }
-
-    #[test]
-    fn category_construct_excludes_only_its_category() {
-        let rules = vec![
-            rule("sql", "select", "sql"),
-            rule("interp", INLINE, "interp"),
-        ];
-        let constructs = vec![construct("sql", None, None, None, Some("sql"))];
-        let text = format!("select 1\n{} pass\n", INLINE);
-        let findings = scan_with("a.sql", &text, "sql", &rules, &constructs);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule, "interp");
-    }
-
-    #[test]
-    fn normalized_view_removes_zero_width() {
-        let rules = vec![rule("interp", INLINE, "interp")];
-        let text = "python\u{200b} -c pass\n".to_string();
-        let findings = scan_with_depth("a.txt", &text, "text", &rules, &[], 0);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].view, "normalized");
-    }
-
-    #[test]
-    fn decoded_hex_view_matches() {
-        let rules = vec![rule("sql", "select from", "sql")];
-        let findings = scan_with_depth("a.txt", "73656c6563742066726f6d", "text", &rules, &[], 2);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].view, "decoded");
-    }
-
-    #[test]
-    fn normalized_percent_escape_matches() {
-        let rules = vec![rule("sql", "select from", "sql")];
-        let text = "%73%65%6c%65%63%74%20%66%72%6f%6d";
-        let findings = scan_with_depth("a.txt", text, "text", &rules, &[], 2);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].view, "normalized");
-    }
-}
+#[path = "inline_tests.rs"]
+mod tests;
