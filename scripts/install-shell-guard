@@ -236,7 +236,7 @@ fi
 #    then migrate the older copy, then the diverted original; refuse when no
 #    source exists (cannot reconstruct stock bash).
 if [ ! -f "$REAL_PATH" ]; then
-    install -d -m 0700 -o root -g root "$SEALED_DIR"
+    install -d -m 0711 -o root -g root "$SEALED_DIR"
     if [ -f "$LEGACY_REAL" ]; then
         log "migrating $LEGACY_REAL -> $REAL_PATH"
         cp "$LEGACY_REAL" "$REAL_PATH"
@@ -253,6 +253,7 @@ if [ ! -f "$REAL_PATH" ]; then
         die "guard installed but no stock bash source (sealed, older, or diverted) exists"
     fi
 fi
+chmod 0711 "$SEALED_DIR"
 install -d -m 0700 -o root -g root "$SEALED_PKG_DIR"
 # chown/chmod on an already-sealed (+i) copy fail with EPERM; the
 # immutable flag itself proves ownership and mode are locked in.
@@ -352,6 +353,7 @@ elf_magic "$BASH_PATH" || die "post-check: $BASH_PATH is not ELF"
 has_guard_cap "$BASH_PATH" || die "post-check: guard capability missing on $BASH_PATH"
 [ "$(stat -c %a "$BASH_PATH")" = "755" ] || die "post-check: $BASH_PATH mode is not 0755"
 is_immutable "$REAL_PATH" || die "post-check: $REAL_PATH lost +i"
+[ "$(stat -c %a "$SEALED_DIR")" = "711" ] || die "post-check: $SEALED_DIR mode is not 0711"
 [ -f "$SCANNER_PATH" ] || die "post-check: inline scanner missing at $SCANNER_PATH"
 [ "$(hash_of "$SCANNER_PATH")" = "$GUARD_HASH" ] || die "post-check: inline scanner is not the installed guard"
 if [ -z "$SHG_ROOT" ]; then

@@ -1073,6 +1073,7 @@ The scanner is a hardlink of the guard binary:
 - path: `/usr/lib/workspace-guard/sealed/inline-scan`
 - owner: root:root
 - mode: 0755
+- sealed root: root:root, mode 0711 (traversable, not listable)
 - parent chain: sealed
 
 The entrypoint dispatches on `argv[0]` and serves scanner requests only.

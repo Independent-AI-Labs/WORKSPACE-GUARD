@@ -104,8 +104,9 @@ BASH_PATH="$(readlink -f "$BASH_LINK" 2>"$DEVNULL")"
 if [ -z "$BASH_PATH" ]; then
     BASH_PATH="$BASH_LINK"
 fi
-REAL_PATH="$SHG_ROOT/usr/lib/workspace-guard/sealed/bash"
-SCANNER_PATH="$SHG_ROOT/usr/lib/workspace-guard/sealed/inline-scan"
+SEALED_ROOT="$SHG_ROOT/usr/lib/workspace-guard/sealed"
+REAL_PATH="$SEALED_ROOT/bash"
+SCANNER_PATH="$SEALED_ROOT/inline-scan"
 SEALED_PKG_DIR="$SHG_ROOT/usr/lib/workspace-guard/sealed/pkg"
 DISTRIB_PATH="$SEALED_PKG_DIR/bash"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
@@ -191,6 +192,7 @@ fi
 if [ ! -f "$SCANNER_PATH" ]; then
     bad "$SCANNER_PATH missing"
 else
+    [ "$(stat -c %a "$SEALED_ROOT")" = "711" ] || bad "$SEALED_ROOT mode != 0711"
     [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$SCANNER_PATH")" = "root:root" ] || bad "$SCANNER_PATH not root:root"
     [ "$(stat -c %a "$SCANNER_PATH")" = "755" ] || bad "$SCANNER_PATH mode != 0755"
     if [ -f "$BASH_PATH" ]; then
