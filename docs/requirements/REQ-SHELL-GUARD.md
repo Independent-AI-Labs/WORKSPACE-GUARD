@@ -797,7 +797,7 @@ handled by `make install-shell-guard`.
 
 - **REQ-SHG-1001**: The scanner entrypoint shall be installed as a hardlink of
   the guard binary at `/usr/lib/workspace-guard/sealed/inline-scan`, owner
-  root:root, mode 0700, under the sealed guard root. The entrypoint shall
+  root:root, mode 0755, under the sealed guard root. The entrypoint shall
   dispatch on `argv[0]` and shall not alter shell invocation behaviour.
 
 - **REQ-SHG-1002**: The canonical inline policy shall be root-owned guard

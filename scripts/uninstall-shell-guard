@@ -150,7 +150,7 @@ else
 fi
 
 # 3. Remove the sealed tree and the apt hook.
-rm -f "$REAL_PATH" "$DISTRIB_PATH" "$LEGACY_REAL" "$LEGACY_DISTRIB"
+rm -f "$REAL_PATH" "$SEALED_DIR/inline-scan" "$DISTRIB_PATH" "$LEGACY_REAL" "$LEGACY_DISTRIB"
 rmdir "$SEALED_PKG_DIR" 2>"$DEVNULL" || log "sealed package dir not empty (left in place)"
 rmdir "$SEALED_DIR" 2>"$DEVNULL" || log "sealed dir not empty (left in place)"
 [ ! -e "$APT_HOOK" ] || { rm -f "$APT_HOOK"; log "removed apt hook"; }

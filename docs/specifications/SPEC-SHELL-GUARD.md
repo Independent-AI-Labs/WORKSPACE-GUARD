@@ -1072,7 +1072,7 @@ The scanner is a hardlink of the guard binary:
 
 - path: `/usr/lib/workspace-guard/sealed/inline-scan`
 - owner: root:root
-- mode: 0700
+- mode: 0755
 - parent chain: sealed
 
 The entrypoint dispatches on `argv[0]` and serves scanner requests only.
@@ -1105,7 +1105,7 @@ It writes one JSON response on standard output:
 
 - `schema`: response schema version
 - `findings`: array of `{path, rule, category, line, column, view, matched,
-  reason, hint, block}`
+  reason, hint, block, exemptible}`
 
 Rules are evaluated in declared order. Every finding is returned. The
 consumer applies path exemptions and reporting. A schema mismatch is an error.
@@ -1126,7 +1126,7 @@ WORKSPACE-CI verifies the scanner before use:
 
 - regular file
 - owner root
-- mode 0700
+- mode 0755
 - sealed parent chain
 - supported response schema
 

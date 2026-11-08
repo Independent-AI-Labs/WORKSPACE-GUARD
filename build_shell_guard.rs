@@ -27,11 +27,54 @@ fn default_mode() -> String {
     "block".to_string()
 }
 
+fn default_category() -> String {
+    "inline".to_string()
+}
+
+fn default_mask() -> bool {
+    true
+}
+
+fn default_exemptible() -> bool {
+    true
+}
+
 #[derive(Deserialize)]
 struct ShellPolicyFile {
     #[serde(default = "crate::default_version")]
     _version: u32,
     patterns: Vec<ShellPattern>,
+    #[serde(default)]
+    allowed_constructs: Vec<AllowedConstruct>,
+    #[serde(default)]
+    decode: Option<DecodeConfig>,
+}
+
+#[derive(Deserialize)]
+struct DecodeConfig {
+    #[serde(default)]
+    max_depth: u32,
+}
+
+#[derive(Deserialize)]
+struct AllowedConstruct {
+    id: String,
+    language: String,
+    #[serde(default = "default_level")]
+    level: u32,
+    #[serde(default)]
+    open: String,
+    #[serde(default)]
+    close: String,
+    #[serde(default)]
+    pattern: String,
+    #[serde(default)]
+    category: String,
+    reason: String,
+}
+
+fn default_level() -> u32 {
+    1
 }
 
 #[derive(Deserialize)]
@@ -43,6 +86,39 @@ struct ShellPattern {
     scope: String,
     #[serde(default = "default_mode")]
     mode: String,
+    #[serde(default = "default_category")]
+    category: String,
+    #[serde(default)]
+    contexts: Option<Vec<String>>,
+    #[serde(default = "default_mask")]
+    mask: bool,
+    #[serde(default = "default_exemptible")]
+    exemptible: bool,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn scope_contexts(scope: &str) -> Vec<&'static str> {
+    match scope {
+        "both" => vec!["command", "script", "file"],
+        "command" => vec!["command"],
+        "script" | "untrusted-script" => vec!["script"],
+        _ => vec![],
+    }
+}
+
+fn valid_context(context: &str) -> bool {
+    matches!(context, "file" | "command" | "script")
+}
+
+fn effective_contexts(p: &ShellPattern) -> Vec<String> {
+    match &p.contexts {
+        Some(contexts) => contexts.clone(),
+        None => scope_contexts(&p.scope)
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -106,6 +182,26 @@ pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
             p.id,
             p.mode
         );
+        assert!(
+            !p.category.is_empty(),
+            "build.rs: shell-guard pattern {:?} has an empty category",
+            p.id
+        );
+        if let Some(contexts) = &p.contexts {
+            assert!(
+                !contexts.is_empty(),
+                "build.rs: shell-guard pattern {:?} declares no contexts",
+                p.id
+            );
+            for context in contexts {
+                assert!(
+                    valid_context(context),
+                    "build.rs: shell-guard pattern {:?} has invalid context {:?} (file|command|script)",
+                    p.id,
+                    context
+                );
+            }
+        }
         regex::bytes::Regex::new(&p.regex).unwrap_or_else(|e| {
             panic!(
                 "build.rs: shell-guard pattern {:?} does not compile: {}",
@@ -113,6 +209,64 @@ pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
             )
         });
     }
+    let mut construct_ids = std::collections::HashSet::new();
+    for c in &policy.allowed_constructs {
+        assert!(
+            construct_ids.insert(c.id.clone()),
+            "build.rs: duplicate allowed-construct id {:?}",
+            c.id
+        );
+        assert!(
+            !c.language.is_empty() && !c.reason.is_empty(),
+            "build.rs: allowed construct {:?} needs language and reason",
+            c.id
+        );
+        assert!(
+            c.level >= 1,
+            "build.rs: allowed construct {:?} has level 0",
+            c.id
+        );
+        let region = !c.open.is_empty() || !c.close.is_empty();
+        let token = !c.pattern.is_empty();
+        let category = !c.category.is_empty();
+        let selectors = region as u8 + token as u8 + category as u8;
+        assert!(
+            selectors == 1,
+            "build.rs: allowed construct {:?} needs exactly one region, token, or category selector",
+            c.id
+        );
+        if region {
+            assert!(
+                !c.open.is_empty() && !c.close.is_empty(),
+                "build.rs: allowed construct {:?} needs both open and close",
+                c.id
+            );
+            for pat in [&c.open, &c.close] {
+                regex::bytes::Regex::new(pat).unwrap_or_else(|e| {
+                    panic!(
+                        "build.rs: allowed construct {:?} region does not compile: {}",
+                        c.id, e
+                    )
+                });
+            }
+        }
+        if token {
+            regex::bytes::Regex::new(&c.pattern).unwrap_or_else(|e| {
+                panic!(
+                    "build.rs: allowed construct {:?} token does not compile: {}",
+                    c.id, e
+                )
+            });
+        }
+    }
+    if let Some(decode) = &policy.decode {
+        assert!(
+            decode.max_depth <= 8,
+            "build.rs: decode.max_depth {} exceeds 8",
+            decode.max_depth
+        );
+    }
+
     for case in &matrix.cases {
         assert!(
             case.expect == "blocked" || case.expect == "allowed" || case.expect == "reported",
@@ -166,6 +320,45 @@ pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
         ));
     }
     code.push_str("];\n");
+
+    code.push_str(
+        "pub type InlineRuleDef = (&'static str, &'static str, &'static str, &'static str, &'static str, bool, bool, &'static str, &'static str);\n",
+    );
+    code.push_str("pub const INLINE_RULES: &[InlineRuleDef] = &[\n");
+    for p in &policy.patterns {
+        let reason = p.reason.as_deref().unwrap_or(&p.hint);
+        code.push_str(&format!(
+            "    ({:?}, {:?}, {:?}, {:?}, {:?}, {}, {}, {:?}, {:?}),\n",
+            p.id,
+            p.regex,
+            p.hint,
+            p.category,
+            effective_contexts(p).join(","),
+            p.mask,
+            p.exemptible,
+            p.mode,
+            reason
+        ));
+    }
+    code.push_str("];\n");
+
+    code.push_str(
+        "pub type InlineConstructDef = (&'static str, &'static str, u32, &'static str, &'static str, &'static str, &'static str, &'static str);\n",
+    );
+    code.push_str("pub const INLINE_CONSTRUCTS: &[InlineConstructDef] = &[\n");
+    for c in &policy.allowed_constructs {
+        code.push_str(&format!(
+            "    ({:?}, {:?}, {}, {:?}, {:?}, {:?}, {:?}, {:?}),\n",
+            c.id, c.language, c.level, c.open, c.close, c.pattern, c.category, c.reason
+        ));
+    }
+    code.push_str("];\n");
+
+    let decode_depth = policy.decode.as_ref().map_or(0, |d| d.max_depth);
+    code.push_str(&format!(
+        "pub const INLINE_DECODE_DEPTH: u32 = {};\n",
+        decode_depth
+    ));
 
     code.push_str("// --- git_guard_resource_limits.yaml ---\n");
     code.push_str(&format!(

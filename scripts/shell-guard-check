@@ -105,6 +105,7 @@ if [ -z "$BASH_PATH" ]; then
     BASH_PATH="$BASH_LINK"
 fi
 REAL_PATH="$SHG_ROOT/usr/lib/workspace-guard/sealed/bash"
+SCANNER_PATH="$SHG_ROOT/usr/lib/workspace-guard/sealed/inline-scan"
 SEALED_PKG_DIR="$SHG_ROOT/usr/lib/workspace-guard/sealed/pkg"
 DISTRIB_PATH="$SEALED_PKG_DIR/bash"
 APT_HOOK="$SHG_ROOT/etc/apt/apt.conf.d/99workspace-guard-shell"
@@ -182,6 +183,21 @@ else
             ok "$REAL_PATH matches diverted original"
         else
             bad "$REAL_PATH hash differs from $DISTRIB_PATH"
+        fi
+    fi
+fi
+
+# --- inline scanner -----------------------------------------------------------
+if [ ! -f "$SCANNER_PATH" ]; then
+    bad "$SCANNER_PATH missing"
+else
+    [ -n "$SHG_ROOT" ] || [ "$(stat -c %U:%G "$SCANNER_PATH")" = "root:root" ] || bad "$SCANNER_PATH not root:root"
+    [ "$(stat -c %a "$SCANNER_PATH")" = "755" ] || bad "$SCANNER_PATH mode != 0755"
+    if [ -f "$BASH_PATH" ]; then
+        if [ "$(hash_of "$SCANNER_PATH")" = "$(hash_of "$BASH_PATH")" ]; then
+            ok "$SCANNER_PATH matches installed guard"
+        else
+            bad "$SCANNER_PATH is not the installed guard"
         fi
     fi
 fi

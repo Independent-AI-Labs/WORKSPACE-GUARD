@@ -110,6 +110,7 @@ BASH_PATH="$(readlink -f "$BASH_LINK")"
 SEALED_DIR="$SHG_ROOT/usr/lib/workspace-guard/sealed"
 SEALED_PKG_DIR="$SEALED_DIR/pkg"
 REAL_PATH="$SEALED_DIR/bash"
+SCANNER_PATH="$SEALED_DIR/inline-scan"
 DISTRIB_PATH="$SEALED_PKG_DIR/bash"
 LEGACY_REAL="$SHG_ROOT/bin/bash.real"
 LEGACY_DISTRIB="$BASH_PATH.distrib"
@@ -324,6 +325,9 @@ if ! is_immutable "$REAL_PATH"; then
     chattr +i "$REAL_PATH" || { echo "ERROR: chattr +i failed on $REAL_PATH" >&2; exit 3; }
 fi
 
+# 5b. Inline scanner entrypoint: a hardlink of the guard binary.
+ln -f "$BASH_PATH" "$SCANNER_PATH" || die "cannot hardlink inline scanner at $SCANNER_PATH"
+
 # 6. /bin/sh coverage (only when it resolves to the replaced bash).
 if sh_covered; then
     log "/bin/sh resolves to bash: covering $SHG_ROOT/bin/sh"
@@ -348,6 +352,8 @@ elf_magic "$BASH_PATH" || die "post-check: $BASH_PATH is not ELF"
 has_guard_cap "$BASH_PATH" || die "post-check: guard capability missing on $BASH_PATH"
 [ "$(stat -c %a "$BASH_PATH")" = "755" ] || die "post-check: $BASH_PATH mode is not 0755"
 is_immutable "$REAL_PATH" || die "post-check: $REAL_PATH lost +i"
+[ -f "$SCANNER_PATH" ] || die "post-check: inline scanner missing at $SCANNER_PATH"
+[ "$(hash_of "$SCANNER_PATH")" = "$GUARD_HASH" ] || die "post-check: inline scanner is not the installed guard"
 if [ -z "$SHG_ROOT" ]; then
     # Root bypasses the AT_SECURE gate: benign commands pass through and
     # destructive commands are still blocked. Non-root runtime behavior is

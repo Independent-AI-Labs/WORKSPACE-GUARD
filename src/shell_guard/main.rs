@@ -1,3 +1,5 @@
+use nix::unistd::{execve, geteuid, getuid, Uid, User};
+use regex::bytes::Regex;
 use std::ffi::{CString, OsString};
 use std::fs;
 use std::io::{Read, Write};
@@ -6,16 +8,12 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use nix::unistd::{execve, geteuid, getuid, Uid, User};
-use regex::bytes::Regex;
-
 mod shell_config {
     include!(concat!(env!("OUT_DIR"), "/shell_guard_config.rs"));
 }
 mod fd;
+mod inline;
 mod report;
-
 include!("../../sealed_paths.rs");
 const MAX_TEXT: usize = 1 << 20;
 const LOG_FILE_NAME: &str = ".workspace-guard.log";
@@ -437,6 +435,11 @@ fn at_secure() -> u64 {
 }
 
 fn main() {
+    let args: Vec<OsString> = std::env::args_os().collect();
+    if inline::is_scanner_invocation(&args) {
+        inline::run_scanner();
+    }
+
     // Root already has an unconditional escape hatch (the sealed bash),
     // so failing closed for euid 0 only breaks every root make target
     // and package-manager lifecycle script without adding any security.
@@ -447,7 +450,6 @@ fn main() {
         process::exit(3);
     }
 
-    let args: Vec<OsString> = std::env::args_os().collect();
     let rules = compile_rules();
 
     match classify(&args) {
