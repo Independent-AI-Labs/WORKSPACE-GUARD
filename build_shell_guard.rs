@@ -100,7 +100,7 @@ struct ShellPattern {
 
 fn scope_contexts(scope: &str) -> Vec<&'static str> {
     match scope {
-        "both" => vec!["command", "script", "file"],
+        "both" => vec!["command", "script"],
         "command" => vec!["command"],
         "script" | "untrusted-script" => vec!["script"],
         "file" => vec!["file"],
