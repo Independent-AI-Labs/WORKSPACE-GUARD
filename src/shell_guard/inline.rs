@@ -4,6 +4,7 @@
 //! entrypoint serves WORKSPACE-CI file scans. Both use the one compiled rule
 //! table from `config/shell_guard_policy.yaml`.
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -13,6 +14,9 @@ use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::shell_config;
+
+#[path = "inline_views.rs"]
+mod views;
 
 pub struct Rule {
     pub id: &'static str,
@@ -151,11 +155,6 @@ fn position(text: &[u8], offset: usize) -> (usize, usize) {
     (line, offset - line_start + 1)
 }
 
-fn matched_text(text: &[u8], start: usize, end: usize) -> String {
-    String::from_utf8(text[start..end].to_vec())
-        .expect("inline engine: a regex match must fall on UTF-8 boundaries")
-}
-
 pub fn scan_text(path: &str, text: &str, language: &str) -> Vec<Finding> {
     let rules = compile_rules();
     let constructs = compile_constructs();
@@ -169,9 +168,30 @@ fn scan_with(
     rules: &[Rule],
     constructs: &[Construct],
 ) -> Vec<Finding> {
-    let _decode_depth = shell_config::INLINE_DECODE_DEPTH;
+    scan_with_depth(
+        path,
+        text,
+        language,
+        rules,
+        constructs,
+        shell_config::INLINE_DECODE_DEPTH,
+    )
+}
+
+fn scan_with_depth(
+    path: &str,
+    text: &str,
+    language: &str,
+    rules: &[Rule],
+    constructs: &[Construct],
+    depth: u32,
+) -> Vec<Finding> {
     let (masked, excluded) = mask(text.as_bytes(), constructs, language);
+    let masked_text = std::str::from_utf8(&masked).expect("mask preserves UTF-8 boundaries");
+    let original_views = views::build_views(text, depth);
+    let masked_views = views::build_views(masked_text, depth);
     let original = text.as_bytes();
+    let mut seen = HashSet::new();
     let mut findings = Vec::new();
     for rule in rules {
         if !context_applies(rule.contexts, "file") {
@@ -180,22 +200,34 @@ fn scan_with(
         if excluded.contains(&rule.category) {
             continue;
         }
-        let haystack = if rule.mask { &masked } else { original };
-        for found in rule.re.find_iter(haystack) {
-            let (line, column) = position(original, found.start());
-            findings.push(Finding {
-                path: path.to_string(),
-                rule: rule.id,
-                category: rule.category,
-                line,
-                column,
-                view: "raw",
-                matched: matched_text(original, found.start(), found.end()),
-                reason: rule.reason,
-                hint: rule.hint,
-                block: rule.mode != "report",
-                exemptible: rule.exemptible,
-            });
+        let rule_views = if rule.mask {
+            &masked_views
+        } else {
+            &original_views
+        };
+        for view in rule_views {
+            for found in rule.re.find_iter(&view.data) {
+                let start = view.offsets.get(found.start()).copied().unwrap_or(0);
+                if !seen.insert((rule.id, start)) {
+                    continue;
+                }
+                let (line, column) = position(original, start);
+                let matched = String::from_utf8(view.data[found.start()..found.end()].to_vec())
+                    .expect("inline engine: a regex match must fall on UTF-8 boundaries");
+                findings.push(Finding {
+                    path: path.to_string(),
+                    rule: rule.id,
+                    category: rule.category,
+                    line,
+                    column,
+                    view: view.name,
+                    matched,
+                    reason: rule.reason,
+                    hint: rule.hint,
+                    block: rule.mode != "report",
+                    exemptible: rule.exemptible,
+                });
+            }
         }
     }
     findings
@@ -364,5 +396,31 @@ mod tests {
         let findings = scan_with("a.sql", &text, "sql", &rules, &constructs);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule, "interp");
+    }
+
+    #[test]
+    fn normalized_view_removes_zero_width() {
+        let rules = vec![rule("interp", INLINE, "interp")];
+        let text = "python\u{200b} -c pass\n".to_string();
+        let findings = scan_with_depth("a.txt", &text, "text", &rules, &[], 0);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].view, "normalized");
+    }
+
+    #[test]
+    fn decoded_hex_view_matches() {
+        let rules = vec![rule("sql", "select from", "sql")];
+        let findings = scan_with_depth("a.txt", "73656c6563742066726f6d", "text", &rules, &[], 2);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].view, "decoded");
+    }
+
+    #[test]
+    fn normalized_percent_escape_matches() {
+        let rules = vec![rule("sql", "select from", "sql")];
+        let text = "%73%65%6c%65%63%74%20%66%72%6f%6d";
+        let findings = scan_with_depth("a.txt", text, "text", &rules, &[], 2);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].view, "normalized");
     }
 }
