@@ -578,7 +578,7 @@ REQ-GGUARD-100. Report or audit failure before Git starts is typed exit 3
 with no execution (REQ-GGUARD-045).
 
 The first block in §4's ordered decision engine supplies the sole reason and
-hint; later matching checks are not evaluated and cannot append competing text.
+hint; later matching checks do not run.
 The reason names the exact compiled policy and blocked form. The hint is
 policy-owned static data, except for encoded evidence fields, and cannot contain
 unencoded caller bytes. It does not recommend an action blocked in the same
@@ -590,9 +590,9 @@ shell or subprocess.
 Argument bytes, selected reason bytes, and one timestamp are captured in a
 single immutable evidence object. The visible formatter and canonical audit
 formatter consume that object, preventing disagreement between destinations.
-The visible hint is additional policy-owned evidence; §7.1's audit schema does
-not duplicate it. One formatted visible payload is reused for stderr and any
-distinct controlling tty under REQ-GGUARD-110.
+The visible hint is additional policy-owned evidence; §7.1's audit schema
+references the same evidence object. One formatted visible payload is reused
+for stderr and any distinct controlling tty under REQ-GGUARD-110.
 
 One shared delivery function accepts an immutable byte payload and returns typed
 per-destination results; it does not exit. The dispatcher uses it for policy,
@@ -607,8 +607,8 @@ not a terminal, the tty receives the report. If stderr is a terminal, safe tty
 APIs compare terminal/session identity for stderr and the controlling terminal;
 filesystem pathname, inode, `st_dev`, and ordinary file identity are forbidden
 for this decision because `/dev/tty` may alias the same `/dev/pts/N` through
-different metadata. A proven same terminal receives no second copy; a proven
-distinct terminal does. If stderr is a terminal but identity cannot be proven,
+different metadata. A proven same terminal receives exactly one copy; a proven
+distinct terminal receives its own copy. If stderr is a terminal but identity cannot be proven,
 the already-attempted stderr report stands and the tty copy is skipped to avoid
 duplication. Thus an ordinary interactive failure appears once, while redirected
 stderr still permits a distinct controlling-terminal report.
@@ -648,8 +648,8 @@ Some checks require invoking real git:
 Timeout behavior is defined by each subprocess-backed requirement. Commands in
 the compiled `blocked` category and static sudo-gated decisions such as
 non-root `commit --amend` do not invoke a subprocess and cannot be skipped by a
-timeout. Partial commands retain their explicit policy; subprocess failure
-shall not silently reclassify one category as another.
+timeout. Partial commands retain their explicit policy; each subprocess failure
+keeps its declared category.
 
 Repository resolution consumes the validated location selectors from the
 original global-option region and is performed once. A typed no-repository
@@ -718,8 +718,8 @@ workspace tools, toolchain shims, hooks, and external Git commands.
 
 ### 5.3 Preserved Variables
 
-Only names in the compiled environment catalog are preserved; this section does
-not duplicate that list. Root-only editor and identity entries are dropped with
+Only names in the compiled environment catalog are preserved; this section
+references that single list. Root-only editor and identity entries are dropped with
 a byte-exact evidence warning for non-root and admitted for effective-UID-zero operators.
 File-capability secure execution does not authorize them. Command-selecting
 pager, editor, diff, credential, and helper variables are not ordinary preserved
@@ -810,8 +810,9 @@ One inherited entry produces at most one warning. The specialized empty
 hook-bypass variant supersedes the generic filtered-environment variant; a
 non-empty hook-bypass value is an exit-1 denial and produces no warning.
 
-No other runtime condition may be relabeled as a warning to avoid its policy,
-validation, guard-unavailable, contract, audit, or reconciliation outcome. Trace
+Only the declared runtime conditions map to a warning; every other condition
+keeps its policy, validation, guard-unavailable, contract, audit, or
+reconciliation outcome. Trace
 lines, helper stderr, contract streams, and installer output retain their own
 contracts. In particular, background-push detection failure remains an exit-1
 policy denial. §3.3 read-only sanitization is likewise not a warning: its
@@ -989,7 +990,7 @@ bytes are emitted once and are not embedded in the outcome message. On any other
 outcome the guard emits a separate concise summary containing status metadata,
 exits 4, and uses standard stderr/distinct-tty/audit delivery. The audit event
 records the command and outcome; script stdout/stderr remains separately
-preserved evidence and is not duplicated in the summary record. Output bytes and
+preserved evidence, and the summary record holds one copy. Output bytes and
 per-stream order are preserved, including non-UTF-8 data.
 
 ### 6.3 Why Shell Delegation?
@@ -1162,8 +1163,8 @@ No input is redacted, masked, omitted, hashed, or truncated. Inline credentials
 or tokens violate the agent operating contract; agents must use sanctioned
 secret-store paths. Such misuse remains complete root-owned forensic evidence.
 Terminal escaping and audit percent encoding are reversible framing only.
-Separately streamed helper output need not be duplicated in a summary audit
-record, but every destination that receives it preserves the exact bytes.
+Separately streamed helper output appears once in a summary audit record, and
+every destination that receives it preserves the exact bytes.
 
 ### 7.4 Log Write Timing
 

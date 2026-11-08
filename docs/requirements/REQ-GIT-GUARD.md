@@ -125,7 +125,7 @@ This document specifies the requirements for the Rust binary. The installation/d
 - **REQ-GGUARD-020**: Every exact subcommand in the compiled `blocked`
   category of `config/git_guard_subcommands.yaml` shall be unconditionally
   blocked for all users, including root, with exit code 1. The policy file is
-  the single command-list authority; prose shall not duplicate a partial list.
+  the single command-list authority.
   Build-time validation and the policy matrix shall require at least one block
   case for every entry, including destructive plumbing commands.
 - **REQ-GGUARD-020a**: Every exact subcommand in the compiled `sudo_gated`
@@ -185,7 +185,7 @@ This document specifies the requirements for the Rust binary. The installation/d
     rules.
   Every blocked command-option pair shall have operand-lookalike and
   post-separator allowed controls in the policy matrix. Remediation text shall
-  never recommend another option blocked by the same rule.
+  name only options that the same rule permits.
 - **REQ-GGUARD-031**: Before subcommand discovery, the parser shall validate
   exactly the config-bearing global forms accepted by the pinned Git version:
   `-c name=value`, attached `-cname=value`, and
@@ -204,8 +204,8 @@ This document specifies the requirements for the Rust binary. The installation/d
 ### 5. Dangerous Git Config Key Injection
 
 - **REQ-GGUARD-040**: `config/git_guard_config_keys.yaml` shall be the sole
-  authority for dangerous and sudo-gated Git config-key patterns; prose shall
-  not duplicate a partial key list. Every policy entry shall declare its
+  authority for dangerous and sudo-gated Git config-key patterns. Every policy
+  entry shall declare its
   pattern, enforcement class, threat class, and concrete reason. Required threat
   classes are command execution, hook/alias execution, filter/merge/pager
   execution, credential redirection, transport/protocol changes,
@@ -301,8 +301,8 @@ This document specifies the requirements for the Rust binary. The installation/d
   any other value is a `GuardUnavailable` failure. The reroute affects only
   the terminal report; the REQ-GGUARD-090..093 audit append stays mandatory
   in both modes, and stdout is never used.
-- **REQ-GGUARD-046**: Read-only sanitization shall not weaken any other
-  rule. The following shall remain exact policy-matrix obligations:
+- **REQ-GGUARD-046**: Read-only sanitization shall preserve every other rule.
+  The following shall remain exact policy-matrix obligations:
   dangerous-class config keys on every subcommand not qualifying under
   REQ-GGUARD-043, including `fetch`, `clone`, `ls-remote`, `push`,
   `commit`, and every hook-running or transport command; sudo-gated keys for
@@ -678,7 +678,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   any failure, the guard shall emit one concise status summary that does not
   duplicate already-streamed script output, deliver it through standard
   stderr/distinct-tty/audit block reporting. Script streams remain separately
-  preserved evidence and are not duplicated inside the summary record. No non-`Passed` outcome may execute the
+  preserved evidence; the summary record holds one copy. No non-`Passed` outcome may execute the
   requested Git command, and no helper output or failure may be swallowed.
 - **REQ-GGUARD-086**: Whenever REQ-GGUARD-080/082 requires a contract, any
   unavailable or untrusted runner deployment shall fail closed with exit 4 for
@@ -724,7 +724,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   remain in force. The exemption shall be evaluated before the `vendored`-tier
   anti-bypass check: an exempt path proceeds, while a path marked only
   `vendored` continues to block. Repositories matched by no entry shall be
-  unaffected, and root shall receive no additional bypass.
+  unaffected, and root's bypass surface shall remain unchanged.
 - **REQ-GGUARD-181**: Every honored exemption shall append one authoritative
   audit record with `event=exempt`, using the REQ-GGUARD-090 sink and
   REQ-GGUARD-091 canonical encoding, carrying the canonical repository root and
@@ -878,7 +878,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   exit-4 guard outcome shall state its exact class, preserve complete reversible
   evidence, emit one concise stderr/distinct-tty report, and attempt one
   authoritative `contract-reject` or `contract-unavailable` audit append.
-  Separately streamed runner output shall not be duplicated in the summary.
+  Separately streamed runner output shall appear exactly once in the summary.
   Report or audit failure shall be surfaced without changing exit 4. Earlier
   typed policy, validation, or guard-unavailable outcomes retain exits 1, 2, or
   3. Real Git's own normal exit 4 is propagated under REQ-GGUARD-100 without a
@@ -1056,7 +1056,7 @@ This document specifies the requirements for the Rust binary. The installation/d
   sequence; opaque helper stdout/stderr remains byte evidence. Terminal output
   and audit records use reversible framing and shall decode to the original bytes.
 - **REQ-GGUARD-124**: The binary shall set its own `RLIMIT_NOFILE` to a bounded, policy-defined limit (`config/git_guard_resource_limits.yaml`, compiled in at build time; currently 65536 - history: 256, then 4096, then 65536, each raise on EMFILE evidence from legitimate hook/build chains) and `RLIMIT_CORE` to 0 (no core dumps) before exec-ing real git, to limit blast radius.
-- **REQ-GGUARD-125**: The binary shall NOT open any file descriptors other than `/dev/tty`, `/proc/self/stat`, and the real git binary before exec-ing. No temporary files, no log file open during argument processing.
+- **REQ-GGUARD-125**: The binary shall open exactly `/dev/tty`, `/proc/self/stat`, and the real git binary before exec-ing; every other descriptor shall remain closed.
 
 ### 14. Performance
 

@@ -36,8 +36,8 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
 
 - **REQ-EXEC-100**: Process execution shall be deny-by-default in the
   confined agent session; only executables present in the allowlist may run.
-- **REQ-EXEC-101**: The posture shall be always on and shall not depend on a
-  per-workload sandbox launch.
+- **REQ-EXEC-101**: The posture shall be always on and shall operate
+  independently of any per-workload sandbox launch.
 - **REQ-EXEC-102**: The enforcement authority shall be the Linux kernel, not a
   userspace wrapper around a shell.
 - **REQ-EXEC-103**: The posture shall be fail-closed: the agent session shall
@@ -47,7 +47,7 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
 - **REQ-EXEC-104**: Root shall remain break-glass and unconfined; the agent
   shall have no path to modify the policy, stop the loader, or unload the
   program.
-- **REQ-EXEC-105**: The posture shall not alter the shell guard's content
+- **REQ-EXEC-105**: The posture shall preserve the shell guard's content
   contract; the two shall coexist as specified in
   [SPEC-EXEC-POLICY section 8](../specifications/SPEC-EXEC-POLICY.md#8-shell-guard-coexistence).
 
@@ -67,7 +67,7 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
   the agent shall have neither.
 - **REQ-EXEC-115**: Enabling BPF LSM (`bpf` appended to the kernel `lsm=`
   list) shall be an operator action, documented with the exact value and the
-  required reboot; until it is enabled the agent session shall not start.
+  required reboot; the agent session shall start only after enablement.
 - **REQ-EXEC-116**: The loader shall publish the loader token
   `/run/workspace-exec-policy/bpf-ready` only after the program link is
   attached, and the arming step shall require it.
@@ -84,18 +84,18 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
 - **REQ-EXEC-120**: AppArmor shall own the filesystem lane and the effects
   lane. Its profile shall be installed and loaded in enforcing mode; there
   shall be no complain state. It shall grant `/** ix`, `ptrace,` and
-  `capability,` so that it is never a second decider for exec, ptrace, or
-  capability.
+  `capability,` so that exec, ptrace, and capability each have exactly one
+  decider.
 - **REQ-EXEC-121**: Ptrace shall be owned by YAMA at `ptrace_scope=2`; kernel
   code shall be owned by Lockdown `integrity`; capabilities shall be owned by
-  the capability LSM plus the agent unit bounding set. No layer other than
-  the owner shall write a rule for these concerns.
+  the capability LSM plus the agent unit bounding set. Each concern shall have
+  exactly one rule-writing owner.
 - **REQ-EXEC-122**: Every lane shall be installed by the same reconcile target
   and verified by the same drift check.
-- **REQ-EXEC-123**: No lane shall decide another lane's concern, and no lane
-  shall substitute for another. A layer whose sole unique property is already
-  provided by an owner (Landlock, IMA, EVM) shall hold no lane; the rationale
-  shall be recorded in the specification.
+- **REQ-EXEC-123**: Each lane shall decide exactly its own concern. A layer
+  whose sole unique property is already provided by an owner (Landlock, IMA,
+  EVM) shall hold no lane; the rationale shall be recorded in the
+  specification.
 - **REQ-EXEC-124**: The readiness manifest `/run/workspace-exec-policy/ready`
   shall list every lane owner, and the session gate shall require all of them.
 
@@ -137,7 +137,7 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
   assigned exactly one disposition in
   [SPEC-EXEC-POLICY section 7](../specifications/SPEC-EXEC-POLICY.md#7-rule-disposition-matrix).
 - **REQ-EXEC-151**: A build-time or shell gate shall fail if a policy rule has
-  no disposition entry, so a rule cannot be added without one. Implemented by
+  no disposition entry, so every rule is added with one. Implemented by
   `scripts/check-exec-dispositions.sh`, run from `make check`
   (`make check-exec-dispositions`) and the pre-push gate.
 - **REQ-EXEC-152**: A kernel-owned rule may be removed from the policy file
@@ -145,7 +145,9 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
   renamed-copy and syscall forms and an audit record is produced.
 - **REQ-EXEC-153**: `content` rules (output suppression, inline-code contract,
   argv-dependent inline forms) shall remain in the shell guard permanently
-  until a documented argv-enforcement phase supersedes them.
+  until a documented argv-enforcement phase supersedes them. Inline rules are
+  evaluated by the shared guard engine, which WORKSPACE-CI consumes through the
+  sealed scanner.
 
 ## 7. Audit and Detection (REQ-EXEC-160 series)
 
@@ -170,8 +172,8 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
   when armed and every owner verified), and `DRIFTED` (exit 1 when armed but
   an owner is not verified).
 - **REQ-EXEC-173**: A documented recovery procedure shall exist for an
-  over-restrictive policy: unconfined root may stop the loader; the agent
-  cannot invoke this path.
+  over-restrictive policy: unconfined root may stop the loader; this path is
+  operator-only.
 - **REQ-EXEC-174**: The boot-param change and reboot shall be recorded as an
   operator step in the deployment documentation.
 - **REQ-EXEC-175**: `install-exec-policy` shall stage every lane and leave
@@ -179,9 +181,9 @@ rule-by-rule treatment of the existing shell-guard policy is normative in
   layers, the seeded policy, and every lane owner verified; it shall run a
   denial canary and stay `unarmed` on canary failure.
 - **REQ-EXEC-176**: `scripts/guard-operator.sh` shall stage the posture on
-  `up`/`refresh` (warn-only; never arm), report it on `check`, and unstage it
-  on `down`. Arming shall remain the explicit `enable-exec-policy` target
-  alone.
+  `up`/`refresh` in warn-only mode, report it on `check`, and unstage it on
+  `down`. Arming shall remain the role of the explicit `enable-exec-policy`
+  target.
 - **REQ-EXEC-177**: The posture shall use the state files
   `/etc/workspace-guard/exec-policy-state` (`unarmed|armed`),
   `/etc/workspace-guard/exec_allowlist.yaml` (installed from the reviewed

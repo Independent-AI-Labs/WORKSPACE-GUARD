@@ -25,8 +25,8 @@ sandbox), it is **enforced in the kernel**, and it is **fail-closed**.
 LSMs compose conjunctively: a denial by any layer wins, and a layer that
 default-denies every operation implicitly decides every concern. Overlap is
 therefore avoided by giving each layer exactly one lane, and by having each
-layer either grant-broad (so it is not a decider) or deny exclusively its
-own lane.
+layer either grant-broad (so each concern has exactly one decider) or deny
+exclusively its own lane.
 
 ### 1.2 Layer set
 
@@ -38,7 +38,7 @@ own lane.
 | **ptrace** | Process inspection | YAMA | `ptrace_scope=2` |
 | **Kernel code** | Module load, kexec, `/dev/mem`, MSR, ioperm | Lockdown | `lockdown=integrity` |
 | **Capability** | Which capabilities the session may hold | capability LSM + systemd bounding set | `CapabilityBoundingSet=` |
-| **Content** | Shell text with no syscall (output suppression, inline channels) | shell guard | raw-text scanner (SPEC-SHELL-GUARD) |
+| **Content** | Shell text with no syscall (output suppression, inline channels) | shell guard | shared inline engine (SPEC-SHELL-GUARD §20) |
 | **Gate** | Session admission | systemd | `ExecCondition=` readiness manifest |
 
 Landlock, IMA and EVM remain available system layers but hold **no lane in
@@ -100,23 +100,23 @@ documented in the deployment runbook (REQ-EXEC-174).
  bprm_check   (profile)      (profile)       scope=2        integrity
    │                            │
    └─ deny-by-default allowlist; apparmor grants everything outside its
-      two lanes (`/** ix`, `ptrace`, `capability`) so it never decides
-      exec, ptrace or capability; it denies only filesystem writes it
-      does not grant and the effect classes it owns.
+      two lanes (`/** ix`, `ptrace`, `capability`) so exec, ptrace, and capability
+      each have exactly one decider; it denies only its own filesystem writes
+      and effect classes.
 ```
 
 ### 3.1 Lane-keeping rules
 
 - **Exec lane.** The BPF program is attached globally but decides only for
   tasks in the agent session (by cgroup and task ancestry); every other task
-  receives `0` (allow). It never mediates mounts, signals, sockets or files.
+  receives `0` (allow). It mediates only its own lane.
 - **Filesystem and effects lanes.** The AppArmor profile is the sole
   filesystem authorizer and the sole authorizer of mount, signal-outside-tree
   and socket-family operations. It grants `/** ix`, `ptrace,` and
-  `capability,` so it is not a second decider for exec, ptrace or capability.
+  `capability,` so exec, ptrace, and capability each have exactly one decider.
 - **ptrace, kernel code, capability lanes.** YAMA, Lockdown and the
   capability LSM plus the agent unit bounding set are global and single;
-  no other layer writes a rule for their concerns.
+  each concern has exactly one rule-writing layer.
 
 ### 3.2 Fail-closed admission
 
@@ -131,9 +131,9 @@ documented in the deployment runbook (REQ-EXEC-174).
    layer substitutes for another.
 
 There is no `audit` state in which the agent runs unenforced. Staging
-installs the layers and leaves state `unarmed`; while unarmed the agent
-session does not start. Building the allowlist happens out of band, under
-root, never by running the real agent session.
+installs the layers and leaves state `unarmed`; the agent session starts only
+after arming. Build the allowlist out of band, under root, outside the real
+agent session.
 
 ---
 
@@ -174,7 +174,7 @@ ptrace and capability to their owners.
 ## 6. ptrace, Kernel-Code and Capability Lanes
 
 - **ptrace:** YAMA `ptrace_scope=2` is the sole decider. The AppArmor profile
-  grants `ptrace,` so it is not a second gate.
+  grants `ptrace,`, so YAMA remains the sole ptrace gate.
 - **Kernel code:** Lockdown `integrity` is the sole decider for module load,
   kexec, `/dev/mem`, MSR access and ioperm/iopl.
 - **Capability:** the capability LSM plus the agent unit bounding set
@@ -231,6 +231,7 @@ disposition. Dispositions name the single owner:
 | `inline-shell` | nested `bash -c`/`sh -c` | exec cannot read the `-c` argument | content |
 | `uv-inline-interp` | `uv run <interpreter> -c` | argv-dependent | content |
 | `inline-code-channel` | heredoc/`eval`/`source <()` | shell grammar, not a syscall | content |
+| `interp-inline-code` | path-qualified interpreter/shell with `-c`/`-e`/stdin/heredoc | argv-dependent | content |
 
 ### 7.1 Session-layer items
 
@@ -272,7 +273,7 @@ armed.
   AppArmor profile, session gate, unit, drop-in and the pinned map seed from
   `config/exec_allowlist.yaml` to `/etc/workspace-guard/exec_allowlist.yaml`;
   create `exec-policy-state` as `unarmed`; enable the boot-time service.
-  Idempotent and reconciling. If the authority artifacts are not built or the
+  Idempotent and reconciling. If the authority artifacts are missing or the
   allowlist is unseeded, stage warns and leaves the posture unarmed.
 - `make enable-exec-policy CONFIRM=1` (root; `arm`): refuse without
   `CONFIRM=1`; require the staged layers, the seeded policy, and every lane
@@ -283,7 +284,7 @@ armed.
   state `unarmed`. The agent session then refuses to start (fail closed).
 - `make check-exec-policy` (any): read-only report; exit 2 `NOT INSTALLED`,
   exit 0 `NOT ARMED`, exit 0 `OK` when armed and every owner verified, exit 1
-  `DRIFTED` when armed but an owner is not verified.
+  `DRIFTED` when armed but an owner is unverified.
 - `make uninstall-exec-policy` (root): remove the staged artifacts and the
   readiness manifest; the policy and state are preserved.
 
@@ -302,8 +303,7 @@ unstages it. None of these arm it - that is `enable-exec-policy` alone.
 Denials and enforcement-state transitions are logged: loader readiness, map
 reload, link attach/detach, and every denial with uid, path (or `<anon>`),
 hash and ppid. The destination and mode follow
-[SPEC-AUDIT](SPEC-AUDIT.md). Audit delivery failure never downgrades a
-denial.
+[SPEC-AUDIT](SPEC-AUDIT.md). Audit delivery failure preserves the denial.
 
 ---
 
@@ -331,14 +331,14 @@ denial.
 
 ## 12. Residual Risks
 
-- **Pre-arm window**: while unarmed the agent session does not start; there
-  is no window in which it runs unenforced.
+- **Pre-arm window**: the agent session starts only after arming, so it never
+  runs unenforced.
 - **Kernel/verifier limits**: complex in-kernel hashing is bounded; the
   loader maintains hash tokens out of band.
 - **argv-dependent rules**: `inline-shell` and `uv-inline-interp` remain
-  text-based until an argv-enforcement phase lands.
-- **D-Bus/polkit**: power actions are not fully mediated by LSM; the binary
-  deny plus a polkit rule are required.
+  text-based until an argv-enforcement phase lands. They are evaluated by the
+  shared inline engine (§20), which WORKSPACE-CI also consumes.
+- **D-Bus/polkit**: power actions require the binary deny plus a polkit rule.
 - **Root adversary**: out of scope by trust model (root is break-glass).
 
 ---

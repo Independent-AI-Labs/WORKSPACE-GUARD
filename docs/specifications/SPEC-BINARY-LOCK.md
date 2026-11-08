@@ -341,7 +341,7 @@ The guard checks patterns in this order (first match wins):
 `sudoedit` is a symlink to `sudo` on most distros. The guard resolves this
 through `find_policy`: a `name: sudo` rule lists `allow_subcommands: [sudo,
 sudoedit]`, so `basename(argv[0]) == "sudoedit"` matches the sudo rule and
-shares the same policy. No duplicate rule is needed for the symlink name.
+shares the same policy.
 
 ### 3.5 passwd guard detail
 

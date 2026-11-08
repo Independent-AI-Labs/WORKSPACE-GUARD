@@ -394,6 +394,56 @@ SHG_DD='--'
     [[ "$output" == *"inline-code-channel"* ]]
 }
 
+@test "shell-guard: blocks path-qualified inline Python with quoted heredoc" {
+    require_root_guard
+    run shg -c ".venv/bin/python - <<'PY'
+print(1)
+PY"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"interp-inline-code"* ]]
+}
+
+@test "shell-guard: blocks path-qualified inline Python with -c" {
+    require_root_guard
+    run shg -c '.venv/bin/python -c print(1)'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"interp-inline-code"* ]]
+}
+
+@test "shell-guard: blocks assignment-prefixed bare inline Python" {
+    require_root_guard
+    run shg -c 'ZERO_PNP=1 python3 -c print(1)'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"interp-inline-code"* ]]
+}
+
+@test "shell-guard: blocks shell stdin heredoc with quoted delimiter" {
+    require_root_guard
+    run shg -c "bash <<'PY'
+echo hi
+PY"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"interp-inline-code"* ]]
+}
+
+@test "shell-guard: blocks path-qualified quoted heredoc in a script body" {
+    require_root_guard
+    printf "#!/bin/bash\n.venv/bin/python - <<'PY'\nprint(1)\nPY\n" > "$TEST_TMPDIR/path-inline-python.sh"
+    chmod +x "$TEST_TMPDIR/path-inline-python.sh"
+    run shg "$TEST_TMPDIR/path-inline-python.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"interp-inline-code"* ]]
+}
+
+@test "shell-guard: allows path-qualified interpreter running a script file" {
+    require_root_guard
+    printf '#!/bin/bash\necho allowed-script\n' > "$TEST_TMPDIR/allowed.sh"
+    chmod +x "$TEST_TMPDIR/allowed.sh"
+    run shg -c "/bin/bash $TEST_TMPDIR/allowed.sh"
+    [ "$status" -eq 0 ]
+    [ "$output" = "allowed-script" ]
+}
+
 @test "shell-guard: blocks kill with two-digit signal (kill-mass)" {
     require_root_guard
     run shg -c 'kill -15 1234'

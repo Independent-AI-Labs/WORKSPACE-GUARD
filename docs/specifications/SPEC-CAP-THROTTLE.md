@@ -119,8 +119,8 @@ allowlist:
     allowed: [cap_setgid, cap_setuid]
     reason: "Subordinate GID mapping for user namespaces"
 
-# No other path is in the allowlist. Any capability found on a path not
-# listed above is stripped unconditionally.
+# The allowlist contains exactly the paths listed above. Any capability found
+# on any other path is stripped unconditionally.
 ```
 
 ---
@@ -180,8 +180,8 @@ fully de-privileged inside the sandbox.
 
 ### 6.1 Caps that are ALWAYS dropped
 
-The following capabilities are never granted to agent workloads, regardless
-of profile:
+The following capabilities are excluded from agent workloads under every
+profile:
 
 | Capability | Blocked because |
 |------------|----------------|

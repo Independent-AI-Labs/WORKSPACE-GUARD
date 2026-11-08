@@ -341,3 +341,38 @@ cases:
   - id: nu-word-ok
     input: echo nu ash dash
     expect: allowed
+  - id: venv-path-python-inline-c-blocked
+    input: .venv/bin/python -c print(1)
+    expect: blocked
+    rule: interp-inline-code
+  - id: venv-path-python-stdin-heredoc-blocked
+    input: .venv/bin/python - <<'PY'
+    expect: blocked
+    rule: interp-inline-code
+  - id: venv-path-python-stdin-blocked
+    input: cat f | .venv/bin/python -
+    expect: blocked
+    rule: interp-inline-code
+  - id: assign-venv-path-python-inline-blocked
+    input: ZERO_PNP=1 .venv/bin/python -c print(1)
+    expect: blocked
+    rule: interp-inline-code
+  - id: assign-bare-python-inline-blocked
+    input: ZERO_PNP=1 python3 -c print(1)
+    expect: blocked
+    rule: interp-inline-code
+  - id: shell-quoted-heredoc-blocked
+    input: bash <<'PY'
+    expect: blocked
+    rule: interp-inline-code
+  - id: venv-path-python-script-ok
+    input: .venv/bin/python scripts/run-map-test.py
+    expect: allowed
+  - id: venv-path-python-module-ok
+    input: .venv/bin/python -m pytest
+    expect: allowed
+  - id: venv-path-python-inline-script-ctx
+    input: .venv/bin/python - <<'PY'
+    expect: blocked
+    rule: interp-inline-code
+    ctx: untrusted-script

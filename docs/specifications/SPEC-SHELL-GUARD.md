@@ -352,7 +352,9 @@ numeric-PID forms never match.
 schema is a flat pattern table: every rule is
 `{id, regex, hint, scope?}` where `scope` is `command` | `script` |
 `untrusted-script` | `both` (default `both`, REQ-SHG-312); the regexes are the group
-shapes of §6 written out in full. Example
+shapes of §6 written out in full. Rules that serve the shared inline engine
+additionally declare `contexts`, `mask`, `exemptible`, `category`, and
+`reason`; see §20. Example
 excerpt:
 
 ```yaml
@@ -448,12 +450,19 @@ patterns:
       hint: "interpreters are an unscanned command channel; run them from a script or the operator shell",
       scope: command,
     }
+  # --- path-qualified / stdin inline code (REQ-SHG-313/314) ---
+  - {
+      id: interp-inline-code,
+      regex: '... (python|perl|node|bash|sh|awk|...) followed by -c, -e, stdin -, <, or << ...',
+      hint: "inline interpreter code is blocked even via a path-qualified interpreter; run a committed script file instead",
+      scope: both,
+    }
 ```
 
 The alt-interp match is command-position only: an interpreter name
 blocks at the start of the `-c` text or directly after a command
 separator or launcher word (`sudo`, `env`, `exec`, `timeout`,
-`xargs`, ...). Path components (`.venv/lib/python3.11/...`),
+`xargs`, ...). Intermediate path components (`.venv/lib/python3.11/...`),
 arguments of other commands (`command -v python3`), and
 `uv run python path/to/script.py` is permitted only as an approved isolated
 script invocation. `uv run python -c`, `uv run python -`, heredoc/stdin
@@ -461,6 +470,16 @@ payloads, and equivalent inline forms are blocked. `uv` is the sanctioned
 launcher, not an inline-code exemption. Interpreter rules apply in command
 text and untrusted script bodies; trusted-tier status does not authorize
 inline code.
+
+Path-qualified interpreter executables (`/opt/venv/python`,
+`/opt/venv/python3`) are invocations, not intermediate path components.
+The `interp-inline-code` rule (`scope: both`) blocks such an executable,
+and a bare interpreter that escaped `alt-interp` via leading
+`VAR=value` assignments, when it carries `-c`, `-e`, `--eval`/`--execute`/
+`--expr`/`--code`, stdin `-`, a `<` redirect, or a heredoc with a quoted or
+unquoted delimiter. It also covers shell stdin/heredoc delivery
+(`bash <<'EOF'`). A path-qualified interpreter running a script file
+(`/opt/venv/python path/to/script.py`) and `-m module` remain allowed.
 
 Inline code is prohibited across guarded contexts: interpreter `-c`/`-e`/stdin,
 heredoc program text, nested `bash -c`/`sh -c`, `eval`, dynamic `source`, and
@@ -942,12 +961,12 @@ immutable-flag reads use REQ-GGUARD-121's centralized reviewed wrapper, and
 
 ## 17. Non-Goals
 
-Per REQ-SHELL-GUARD §11: not a sandbox; no interpreter-syscall
-control **at this layer** (the kernel authority of
-[SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md) owns that); no WRAPPING of shells
-beyond bash/sh (other shells are blocked, and their kernel deny is the
-authority); no interactive prompts; no full POSIX parser; no management
-of agent-side config. This guard is not the execution authority.
+Per REQ-SHELL-GUARD §11: this layer is a text-policy wrapper. The kernel
+authority of [SPEC-EXEC-POLICY](SPEC-EXEC-POLICY.md) owns interpreter-syscall
+control. The guarded pair is bash and sh; other shells are blocked, and their
+kernel deny is the authority. The guard blocks or allows without prompts. It
+uses raw-text matching without a full POSIX parser. Agent-side config stays
+outside its scope. The execution authority is the kernel layer.
 
 ---
 
@@ -993,6 +1012,10 @@ content (no kernel-observable effect; stays here), **SL** session
 | `AT_SECURE` gate (§3.2) | SL | privilege model |
 | untrusted-script memfd staging (§9.1) | SL | session/wrapper |
 
+Inline rules are implemented by the shared inline engine (§20) and retain
+their `content` dispositions. The engine is shared with the CI scanner; the
+CI consumer uses the same enforcement rules.
+
 A new rule added to the policy file without a disposition row in
 SPEC-EXEC-POLICY §7 fails the REQ-EXEC-151 gate.
 
@@ -1033,3 +1056,88 @@ also observe untrusted script bodies, and are ordered after the block rules so
 a command already covered by a block rule reports the block rule first. They
 are report-only first: promotion to `block` follows once the false-positive
 rate is known.
+
+## 20. Reusable Inline Detection Engine And Scanner
+
+### 20.1 Ownership
+
+Inline detection is implemented once, in Rust, in the guard. The shell guard
+consumes the library in-process. A scanner entrypoint built from the same
+binary serves WORKSPACE-CI. The CI checker carries no rule, mask, decode, or
+matching implementation.
+
+### 20.2 Entrypoint
+
+The scanner is a hardlink of the guard binary:
+
+- path: `/usr/lib/workspace-guard/sealed/inline-scan`
+- owner: root:root
+- mode: 0700
+- parent chain: sealed
+
+The entrypoint dispatches on `argv[0]` and serves scanner requests only.
+`make install-shell-guard` installs the hardlink with the guard.
+
+### 20.3 Policy Schema Extensions
+
+The canonical inline policy is root-owned guard configuration compiled at
+build time. Each rule carries:
+
+- `id`, `regex`, `category`, `reason`, `hint`
+- `contexts`: one or more of `file`, `command`, `script`
+- `mask`: whether allowed constructs apply before matching
+- `exemptible`: whether a consumer path exemption may suppress the finding
+- `mode`: `block` or `report`
+
+Allowed constructs and decode depth are declared in the same policy.
+
+The shell guard evaluates `command` and `script` contexts. The CI scanner
+evaluates `file` contexts. A rule may apply to more than one context.
+
+### 20.4 Scanner Protocol
+
+The scanner reads one JSON request on standard input:
+
+- `schema`: request schema version
+- `files`: array of `{path, language}` entries
+
+It writes one JSON response on standard output:
+
+- `schema`: response schema version
+- `findings`: array of `{path, rule, category, line, column, view, matched,
+  reason, hint, block}`
+
+Rules are evaluated in declared order. Every finding is returned. The
+consumer applies path exemptions and reporting. A schema mismatch is an error.
+
+Input is strict UTF-8. Invalid UTF-8 or NUL bytes in a selected file fail the
+request. There is no secondary decode path.
+
+### 20.5 Structural Substitution Rule
+
+The policy declares `interp-substitution-inline`. It matches text that
+reconstructs an interpreter inline token through parameter substitution. It
+evaluates the original text (`mask: false`) and is non-exemptible. It applies
+to all contexts.
+
+### 20.6 CI Consumer
+
+WORKSPACE-CI verifies the scanner before use:
+
+- regular file
+- owner root
+- mode 0700
+- sealed parent chain
+- supported response schema
+
+An absent, unreadable, incompatible, or failed scanner fails the CI check.
+CI consumes the one scanner. The guard is installed before the CI artifact.
+
+### 20.7 Tests
+
+- Guard unit tests cover the engine, allowed constructs, decode views,
+  contexts, and the structural substitution rule.
+- Shared conformance vectors prove that the shell guard and the CI consumer
+  return identical findings for the same text, language, and context.
+- The scanner protocol is tested for schema mismatch, invalid UTF-8, NUL
+  bytes, and an empty batch.

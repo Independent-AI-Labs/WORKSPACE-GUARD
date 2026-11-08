@@ -58,10 +58,10 @@ handled by `make install-shell-guard`.
   POSIX-mode and login-shell behaviour are unchanged.
 
 - **REQ-SHG-003**: The guard shall be INSTALLED only at `/bin/bash`
-  and `/bin/sh`-resolving-to-bash; it does not replace any other
-  shell binary. However, invocation of any OTHER shell from within a
-  guarded shell shall be blocked (REQ-SHG-307), so the guarded pair
-  cannot be used as a springboard to an unguarded interpreter.
+  and `/bin/sh`-resolving-to-bash; every other shell binary shall remain
+  outside the guarded pair. Invocation of any other shell from within a
+  guarded shell shall be blocked (REQ-SHG-307), so the guarded pair cannot be
+  used as a springboard to an unguarded interpreter.
 
 - **REQ-SHG-004**: The block policy shall be data-driven from
   `config/shell_guard_policy.yaml`, compiled into the binary at build
@@ -377,10 +377,15 @@ handled by `make install-shell-guard`.
   separator (`\n`, `;`, `|`, `&`, `&&`, `||`, `$(`, backtick) or a
   launcher word (`sudo`, `doas`, `env`, `exec`, `nice`, `nohup`,
   `setsid`, `stdbuf`, `timeout`, `xargs`, each with optional flags
-  and `VAR=value` assignments). Names appearing as path components
-  (`.venv/lib/python3.11/...`) or as arguments to other commands
-  (`grep name pyproject.toml`, `command -v python3`) shall NOT match.
-  `uv run python path/to/script.py` may match only as an approved isolated
+  and `VAR=value` assignments). Names appearing as intermediate path
+  components (`.venv/lib/python3.11/...`) or as arguments to other
+  commands (`grep name pyproject.toml`, `command -v python3`) shall NOT
+  match. A path-qualified interpreter executable (`/opt/venv/python`,
+  `/opt/venv/python3`) IS an invocation: it shall be blocked when it
+  carries an inline form (`-c`, `-e`, stdin `-`, `<`, or a heredoc),
+  while `/opt/venv/python path/to/script.py` remains permitted. Leading
+  `VAR=value` assignments before the interpreter shall not defeat the
+  match. `uv run python path/to/script.py` may match only as an approved isolated
   script invocation. `uv run python -c`, `uv run python -`, heredoc/stdin
   payloads, `exec`, `eval`, and equivalent inline forms shall be blocked.
   `uv` is the only sanctioned Python launcher; it does not authorize inline
@@ -388,10 +393,13 @@ handled by `make install-shell-guard`.
 
  - **REQ-SHG-314**: Inline code shall not be used in any guarded execution
    context. This includes interpreter `-c`/`-e`/stdin forms, heredocs carrying
-   program text, nested `bash -c`/`sh -c` payloads, `eval`, dynamic `source`,
-   command substitution used as a code channel, and process substitution used
-   to deliver executable text. Technology mixing shall use a checked-in,
-   extension-qualified isolated script invoked through its sanctioned launcher.
+   program text (quoted and unquoted delimiters alike), path-qualified
+   interpreter executables carrying those forms, nested `bash -c`/`sh -c`
+   payloads, shell stdin/heredoc delivery (`bash <<'EOF'`), `eval`, dynamic
+   `source`, command substitution used as a code channel, and process
+   substitution used to deliver executable text. Technology mixing shall use a
+   checked-in, extension-qualified isolated script invoked through its
+   sanctioned launcher.
 
  - **REQ-SHG-315**: Every direct subprocess launched by guard-owned Rust code
    shall have an absolute executable path, an explicit argument contract, a
@@ -740,42 +748,90 @@ handled by `make install-shell-guard`.
 
 ## 11. Non-Goals
 
-- **REQ-SHG-NG-01**: The shell guard is NOT a sandbox. It does not
-  restrict filesystem access, network, or resource consumption of
-  allowed commands. Sandbox layers are specified in
-  [REQ-SANDBOX](REQ-SANDBOX.md); the always-on execution posture is
-  [REQ-EXEC-POLICY](REQ-EXEC-POLICY.md).
+- **REQ-SHG-NG-01**: The shell guard SHALL remain a text-policy wrapper.
+  Sandboxing of filesystem access, network, and resource consumption is
+  specified in [REQ-SANDBOX](REQ-SANDBOX.md); the always-on execution posture
+  is [REQ-EXEC-POLICY](REQ-EXEC-POLICY.md).
 
-- **REQ-SHG-NG-02**: The guard does NOT attempt to block destruction
-  performed through interpreters (`python3 -c 'os.kill(...)'`,
-  `perl -e ...`). That surface is closed by the exclusive execution
-  posture (the exec lane denies non-allowlisted interpreter hashes) and
+- **REQ-SHG-NG-02**: Destruction performed through interpreters
+  (`python3 -c 'os.kill(...)'`, `perl -e ...`) SHALL be closed by the
+  exclusive execution posture (the exec lane denies non-allowlisted
+  interpreter hashes) and
   the effects lane of REQ-EXEC-130-136; until that authority is attached,
   it remains bounded by the binary lock and auditd layers.
 
-- **REQ-SHG-NG-03**: The guard does NOT WRAP shells other than bash
-  and sh-resolving-to-bash, but it DOES block their invocation from
-  within a guarded shell (REQ-SHG-307). A shell binary renamed or
+- **REQ-SHG-NG-03**: The guarded pair SHALL be exactly bash and
+  sh-resolving-to-bash. Invocation of any other shell from within a guarded
+  shell SHALL be blocked (REQ-SHG-307). A shell binary renamed or
   copied to an unlisted name (e.g. a user-compiled zsh at
   `~/bin/mysh`) defeats basename matching; this residual is closed by
   the content-hash allowlist of REQ-EXEC-111, not by the text scan.
 
-- **REQ-SHG-NG-04**: The guard never prompts. It blocks or allows.
+- **REQ-SHG-NG-04**: The guard SHALL block or allow without prompting.
   Interactive approval flows belong to the agent's permission layer.
 
-- **REQ-SHG-NG-05**: The guard does NOT re-implement shell parsing.
-  Raw-text pattern matching has no grammar awareness: anything the
-  patterns do not match fails open to the real shell (REQ-SHG-304),
-  and the evasion classes of REQ-SHG-208 are accepted residuals.
+- **REQ-SHG-NG-05**: The guard SHALL use raw-text pattern matching without a
+  shell parser. Anything the patterns do not match passes to the real shell
+  (REQ-SHG-304), and the evasion classes of REQ-SHG-208 are accepted
+  residuals.
 
 - **REQ-SHG-NG-06**: Agent-side config (opencode `permission` rules,
-  plugins) is out of scope: it is a complementary, user-space layer
-  that this binary neither depends on nor manages.
+  plugins) SHALL remain outside this binary's scope: it is a complementary,
+  user-space layer that this binary neither depends on nor manages.
 
 - **REQ-SHG-NG-07**: Suppression performed INSIDE an interpreter
   (`python3 -c 'subprocess.run(..., stdout=subprocess.DEVNULL)'`,
-  redirecting to a log file that is never read) is not detectable by
-  a shell-layer text scan and is out of scope, per the same
-  interpreter-indirection boundary as REQ-SHG-NG-02. Suppression
-  spelled with shell grammar (pipes to `tail`/`head`, `/dev/null`
-  redirects, `|| true`) IS in scope (REQ-SHG-308/309/310).
+  redirecting to a log file that is never read) SHALL remain outside
+  shell-layer text detection, per the same interpreter-indirection boundary as
+  REQ-SHG-NG-02. Suppression spelled with shell grammar (pipes to
+  `tail`/`head`, `/dev/null` redirects, `|| true`) IS in scope
+  (REQ-SHG-308/309/310).
+
+---
+
+## 12. Reusable Inline Detection Engine (REQ-SHG-1000 series)
+
+- **REQ-SHG-1000**: The guard shall provide one Rust inline-detection engine,
+  used in-process by the shell guard and by a scanner entrypoint built from
+  the same binary.
+
+- **REQ-SHG-1001**: The scanner entrypoint shall be installed as a hardlink of
+  the guard binary at `/usr/lib/workspace-guard/sealed/inline-scan`, owner
+  root:root, mode 0700, under the sealed guard root. The entrypoint shall
+  dispatch on `argv[0]` and shall not alter shell invocation behaviour.
+
+- **REQ-SHG-1002**: The canonical inline policy shall be root-owned guard
+  configuration compiled into the guard at build time. It shall declare
+  rules, allowed constructs, decode depth, contexts (`file`, `command`,
+  `script`), mask behaviour, exemptible state, reason, and hint.
+
+- **REQ-SHG-1003**: The shell guard shall evaluate command text and untrusted
+  script bodies through the one shared inline engine.
+
+- **REQ-SHG-1004**: The scanner shall accept one JSON batch of `path` and
+  `language` entries and return JSON findings with rule identity, category,
+  line, column, view, matched text, reason, hint, and block state. Input
+  shall be strict UTF-8. Invalid UTF-8 or NUL bytes in a selected file shall
+  fail the request.
+
+- **REQ-SHG-1005**: The policy shall declare a structural substitution rule
+  that blocks textual reconstruction of an interpreter inline token. The rule
+  shall evaluate the original text and shall be non-exemptible.
+
+- **REQ-SHG-1006**: WORKSPACE-CI shall consume the one scanner. An absent,
+  unreadable, incompatible, or failed scanner shall fail the CI check.
+
+- **REQ-SHG-1007**: The guard is a dependency of WORKSPACE-CI. The scanner
+  shall be installed before the CI artifact that consumes it, and the CI
+  deployment preflight shall verify it.
+
+- **REQ-SHG-1008**: Inline policy changes are guard changes. They require a
+  guard rebuild and installation and are not applied by a CI-only change.
+
+- **REQ-SHG-1009**: Time or memory limits shall not change a detection result.
+  The scanner shall process the batch to completion or fail with a specific
+  diagnostic.
+
+- **REQ-SHG-1010**: Shared conformance vectors shall prove that the shell
+  guard and the CI consumer return identical findings for the same text,
+  language, and context.

@@ -126,3 +126,7 @@ patterns:
   - id: alt-shell
     regex: (?m)(^|#!|[\x3b&|(`]|\b(env|exec|command|sudo|nohup|xargs|nice|timeout)\s+(-\S+\s+)*)\s*(\S*/)?(zsh|dash|fish|nu|ksh93?|mksh|csh|tcsh|ash|yash|rc|elvish|xonsh|pwsh|powershell)(\s|[\x3b&|)`]|\z)
     hint: only bash/sh are permitted on this host
+  - id: interp-inline-code
+    regex: (^|([\n\x3b|&\x60]|&&|\|\||\$\()\s*|\b(sudo|doas|env|exec|nice|nohup|setsid|stdbuf|timeout|xargs)\b(\s+(-[^\x3b|&\s]*|[A-Za-z_]+=\S*))*\s+)([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*([^[:space:]\x3b|&\x60]*/)?(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|irb|node|nodejs|deno|bun|php[0-9.]*|lua[0-9.]*|luajit|tclsh|wish|expect|Rscript|raku|julia|awk|gawk|mawk|nawk|bash|sh)([[:space:]]*(<<-?)|[[:space:]]+(<<-?|<|-[ce]|--(eval|execute|expr|code)|-([[:space:]]|\z|[\x3b|&\x60])))
+    hint: inline interpreter code (-c/-e/stdin/heredoc) is blocked even via a path-qualified interpreter; run a committed script file instead
+    scope: both
