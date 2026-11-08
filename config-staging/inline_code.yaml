@@ -1,0 +1,151 @@
+version: 1
+decode:
+  max_depth: 2
+patterns:
+  - id: sql-select-from
+    regex: '\bselect\s+(?:distinct\s+|all\s+)?(?:\*|(?:[a-z_][a-z0-9_]*(?:\.[a-z0-9_*]+)?|\d+)(?:\s*,\s*(?:[a-z_][a-z0-9_]*(?:\.[a-z0-9_*]+)?|\d+))*|(?:count|sum|avg|min|max)\s*\(\s*(?:\*|[a-z_][a-z0-9_.]*|\d+)\s*\))\s+from\s+[a-z_][a-z0-9_.]*'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-insert-into
+    regex: '\binsert\s+into\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-create-object
+    regex: '\bcreate\s+(?:table|materialized\s+view|database)\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-alter-table
+    regex: '\balter\s+table\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-drop-object
+    regex: '\bdrop\s+(?:table|database|view)\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-truncate-table
+    regex: '\btruncate\s+table\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-delete-from
+    regex: '\bdelete\s+from\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-optimize-table
+    regex: '\boptimize\s+table\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: sql-backup-database
+    regex: '\bbackup\s+database\b'
+    hint: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: sql
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Query text belongs under the repository SQL tree, loaded by the sanctioned loader.
+  - id: exec-clickhouse-query
+    regex: '\bclickhouse-client\b[\s\S]{0,200}?(?:-q|--query)\b'
+    hint: Remote query payloads belong under the repository SQL tree, loaded by the sanctioned loader.
+    scope: file
+    mode: block
+    category: remote-exec
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Remote query payloads belong under the repository SQL tree, loaded by the sanctioned loader.
+  - id: exec-curl-data
+    regex: '\bcurl\b[\s\S]{0,200}?(?:-d|--data)\b'
+    hint: Remote-execution payloads are an unscanned code channel.
+    scope: file
+    mode: block
+    category: remote-exec
+    contexts: [file]
+    mask: true
+    exemptible: true
+    reason: Remote-execution payloads are an unscanned code channel.
+  - id: interp-substitution-inline
+    regex: '(^|[[:space:];|&`(])\$\{[A-Za-z_][A-Za-z0-9_]*//[^}]*\b(bash|sh|python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|node|php[0-9.]*|lua[0-9.]*|awk)\b[^}]*\}'
+    hint: Textual reconstruction of an inline interpreter token is blocked.
+    scope: file
+    mode: block
+    category: interpreter
+    contexts: [file, command, script]
+    mask: false
+    exemptible: false
+    reason: Textual reconstruction of an inline interpreter token is an unscanned code channel.
+allowed_constructs:
+  - id: markdown-fenced-code
+    language: markdown
+    level: 1
+    open: '^[ \t]{0,3}```'
+    close: '^[ \t]{0,3}```'
+    reason: A level-one fenced code block is a sanctioned construct of Markdown.
+  - id: markdown-inline-code-span
+    language: markdown
+    level: 1
+    pattern: '`[^`\n]+`'
+    reason: An inline code span is the Markdown construct for naming a code token in prose.
+  - id: shell-interpreter-invocation
+    language: shell
+    level: 1
+    pattern: '(?i)\b(?:bash|sh|zsh|dash)\s+-c\b'
+    reason: A shell script invoking a shell is the language carrying its own interpreter.
+  - id: yaml-declared-command
+    language: yaml
+    level: 1
+    pattern: '(?i)(?:entry|command|run|shell)\s*:[^\n]*?\b(?:bash|sh|zsh|dash)\s+-c\b'
+    reason: A declared command field in YAML is the format's sanctioned place for an interpreter invocation.
+  - id: sql-source-statements
+    language: sql
+    level: 1
+    category: sql
+    reason: SQL statement syntax is the sanctioned content of a SQL source file.

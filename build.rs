@@ -8,7 +8,7 @@
 use std::env;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -95,6 +95,12 @@ fn main() {
     ];
     check_config_provenance(&config_dir, &config_files);
 
+    let inline_override = env::var_os("INLINE_POLICY_PATH").map(PathBuf::from);
+    if inline_override.is_none() {
+        check_config_provenance(&config_dir, &["inline_code.yaml"]);
+    }
+    let inline_path = inline_override.unwrap_or_else(|| config_dir.join("inline_code.yaml"));
+
     let ssh_allowlist: GitSshAllowlistConfig = read_yaml(&config_dir, "git_ssh_allowlist.yaml");
     if ssh_allowlist.hosts.is_empty() || ssh_allowlist.users.is_empty() {
         panic!("build.rs: git_ssh_allowlist.yaml needs non-empty hosts and users");
@@ -116,6 +122,7 @@ fn main() {
     for name in &config_files {
         println!("cargo:rerun-if-changed=config/{}", name);
     }
+    println!("cargo:rerun-if-changed={}", inline_path.display());
 
     // Binary-guard codegen. Gated on the cargo feature so the default
     // build does not require res/binary-lock.yaml to exist. Emits ONLY the
@@ -124,5 +131,5 @@ fn main() {
         build_binary_guard::emit_binary_guard_config(Path::new(&manifest));
     }
 
-    build_shell_guard::emit_shell_guard_config(Path::new(&manifest), limits.nofile);
+    build_shell_guard::emit_shell_guard_config(Path::new(&manifest), limits.nofile, &inline_path);
 }

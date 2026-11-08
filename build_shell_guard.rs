@@ -141,12 +141,32 @@ struct ShellMatrixCase {
     ctx: String,
 }
 
-pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
+pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64, inline_path: &Path) {
     let config_dir = manifest.join("config");
     let policy_text = fs::read_to_string(config_dir.join("shell_guard_policy.yaml"))
         .expect("build.rs: failed to read shell_guard_policy.yaml");
-    let policy: ShellPolicyFile = noyalib::compat::serde_yaml::from_str(&policy_text)
+    let mut policy: ShellPolicyFile = noyalib::compat::serde_yaml::from_str(&policy_text)
         .expect("build.rs: failed to parse shell_guard_policy.yaml");
+    let inline_text = fs::read_to_string(inline_path).unwrap_or_else(|e| {
+        panic!(
+            "build.rs: failed to read inline policy {}: {}",
+            inline_path.display(),
+            e
+        )
+    });
+    let inline: ShellPolicyFile = noyalib::compat::serde_yaml::from_str(&inline_text)
+        .unwrap_or_else(|e| {
+            panic!(
+                "build.rs: failed to parse inline policy {}: {}",
+                inline_path.display(),
+                e
+            )
+        });
+    policy.patterns.extend(inline.patterns);
+    policy.allowed_constructs.extend(inline.allowed_constructs);
+    if inline.decode.is_some() {
+        policy.decode = inline.decode;
+    }
     let matrix_text = fs::read_to_string(config_dir.join("shell_guard_policy_matrix.yaml"))
         .expect("build.rs: failed to read shell_guard_policy_matrix.yaml");
     let matrix: ShellMatrixFile = noyalib::compat::serde_yaml::from_str(&matrix_text)
