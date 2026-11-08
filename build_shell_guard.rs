@@ -103,6 +103,7 @@ fn scope_contexts(scope: &str) -> Vec<&'static str> {
         "both" => vec!["command", "script", "file"],
         "command" => vec!["command"],
         "script" | "untrusted-script" => vec!["script"],
+        "file" => vec!["file"],
         _ => vec![],
     }
 }
@@ -171,8 +172,9 @@ pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
             p.scope == "command"
                 || p.scope == "script"
                 || p.scope == "untrusted-script"
-                || p.scope == "both",
-            "build.rs: shell-guard pattern {:?} has invalid scope {:?} (command|script|untrusted-script|both)",
+                || p.scope == "both"
+                || p.scope == "file",
+            "build.rs: shell-guard pattern {:?} has invalid scope {:?} (command|script|untrusted-script|both|file)",
             p.id,
             p.scope
         );
@@ -290,6 +292,9 @@ pub fn emit_shell_guard_config(manifest: &Path, nofile_limit: u64) {
         }
     }
     for p in &policy.patterns {
+        if p.scope == "file" {
+            continue;
+        }
         let want = if p.mode == "report" {
             "reported"
         } else {

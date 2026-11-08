@@ -128,6 +128,9 @@ fn every_pattern_has_a_blocked_case() {
     .expect("matrix yaml readable");
     let matrix: Matrix = noyalib::compat::serde_yaml::from_str(&text).expect("matrix yaml parses");
     for (id, _, _, scope, mode) in shell_config::SHELL_PATTERNS {
+        if *scope == "file" {
+            continue;
+        }
         let want = if *mode == "report" {
             "reported"
         } else {
@@ -163,7 +166,8 @@ fn scopes_are_valid() {
             *scope == "command"
                 || *scope == "script"
                 || *scope == "untrusted-script"
-                || *scope == "both",
+                || *scope == "both"
+                || *scope == "file",
             "pattern {} has invalid scope {:?}",
             id,
             scope
